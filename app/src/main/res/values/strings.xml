@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Local LLM Engine</string>
+    <string name="title_local_llm_engine">Local LLM Engine</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_model_import">Modell-Import</string>
+    <string name="nav_settings">Einstellungen</string>
+    <string name="vault_title">Dokumenten Tresor</string>
+</resources>
+
