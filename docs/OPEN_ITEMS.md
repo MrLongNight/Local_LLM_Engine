@@ -40,6 +40,13 @@ App-/Engine-Quellstand für APK Build #30: `aaaef521170cad70ce9c1d36eb8bfd4d6592
 - Die öffentliche Chat-API unterstützt jetzt auch die native Developer-Rolle.
 - Nicht mehr verwendete Dokumenten-Tresor-Resource und Google-Services-Gradle-Altlast entfernt.
 
+## Gerätefehler vom 03.11.2026
+
+- Diagnose vom nubia Z2462N: Qwen3-GGUF mit ca. 2,5 GB lädt über Vulkan; Prompt-Evaluation endet mit Code 0. Der Prozess startet während der nativen Token-Generierung neu. Im exportierten App-Log steht kein regulärer Kotlin-/JNI-Fehler.
+- Das Muster spricht für einen nativen Prozessabbruch (z. B. Vulkan-Treiberfehler oder Speicherdruck), beweist die Ursache aber nicht. Der bisherige Standard AUTO + 99 GPU-Layer + Batch 512 + Kontext 4096 ist für einen mobilen Erststart zu aggressiv.
+- Neuer Standard: CPU, Kontext 2048, Batch 128, maximal 512 Ausgabetokens. Vulkan/AUTO bleiben manuell auswählbar. Inferenzlogs enthalten nun zusätzlich aggregierte Prozess- und Gerätespeicherwerte.
+- Noch zu verifizieren: Chat mit demselben Modell im CPU-Standardprofil; danach Vulkan separat mit reduzierter Layerzahl testen. CI-Erfolg ersetzt diese Geräteprüfung nicht.
+
 ## CI-Verifikation
 
 - Unit Tests #60 erfolgreich auf `48f8fb8b2d4d11e96eb350cd823712e10a2c0027`: [Run #60](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402289).

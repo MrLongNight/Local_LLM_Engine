@@ -89,14 +89,14 @@ class DocAnizerViewModel(
 
     private val _engineConfig = MutableStateFlow(
         EngineConfig(
-            contextSize = 4096,
-            batchSize = 512,
+            contextSize = 2048,
+            batchSize = 128,
             threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6),
             temperature = 0.7f,
             topP = 0.9f,
-            maxPredictTokens = 1024,
-            backendPreference = BackendPreference.AUTO,
-            gpuLayers = 99
+            maxPredictTokens = 512,
+            backendPreference = BackendPreference.CPU,
+            gpuLayers = 16
         )
     )
     val engineConfig: StateFlow<EngineConfig> = _engineConfig.asStateFlow()

@@ -1,8 +1,10 @@
 package com.mydocanizer.llm.engine
 
 import android.content.Context
+import android.app.ActivityManager
 import android.net.Uri
 import android.os.Build
+import android.os.Debug
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import java.io.File
@@ -54,6 +56,23 @@ object EngineDiagnostics {
             Log.e("EngineDiagnostics", "Could not queue diagnostics initialization", error)
         }
     }
+    /**
+     * Aggregate process/device memory counters for native OOM and GPU-driver diagnostics.
+     * No prompts, generated content, paths, or identifiers are included.
+     */
+    fun memorySnapshot(context: Context, stage: String): String {
+        val runtime = Runtime.getRuntime()
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        manager?.getMemoryInfo(memoryInfo)
+        return "memoryStage=$stage;processPssKb=${Debug.getPss()};" +
+            "nativeHeapAllocatedBytes=${Debug.getNativeHeapAllocatedSize()};" +
+            "javaHeapUsedBytes=${runtime.totalMemory() - runtime.freeMemory()};" +
+            "javaHeapMaxBytes=${runtime.maxMemory()};" +
+            "deviceAvailMemBytes=${if (manager != null) memoryInfo.availMem else -1L};" +
+            "deviceLowMemory=${manager?.let { memoryInfo.lowMemory } ?: false}"
+    }
+
     fun info(component: String, event: String, details: String? = null) =
         write("INFO", component, event, details)
 

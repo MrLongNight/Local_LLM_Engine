@@ -40,14 +40,14 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property gpuLayers Number of layers offloaded to GPU VRAM (e.g. 99 for full offload).
  */
 data class EngineConfig(
-    val contextSize: Int = 4096,
-    val batchSize: Int = 512,
+    val contextSize: Int = 2048,
+    val batchSize: Int = 128,
     val threads: Int = 4,
     val temperature: Float = 0.7f,
     val topP: Float = 0.9f,
-    val maxPredictTokens: Int = 1024,
-    val backendPreference: BackendPreference = BackendPreference.AUTO,
-    val gpuLayers: Int = 99
+    val maxPredictTokens: Int = 512,
+    val backendPreference: BackendPreference = BackendPreference.CPU,
+    val gpuLayers: Int = 16
 ) {
     init {
         require(contextSize >= 256) { "contextSize must be at least 256" }

@@ -319,7 +319,8 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.info(
                 "inference",
                 "TOKEN_GENERATION_STARTED",
-                "maxPredictTokens=$effectiveMaxPredictTokens;promptDurationMs=$promptDurationMs"
+                "maxPredictTokens=$effectiveMaxPredictTokens;promptDurationMs=$promptDurationMs;" +
+                    EngineDiagnostics.memorySnapshot(context, "before_token_generation")
             )
             // Native code enforces maxPredictTokens; UTF-8 chunks are not model-token counts.
             // Some models emit control/reasoning tokens before visible text. Report native
@@ -333,7 +334,8 @@ internal class LocalLlmEngineImpl(
                     EngineDiagnostics.info(
                         "inference",
                         "TOKEN_GENERATION_PROGRESS",
-                        "nativeTokens=$generatedTokenCount;visibleCharacters=${outputBuilder.length};elapsedMs=$elapsedMs"
+                        "nativeTokens=$generatedTokenCount;visibleCharacters=${outputBuilder.length};elapsedMs=$elapsedMs;" +
+                        EngineDiagnostics.memorySnapshot(context, "token_generation")
                     )
                     emit(InferenceEvent.Progress(generatedTokenCount, outputBuilder.length, elapsedMs))
                     lastProgressTokenCount = generatedTokenCount
