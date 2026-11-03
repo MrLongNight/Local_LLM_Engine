@@ -19,12 +19,14 @@ import java.util.UUID
 /** Imports model sources into app-private storage using staged, SHA-256-addressed files. */
 internal object ModelSourceResolver {
     suspend fun resolveToFile(context: Context, source: ModelSource): File = withContext(Dispatchers.IO) {
-        when (source) {
+        val file = when (source) {
             is ModelSource.FilePath -> {
-                val file = source.file
-                require(file.exists() && file.isFile) { "Model file does not exist or is not a regular file: ${source.path}" }
-                require(file.canRead()) { "Cannot read model file at path: ${source.path}" }
-                file
+                val candidate = source.file
+                require(candidate.exists() && candidate.isFile) {
+                    "Model file does not exist or is not a regular file: ${source.path}"
+                }
+                require(candidate.canRead()) { "Cannot read model file at path: ${source.path}" }
+                candidate
             }
             is ModelSource.ContentUri -> {
                 val uri = Uri.parse(source.uriString)
@@ -37,6 +39,21 @@ internal object ModelSourceResolver {
                 context, context.assets.open(source.assetName), source.assetName.substringAfterLast('/')
             )
             is ModelSource.RemoteUrl -> downloadRemote(context, source)
+        }
+        validateGgufHeader(file)
+        file
+    }
+
+    private fun validateGgufHeader(file: File) {
+        require(file.isFile && file.length() >= 4L) {
+            "Model file is empty or too small to be a GGUF file"
+        }
+        val magic = ByteArray(4)
+        file.inputStream().use { input ->
+            val count = input.read(magic)
+            require(count == 4 && magic.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46))) {
+                "Invalid model file: GGUF magic header is missing"
+            }
         }
     }
 
