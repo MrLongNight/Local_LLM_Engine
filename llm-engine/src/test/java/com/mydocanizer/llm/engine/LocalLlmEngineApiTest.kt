@@ -2,6 +2,7 @@ package com.mydocanizer.llm.engine
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -52,7 +53,8 @@ class LocalLlmEngineApiTest {
         assertEquals(2, request.messages.size)
         assertEquals(ChatRole.SYSTEM, request.messages[0].role)
         assertEquals(ChatRole.USER, request.messages[1].role)
-        assertEquals(1024, request.maxPredictTokens)
+        assertNull(request.maxPredictTokens)
+        assertEquals(512, InferenceRequest.single("Prompt", maxPredictTokens = 512).maxPredictTokens)
     }
 
     @Test

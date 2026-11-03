@@ -56,6 +56,7 @@ internal class LocalLlmEngineImpl(
     private val isCancelled = AtomicBoolean(false)
     private val isClosed = AtomicBoolean(false)
     private val nativeHandleLock = Any()
+    @Volatile private var defaultMaxPredictTokens = EngineConfig().maxPredictTokens
 
     init {
         scope.launch {
@@ -114,11 +115,13 @@ internal class LocalLlmEngineImpl(
     ): Result<ModelInfo> = withContext(llamaDispatcher) {
         runCatching {
             val handle = getValidHandle()
-            _currentModel.value = null
             _state.value = EngineState.LoadingModel(source)
 
             val file: File = ModelSourceResolver.resolveToFile(context, source)
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
+            // Resolve the new source before clearing the current model: a failed SAF/URL
+            // import must not make the still-loaded previous model unreachable.
+            _currentModel.value = null
 
             val ret = NativeEngineHandle.nativeLoadModel(
                 handle = handle,
@@ -140,6 +143,7 @@ internal class LocalLlmEngineImpl(
                 else -> throw IllegalStateException("Native model load failed with error code: $ret")
             }
 
+            defaultMaxPredictTokens = config.maxPredictTokens
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)
             val parts = rawMetadata.split(";")
             val desc = parts.getOrNull(0) ?: ""
@@ -173,7 +177,12 @@ internal class LocalLlmEngineImpl(
         }.onFailure { err ->
             Log.e(TAG, "Model load failed", err)
             if (!isClosed.get()) {
-                _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
+                val stillLoadedModel = _currentModel.value
+                _state.value = if (stillLoadedModel != null) {
+                    EngineState.ModelLoaded(stillLoadedModel)
+                } else {
+                    EngineState.Error("Failed to load model: ${err.message}", err)
+                }
             }
         }
     }
@@ -224,9 +233,12 @@ internal class LocalLlmEngineImpl(
                 return@flow
             }
 
+            // Null means use the maxPredictTokens value from the active EngineConfig.
+            val effectiveMaxPredictTokens = request.maxPredictTokens ?: defaultMaxPredictTokens
+
             // Native prompt evaluation must not clear a cancel request arriving after reset.
             val processRes = NativeEngineHandle.nativeProcessChat(
-                handle = handle, roles = roles, contents = contents, maxPredict = request.maxPredictTokens
+                handle = handle, roles = roles, contents = contents, maxPredict = effectiveMaxPredictTokens
             )
             if (processRes == -2 || isCancelled.get()) {
                 emit(InferenceEvent.Cancelled("", 0))

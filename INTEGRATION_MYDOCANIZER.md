@@ -171,7 +171,7 @@ val history = listOf(
     ChatMessage.user("Und wann kann ich sie beim Finanzamt geltend machen?")
 )
 
-val request = InferenceRequest(messages = history)
+val request = InferenceRequest(messages = history) // maxPredictTokens aus EngineConfig
 ```
 
 ---

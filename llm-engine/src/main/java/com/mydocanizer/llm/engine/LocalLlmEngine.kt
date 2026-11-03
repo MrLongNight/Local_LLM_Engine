@@ -36,7 +36,7 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Loads a GGUF model into memory from the provided [source].
      *
-     * @param source The filesystem path, content URI, or asset of the model.
+     * @param source The filesystem path, content URI, HTTPS URL, or asset of the model.
      * @param config Configuration parameters (context size, threads, temperature, etc.).
      * @return [Result] containing [ModelInfo] on success, or exception on failure.
      */
