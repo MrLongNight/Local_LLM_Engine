@@ -63,8 +63,7 @@ android {
 ## 4. Native Bibliotheken im APK
 
 Beim Kompilieren wird durch CMake (`CMakeLists.txt`) folgendes Artefakt erzeugt und automatisch in das APK gepackt:
-- **`liblocalllm_engine.so`**: Die zentrale native shared library, welche `llama.cpp` (gepinnter Commit `2da668617612d2df773f966e3b0ee22dc2beef7b`), die Vulkan-GPU-Initialisierung und die JNI-Bridge bündelt.
-- **System-Verlinkung**: Verlinkt gegen Android NDK `liblog.so`, `libandroid.so` und `libvulkan.so`.
+- **`liblocalllm_engine.so`**: Die zentrale native Shared Library, welche `llama.cpp` (gepinntem Commit `2da668617612d2df773f966e3b0ee22dc2beef7b`), die JNI-Bridge und – sofern im arm64-Build aktiviert – das optionale GGML-Vulkan-Backend bündelt.,- **System-Verlinkung**: Immer gegen Android NDK `liblog.so` und `libandroid.so`; bei aktiviertem Vulkan-Backend zusätzlich über `ggml-vulkan` gegen den NDK-Vulkan-Loader `libvulkan.so`.
 
 ---
 

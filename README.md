@@ -2,7 +2,7 @@
 
 A standalone Android application and reusable Android library for running local GGUF language models with llama.cpp.
 
-> **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. In particular, Vulkan acceleration and several inference/lifecycle behaviours still require implementation and CI/device verification. Do not interpret a successful Kotlin unit-test run as proof that the native Android build or on-device inference works.
+> **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. The arm64 Vulkan backend is configured as an optional native build path; it still requires a successful Vulkan APK build and real-device verification. Successful Kotlin unit tests alone do not prove native Android inference or performance.
 
 ## Project layout
 

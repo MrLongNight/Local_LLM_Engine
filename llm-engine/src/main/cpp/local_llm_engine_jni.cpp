@@ -328,12 +328,16 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     if (!engine) return 1;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
+
+    std::string model_path;
+    if (!utf8_from_jstring(env, jmodel_path, model_path) || model_path.empty()) {
+        LOGE("Model path is null, empty, or could not be converted to UTF-8");
+        return 2;
+    }
+
+    // Preserve the currently loaded model if the incoming Java path is invalid.
     engine->unload_locked();
-
-    const char* model_path = env->GetStringUTFChars(jmodel_path, nullptr);
-    if (!model_path) return 2;
-
-    LOGI("Loading GGUF model: %s (mode=%d, gpu_layers=%d)", model_path, backend_mode, gpu_layers);
+    LOGI("Loading GGUF model: %s (mode=%d, gpu_layers=%d)", model_path.c_str(), backend_mode, gpu_layers);
 
     llama_model_params model_params = llama_model_default_params();
 
@@ -344,7 +348,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     if (backend_mode == BACKEND_VULKAN) {
         if (!has_vulkan) {
             LOGE("Vulkan backend explicitly requested, but no registered llama.cpp Vulkan backend is available");
-            env->ReleaseStringUTFChars(jmodel_path, model_path);
             return 101; // Vulkan init failure error code (no silent fallback!)
         }
         model_params.n_gpu_layers = gpu_layers > 0 ? gpu_layers : 999;
@@ -366,8 +369,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         LOGI("Configured CPU backend");
     }
 
-    llama_model* model = llama_model_load_from_file(model_path, model_params);
-    env->ReleaseStringUTFChars(jmodel_path, model_path);
+    llama_model* model = llama_model_load_from_file(model_path.c_str(), model_params);
 
     if (!model) {
         LOGE("llama_model_load_from_file failed");
