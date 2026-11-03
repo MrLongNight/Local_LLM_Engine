@@ -21,8 +21,8 @@ class DiagnosticLogFormatterTest {
 
             val snapshot = DiagnosticLogSnapshotter.capture(previous, current)
 
-            assertEquals("older-event\\n", String(snapshot.previous, Charsets.UTF_8))
-            assertEquals("newer-event\\n", String(snapshot.current, Charsets.UTF_8))
+            assertEquals("older-event\n", String(snapshot.previous, Charsets.UTF_8))
+            assertEquals("newer-event\n", String(snapshot.current, Charsets.UTF_8))
             assertEquals(
                 (previous.length() + current.length()),
                 snapshot.totalBytes

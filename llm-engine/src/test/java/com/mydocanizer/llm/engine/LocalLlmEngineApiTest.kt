@@ -81,6 +81,11 @@ class LocalLlmEngineApiTest {
         assertEquals("token", tokenEvent.token)
         assertEquals(0, tokenEvent.tokenIndex)
 
+        val progressEvent = InferenceEvent.Progress(tokensGenerated = 8, visibleCharacters = 0, elapsedMs = 1_200)
+        assertEquals(8, progressEvent.tokensGenerated)
+        assertEquals(0, progressEvent.visibleCharacters)
+        assertEquals(1_200L, progressEvent.elapsedMs)
+
         val result = InferenceResult(
             text = "Completed generation",
             tokensGenerated = 20,

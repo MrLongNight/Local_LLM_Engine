@@ -2,7 +2,7 @@
 
 Stand: 03.11.2026
 Branch: `main`
-Aktueller geprüfter Hauptstand vor diesem Änderungssatz: `48f8fb8b2d4d11e96eb350cd823712e10a2c0027`.
+Aktueller App-/Engine-Quellstand (APK-Quelle): `47632ee5f4137c17a5c273ed496f5cd52accfc4c`; dieser Folgecommit ändert nur Tests und Dokumentation.
 
 ## In den Korrekturläufen umgesetzt
 
@@ -41,13 +41,10 @@ Aktueller geprüfter Hauptstand vor diesem Änderungssatz: `48f8fb8b2d4d11e96eb3
 
 - Unit Tests #60 erfolgreich auf `48f8fb8b2d4d11e96eb350cd823712e10a2c0027`: [Run #60](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402289).
 - Android APK Build #28 erfolgreich auf demselben Commit: [Run #28](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402174).
-- APK-Artefakt `Local-LMM-Engine-debug-apk` vorhanden (38.439.130 Bytes, Archiv-SHA-256 `05eea573120f84d8de20141a47af174c56679f9bf2419009390c6736a7964a2b`), verfügbar bis 17.11.2026.
-- Der Build-Erfolg bestätigt nur das Erzeugen der APK, nicht die Funktionsprüfung der Settings-Navigation oder der Inferenz auf einem realen Gerät.
-
-- Unit Tests #53 erfolgreich auf `47e3bd918de4f1f80c3a71bac10089b47edb05c0`: [Run #53](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41617797814).
-- Android APK Build #21 erfolgreich auf demselben Commit: [Run #21](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41617797810).
-- APK-Artefakt `Local-LMM-Engine-debug-apk` wurde erzeugt und hochgeladen (38.435.107 Bytes, Archiv-SHA-256 `be8fc02e039725c2fe076d247ba4694cc7babd8f2aedd8a71978a8d492f839a4`), verfügbar bis 17.11.2026.
-- Der native Build enthält `arm64-v8a` inklusive erzwungenem Vulkan-Build sowie `x86_64`; der Workflow prüft die erzeugte APK auf Existenz. Das ist weiterhin kein Ersatz für die Installation und Inferenzprüfung auf einem realen Android-Gerät.
+- Unit Tests #61 auf `47632ee5f4137c17a5c273ed496f5cd52accfc4c`: Kotlin-Compile erfolgreich; ein Log-Snapshot-Test schlug wegen uneinheitlicher Newline-Testdaten fehl: [Run #61](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41686101022).
+- Android APK Build #29 auf demselben Commit erfolgreich; APK-Artefakt `Local-LMM-Engine-debug-apk` vorhanden (38.444.545 Bytes, Archiv-SHA-256 `f5042ce8a717d276aa058a0600854a1f83936b07d1ebd291232e30d46b33f4c0`), verfügbar bis 17.11.2026: [Run #29](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41686101062).
+- Die nachfolgenden Änderungen betreffen nur Tests/Dokumentation und verändern die APK-Quelle nicht.
+- Ein erfolgreicher Build ist keine Geräteverifikation der Settings-Navigation oder der Inferenz.
 
 ## Noch offen – nach Priorität
 
