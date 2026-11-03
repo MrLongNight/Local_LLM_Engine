@@ -2,7 +2,7 @@
 
 Stand: 03.11.2026
 Branch: `main`
-Aktueller geprüfter Hauptstand: `47e3bd918de4f1f80c3a71bac10089b47edb05c0`.
+Aktueller geprüfter Hauptstand: `8cbd845b233de8c839eb118fc372a7d7ec4fe6f4`.
 
 ## In den Korrekturläufen umgesetzt
 

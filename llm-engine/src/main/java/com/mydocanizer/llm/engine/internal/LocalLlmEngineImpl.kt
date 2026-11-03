@@ -316,11 +316,23 @@ internal class LocalLlmEngineImpl(
                 return@flow
             }
 
+            EngineDiagnostics.info(
+                "inference",
+                "TOKEN_GENERATION_STARTED",
+                "maxPredictTokens=$effectiveMaxPredictTokens;promptDurationMs=$promptDurationMs"
+            )
             // Native code enforces maxPredictTokens; UTF-8 chunks are not model-token counts.
             while (!isCancelled.get()) {
                 val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle) ?: break
                 if (tokenPiece.isNotEmpty()) {
                     outputBuilder.append(tokenPiece)
+                    if (tokenEventIndex == 0) {
+                        EngineDiagnostics.info(
+                            "inference",
+                            "FIRST_VISIBLE_TOKEN",
+                            "elapsedMs=${(System.nanoTime() - inferenceStartedNanos) / 1_000_000L};nativeTokens=${NativeEngineHandle.nativeGetTokensGenerated(handle)}"
+                        )
+                    }
                     emit(InferenceEvent.Token(tokenPiece, tokenEventIndex++))
                 }
             }
@@ -331,6 +343,20 @@ internal class LocalLlmEngineImpl(
             val durationMs = (NativeEngineHandle.nativeGetInferenceDurationUs(handle) / 1000L).coerceAtLeast(1L)
             val tokensPerSec = actualTokens * 1000.0 / durationMs
             val fullText = outputBuilder.toString()
+
+            if (fullText.isBlank() && finishReason != FinishReason.CANCELLED) {
+                val error = IllegalStateException(
+                    "The model ended generation without visible text (finishReason=$finishReason; nativeTokens=$actualTokens). Check the model's chat template and prompt format."
+                )
+                EngineDiagnostics.error(
+                    "inference",
+                    "EMPTY_MODEL_RESPONSE",
+                    error,
+                    "finishReason=$finishReason;nativeFinishReason=$rawReason;nativeTokens=$actualTokens;durationMs=$durationMs"
+                )
+                emit(InferenceEvent.Error(error))
+                return@flow
+            }
 
             when (finishReason) {
                 FinishReason.CANCELLED -> {

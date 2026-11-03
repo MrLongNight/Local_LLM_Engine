@@ -440,7 +440,7 @@ fun ChatScreen(
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Modell verarbeitet Eingabe und generiert Tokens...",
+                            text = "Prompt wird verarbeitet – warte auf die erste Textausgabe…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.outline
                         )

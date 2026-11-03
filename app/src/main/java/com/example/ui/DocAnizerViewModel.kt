@@ -129,6 +129,7 @@ class DocAnizerViewModel(
 
     fun selectTab(tab: AppTab) {
         _currentTab.value = tab
+        EngineDiagnostics.info("ui", "TAB_SELECTED", "tab=$tab")
     }
 
     fun updateInputText(text: String) {

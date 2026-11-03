@@ -55,6 +55,10 @@ class ExampleRobolectricTest {
 
         viewModel.selectTab(AppTab.IMPORT)
         assertEquals(AppTab.IMPORT, viewModel.currentTab.value)
+        viewModel.selectTab(AppTab.SETTINGS)
+        assertEquals(AppTab.SETTINGS, viewModel.currentTab.value)
+        viewModel.selectTab(AppTab.CHAT)
+        assertEquals(AppTab.CHAT, viewModel.currentTab.value)
         viewModel.updateInputText("Testnachricht")
         assertEquals("Testnachricht", viewModel.inputText.value)
     }

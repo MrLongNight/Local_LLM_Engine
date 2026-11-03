@@ -851,6 +851,15 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
     common_sampler_accept(engine->sampler, new_token_id, true);
 
+    // An end-of-generation token is terminal: do not feed it back into llama_decode().
+    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
+    if (llama_vocab_is_eog(vocab, new_token_id)) {
+        engine->tokens_generated++;
+        engine->last_finish_reason = FINISH_STOP;
+        LOGI("Generated EOG token: %d", new_token_id);
+        return nullptr;
+    }
+
     common_batch_clear(engine->batch);
     common_batch_add(engine->batch, new_token_id, engine->current_position, {0}, true);
 
@@ -863,13 +872,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     engine->current_position++;
     engine->tokens_generated++;
-
-    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
-    if (llama_vocab_is_eog(vocab, new_token_id)) {
-        LOGI("Generated EOG token: %d", new_token_id);
-        engine->last_finish_reason = FINISH_STOP;
-        return nullptr;
-    }
 
     auto token_piece = common_token_to_piece(engine->context, new_token_id);
     engine->cached_token_chars += token_piece;

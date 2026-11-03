@@ -39,6 +39,9 @@ fun SettingsScreen(
     val config: EngineConfig by viewModel.engineConfig.collectAsState()
     val systemPrompt: String by viewModel.systemPrompt.collectAsState()
     val currentModel: ModelInfo? by viewModel.currentModel.collectAsState()
+    LaunchedEffect(Unit) {
+        EngineDiagnostics.info("ui", "SETTINGS_SCREEN_VISIBLE")
+    }
     val exportLogLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain"),
         onResult = { uri -> if (uri != null) viewModel.exportDiagnostics(uri) }

@@ -8,6 +8,46 @@ import org.junit.Test
 class DiagnosticLogFormatterTest {
 
     @Test
+    fun snapshotCapturesPreviousAndCurrentLogsAndReportsExactByteCount() {
+        val directory = createTempDir(prefix = "llm-diagnostics-test")
+        try {
+            val previous = File(directory, "previous.log").apply {
+                writeText("older-event\\n")
+            }
+            val current = File(directory, "current.log").apply {
+                writeText("newer-event\\n")
+            }
+
+            val snapshot = DiagnosticLogSnapshotter.capture(previous, current)
+
+            assertEquals("older-event\\n", String(snapshot.previous, Charsets.UTF_8))
+            assertEquals("newer-event\\n", String(snapshot.current, Charsets.UTF_8))
+            assertEquals(
+                (previous.length() + current.length()),
+                snapshot.totalBytes
+            )
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun snapshotHandlesMissingLogFilesWithoutFailing() {
+        val directory = createTempDir(prefix = "llm-diagnostics-empty")
+        try {
+            val snapshot = DiagnosticLogSnapshotter.capture(
+                File(directory, "missing-previous.log"),
+                File(directory, "missing-current.log")
+            )
+            assertEquals(0L, snapshot.totalBytes)
+            assertTrue(snapshot.previous.isEmpty())
+            assertTrue(snapshot.current.isEmpty())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun formatLineUsesStableTabSeparatedFieldsAndUtcTimestamp() {
         val line = DiagnosticLogFormatter.formatLine(
             "2026-11-03T12:00:00.000Z",

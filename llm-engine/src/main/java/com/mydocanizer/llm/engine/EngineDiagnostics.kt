@@ -4,18 +4,18 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Bounded, app-private diagnostic log for engine lifecycle, model loading and inference.
- *
- * Prompts, generated responses, model paths, content URIs and remote URLs must never be
- * passed as event details. The formatter additionally redacts common URI/path patterns.
+ * Bounded app-private diagnostics. Never pass prompts, generated responses, credentials,
+ * model paths, Content URIs or remote URLs as event details.
  */
 object EngineDiagnostics {
     private const val LOG_DIRECTORY = "diagnostics"
@@ -29,19 +29,18 @@ object EngineDiagnostics {
 
     fun initialize(context: Context) {
         synchronized(lock) {
-            val appContext = context.applicationContext
-            val target = File(appContext.filesDir, LOG_DIRECTORY)
-            if (!target.exists() && !target.mkdirs()) {
-                Log.e("EngineDiagnostics", "Could not create diagnostics directory")
-                return
+            runCatching {
+                val target = ensureDirectoryLocked(context.applicationContext)
+                appendLocked(
+                    "INFO",
+                    "diagnostics",
+                    "SESSION_STARTED",
+                    "apiLevel=${Build.VERSION.SDK_INT};device=${Build.MANUFACTURER} ${Build.MODEL};abis=${Build.SUPPORTED_ABIS.take(4).joinToString(",")};appVersion=${appVersion(context.applicationContext)}"
+                )
+                target
+            }.onFailure {
+                Log.e("EngineDiagnostics", "Could not initialize diagnostics storage", it)
             }
-            directory = target
-            appendLocked(
-                "INFO",
-                "diagnostics",
-                "SESSION_STARTED",
-                "apiLevel=${Build.VERSION.SDK_INT};device=${Build.MANUFACTURER} ${Build.MODEL};abis=${Build.SUPPORTED_ABIS.take(4).joinToString(",")};appVersion=${appVersion(appContext)}"
-            )
         }
     }
 
@@ -54,8 +53,11 @@ object EngineDiagnostics {
     fun error(component: String, event: String, error: Throwable, details: String? = null) {
         val stack = Log.getStackTraceString(error)
         val summary = "${error.javaClass.name}: ${error.message.orEmpty()}"
-        val combined = listOfNotNull(details, summary, stack.takeIf { it.isNotBlank() }?.let { "stack=$it" })
-            .joinToString(" | ")
+        val combined = listOfNotNull(
+            details,
+            summary,
+            stack.takeIf { it.isNotBlank() }?.let { "stack=$it" }
+        ).joinToString(" | ")
         write("ERROR", component, event, combined)
     }
 
@@ -66,60 +68,98 @@ object EngineDiagnostics {
         }
     }
 
+    private fun ensureDirectoryLocked(context: Context): File {
+        val target = File(context.filesDir, LOG_DIRECTORY)
+        if (!target.isDirectory && !target.mkdirs() && !target.isDirectory) {
+            throw IOException("Could not create diagnostics directory")
+        }
+        directory = target
+        return target
+    }
+
     private fun appendLocked(level: String, component: String, event: String, details: String?) {
         val targetDirectory = directory ?: return
         runCatching {
             val current = File(targetDirectory, CURRENT_FILE)
             val previous = File(targetDirectory, PREVIOUS_FILE)
-            val timestamp = utcNow()
-            val encoded = DiagnosticLogFormatter.formatLine(timestamp, level, component, event, details)
-                .toByteArray(Charsets.UTF_8)
+            val encoded = DiagnosticLogFormatter.formatLine(
+                utcNow(), level, component, event, details
+            ).toByteArray(Charsets.UTF_8)
 
             if (current.exists() && current.length() + encoded.size > MAX_FILE_BYTES) {
-                previous.delete()
+                if (previous.exists() && !previous.delete()) {
+                    throw IOException("Could not remove previous diagnostics log during rotation")
+                }
                 if (!current.renameTo(previous)) {
-                    Log.w("EngineDiagnostics", "Could not rotate diagnostics log")
+                    throw IOException("Could not rotate current diagnostics log")
                 }
             }
             FileOutputStream(current, true).use { output ->
                 output.write(encoded)
-                output.flush()
+                output.fd.sync()
             }
         }.onFailure {
-            Log.e("EngineDiagnostics", "Could not append diagnostic event", it)
+            Log.e("EngineDiagnostics", "Could not append diagnostic event: $event", it)
         }
     }
 
     /**
-     * Exports the previous and current log through SAF. Call from an IO dispatcher.
-     * The returned number is the number of exported log bytes, excluding the small header.
+     * Exports a consistent snapshot of both bounded log files through SAF.
+     * Call from Dispatchers.IO. The returned byte count excludes the export header/footer.
      */
-    fun exportTo(context: Context, destination: Uri): Result<Long> = runCatching {
-        val appContext = context.applicationContext
-        initialize(appContext)
-        info("diagnostics", "EXPORT_STARTED")
-        val current = File(appContext.filesDir, "$LOG_DIRECTORY/$CURRENT_FILE")
-        val previous = File(appContext.filesDir, "$LOG_DIRECTORY/$PREVIOUS_FILE")
-        val totalBytes = listOf(previous, current).filter { it.isFile }.sumOf { it.length() }
-
-        val output = appContext.contentResolver.openOutputStream(destination, "wt")
-            ?: throw IllegalStateException("Could not open selected export destination")
-        output.bufferedWriter(Charsets.UTF_8).use { writer ->
-            writer.appendLine("Local LLM Engine diagnostics")
-            writer.appendLine("Exported UTC: ${utcNow()}")
-            writer.appendLine("Format: timestamp, level, component, event, details (tab-separated)")
-            writer.appendLine("Privacy: chat prompts and generated responses are not recorded")
-            writer.appendLine()
-            listOf(previous, current).filter { it.isFile }.forEach { file ->
-                file.bufferedReader(Charsets.UTF_8).useLines { lines ->
-                    lines.forEach { line -> writer.appendLine(line) }
-                }
+    fun exportTo(context: Context, destination: Uri): Result<Long> {
+        return try {
+            val appContext = context.applicationContext
+            val snapshot = synchronized(lock) {
+                val target = ensureDirectoryLocked(appContext)
+                appendLocked("INFO", "diagnostics", "EXPORT_STARTED")
+                DiagnosticLogSnapshotter.capture(
+                    File(target, PREVIOUS_FILE),
+                    File(target, CURRENT_FILE)
+                )
             }
-            writer.appendLine(DiagnosticLogFormatter.formatLine(utcNow(), "INFO", "diagnostics", "EXPORT_SNAPSHOT_COMPLETED", null))
-            writer.flush()
+
+            val output = appContext.contentResolver.openOutputStream(destination, "wt")
+                ?: throw IOException("Could not open selected export destination")
+            output.bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.appendLine("Local LLM Engine diagnostics")
+                writer.appendLine("Exported UTC: ${utcNow()}")
+                writer.appendLine("Format: timestamp, level, component, event, details (tab-separated)")
+                writer.appendLine("Privacy: chat prompts and generated responses are not recorded")
+                writer.appendLine()
+                if (snapshot.previous.isNotEmpty()) {
+                    writer.write(String(snapshot.previous, Charsets.UTF_8))
+                }
+                if (snapshot.current.isNotEmpty()) {
+                    writer.write(String(snapshot.current, Charsets.UTF_8))
+                }
+                writer.appendLine(
+                    DiagnosticLogFormatter.formatLine(
+                        utcNow(), "INFO", "diagnostics", "EXPORT_SNAPSHOT_COMPLETED",
+                        "logBytes=${snapshot.totalBytes}"
+                    ).trimEnd()
+                )
+                writer.flush()
+            }
+
+            synchronized(lock) {
+                appendLocked(
+                    "INFO", "diagnostics", "EXPORT_COMPLETED",
+                    "logBytes=${snapshot.totalBytes}"
+                )
+            }
+            Result.success(snapshot.totalBytes)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            synchronized(lock) {
+                appendLocked(
+                    "ERROR", "diagnostics", "EXPORT_FAILED",
+                    "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
+                )
+            }
+            Result.failure(error)
         }
-        info("diagnostics", "EXPORT_COMPLETED", "logBytes=$totalBytes")
-        totalBytes
     }
 
     private fun appVersion(context: Context): String = runCatching {
@@ -127,9 +167,28 @@ object EngineDiagnostics {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
     }.getOrDefault("unknown")
 
-    private fun utcNow(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }.format(Date())
+    private fun utcNow(): String =
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date())
+}
+
+/** Immutable export snapshot captured while the writer lock is held. */
+internal data class DiagnosticLogSnapshot(
+    val previous: ByteArray,
+    val current: ByteArray
+) {
+    val totalBytes: Long
+        get() = previous.size.toLong() + current.size.toLong()
+}
+
+/** File snapshot helper separated for deterministic unit testing. */
+internal object DiagnosticLogSnapshotter {
+    fun capture(previous: File, current: File): DiagnosticLogSnapshot =
+        DiagnosticLogSnapshot(
+            previous = previous.takeIf { it.isFile }?.readBytes() ?: ByteArray(0),
+            current = current.takeIf { it.isFile }?.readBytes() ?: ByteArray(0)
+        )
 }
 
 /** Pure formatter shared by the diagnostics writer and JVM tests. */
@@ -146,16 +205,16 @@ internal object DiagnosticLogFormatter {
         details: String?
     ): String {
         val fields = listOf(timestampUtc, level, component, event, details.orEmpty())
-        return fields.joinToString(separator = "\t", postfix = "\n") { sanitize(it) }
+        return fields.joinToString(separator = "\\t", postfix = "\\n") { sanitize(it) }
     }
 
     fun sanitize(value: String): String = value
         .replace(urlPattern, "<url-redacted>")
         .replace(contentUriPattern, "<content-uri-redacted>")
         .replace(localPathPattern, "<local-path-redacted>")
-        .replace('\t', ' ')
-        .replace('\r', ' ')
-        .replace('\n', ' ')
+        .replace('\\t', ' ')
+        .replace('\\r', ' ')
+        .replace('\\n', ' ')
         .take(2500)
 }
 
