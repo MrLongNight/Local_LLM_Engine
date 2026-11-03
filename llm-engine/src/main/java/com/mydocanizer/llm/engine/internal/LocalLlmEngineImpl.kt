@@ -73,7 +73,7 @@ internal class LocalLlmEngineImpl(
             check(!isClosed.get()) { "Engine is closed" }
             if (engineHandle.get() != 0L &&
                 (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded)
-            ) return@runCatching
+            ) return@runCatchingPreservingCancellation
             _state.value = EngineState.Initializing
             EngineDiagnostics.info("engine", "INITIALIZATION_STARTED")
 
