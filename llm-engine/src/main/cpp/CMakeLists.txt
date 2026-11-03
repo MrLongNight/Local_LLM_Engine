@@ -38,6 +38,9 @@ if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
     if(DEFINED ENV{SPIRV_HEADERS_CMAKE_DIR})
         set(SPIRV-Headers_DIR "$ENV{SPIRV_HEADERS_CMAKE_DIR}" CACHE PATH "Host SPIR-V-Headers CMake package")
     endif()
+    if(DEFINED ENV{SPIRV_HEADERS_INCLUDE_DIR})
+        set(LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR "$ENV{SPIRV_HEADERS_INCLUDE_DIR}")
+    endif()
 
     find_package(Vulkan COMPONENTS glslc QUIET)
     find_package(SPIRV-Headers CONFIG QUIET)
@@ -61,6 +64,10 @@ else()
 endif()
 
 add_subdirectory(${LLAMA_SRC} build-llama)
+
+if(TARGET ggml-vulkan AND LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR)
+    target_include_directories(ggml-vulkan SYSTEM PRIVATE "${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR}")
+endif()
 
 add_library(localllm_engine SHARED
     local_llm_engine_jni.cpp
