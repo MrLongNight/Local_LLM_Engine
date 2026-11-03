@@ -161,7 +161,7 @@ val request = InferenceRequest(
 
 ## 8. Mehrnachrichten-Chats (Multi-Turn)
 
-Die Engine akzeptiert eine vollständige Gesprächshistorie. llama.cpp stellt das im GGUF hinterlegte Chat-Template bereit; die aktuelle JNI-Implementierung ruft die nicht-Jinja-Formatierungsvariante auf. Modelle, deren Template zwingend Jinja-Kontrollstrukturen oder komplexe Template-Logik benötigen, sind daher noch nicht garantiert kompatibel:
+Die Engine akzeptiert eine vollständige Gesprächshistorie und verwendet die eingebaute llama.cpp-Jinja-Template-Engine. Falls ein Modell-Template vom Jinja-Renderer nicht verarbeitet werden kann, fällt die Formatierung auf den Legacy-Renderer und bei Bedarf auf eine einfache Rollen-/Inhaltsdarstellung zurück. Beim Überschreiten des Kontextfensters entfernt die Engine ältere Gesprächsrunden an Nachrichtengrenzen; System-/Developer-Nachrichten und die neueste Nachricht bleiben erhalten. Reichen selbst diese Inhalte nicht in das Kontextfenster, wird ein klarer Fehler gemeldet, statt das Ende der aktuellen Frage abzuschneiden:
 
 ```kotlin
 val history = listOf(

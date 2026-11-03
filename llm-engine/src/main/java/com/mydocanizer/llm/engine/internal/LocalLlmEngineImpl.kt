@@ -245,9 +245,12 @@ internal class LocalLlmEngineImpl(
                 return@flow
             }
             if (processRes != 0) {
-                emit(InferenceEvent.Error(
-                    IllegalStateException("Native prompt evaluation failed with code $processRes")
-                ))
+                val message = if (processRes == 5) {
+                    "The system/developer prompt and newest message exceed the model context window. Reduce the prompt or use a model with a larger context."
+                } else {
+                    "Native prompt evaluation failed with code $processRes"
+                }
+                emit(InferenceEvent.Error(IllegalStateException(message)))
                 return@flow
             }
 

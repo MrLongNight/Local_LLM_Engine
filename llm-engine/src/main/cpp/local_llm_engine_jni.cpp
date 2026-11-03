@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <exception>
+#include <iterator>
 #include <unistd.h>
 
 #include "llama.h"
@@ -453,35 +455,32 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         return 2;
     }
 
-    const bool has_chat_template = common_chat_templates_was_explicit(engine->chat_templates.get());
-    std::string full_prompt;
-
+    std::vector<common_chat_msg> requested_messages;
+    requested_messages.reserve(static_cast<size_t>(count));
     for (jsize i = 0; i < count; i++) {
-        auto jrole = (jstring)env->GetObjectArrayElement(jroles, i);
-        auto jcontent = (jstring)env->GetObjectArrayElement(jcontents, i);
+        auto jrole = static_cast<jstring>(env->GetObjectArrayElement(jroles, i));
+        auto jcontent = static_cast<jstring>(env->GetObjectArrayElement(jcontents, i));
+        if (jrole == nullptr || jcontent == nullptr) {
+            if (jrole) env->DeleteLocalRef(jrole);
+            if (jcontent) env->DeleteLocalRef(jcontent);
+            LOGE("Chat message contained a null role or content");
+            return 3;
+        }
+
         const char* role_str = env->GetStringUTFChars(jrole, nullptr);
         const char* content_str = env->GetStringUTFChars(jcontent, nullptr);
-
-        common_chat_msg msg;
-        msg.role = role_str ? role_str : "user";
-        msg.content = content_str ? content_str : "";
-
-        if (has_chat_template) {
-            bool is_last_user = (i == count - 1 && msg.role == "user");
-            std::string formatted = common_chat_format_single(
-                    engine->chat_templates.get(),
-                    engine->chat_msgs,
-                    msg,
-                    is_last_user,
-                    /* use_jinja */ false);
-            full_prompt += formatted;
-        } else {
-            full_prompt += msg.role + ": " + msg.content + "\n";
-            if (i == count - 1) {
-                full_prompt += "assistant: ";
-            }
+        if (role_str == nullptr || content_str == nullptr) {
+            if (role_str) env->ReleaseStringUTFChars(jrole, role_str);
+            if (content_str) env->ReleaseStringUTFChars(jcontent, content_str);
+            env->DeleteLocalRef(jrole);
+            env->DeleteLocalRef(jcontent);
+            return 3;
         }
-        engine->chat_msgs.push_back(msg);
+
+        common_chat_msg message;
+        message.role = role_str;
+        message.content = content_str;
+        requested_messages.push_back(std::move(message));
 
         env->ReleaseStringUTFChars(jrole, role_str);
         env->ReleaseStringUTFChars(jcontent, content_str);
@@ -489,19 +488,122 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         env->DeleteLocalRef(jcontent);
     }
 
+    const bool has_chat_template = common_chat_templates_was_explicit(engine->chat_templates.get());
+    // 2 = Jinja renderer, 1 = legacy template renderer, 0 = plain role/content fallback.
+    int template_mode = has_chat_template ? 2 : 0;
+
+    auto build_prompt = [&](const std::vector<common_chat_msg>& messages, int mode) -> std::string {
+        engine->chat_msgs.clear();
+        std::string prompt;
+        for (size_t i = 0; i < messages.size(); ++i) {
+            const auto& message = messages[i];
+            const bool add_assistant = (i == messages.size() - 1 && message.role == "user");
+
+            if (mode == 2 || mode == 1) {
+                const std::string formatted = common_chat_format_single(
+                        engine->chat_templates.get(),
+                        engine->chat_msgs,
+                        message,
+                        add_assistant,
+                        mode == 2
+                );
+                prompt += formatted;
+            } else {
+                prompt += message.role + ": " + message.content + "\n";
+                if (add_assistant) prompt += "assistant: ";
+            }
+            engine->chat_msgs.push_back(message);
+        }
+        return prompt;
+    };
+
+    auto render_prompt = [&](const std::vector<common_chat_msg>& messages) -> std::string {
+        if (template_mode == 2) {
+            try {
+                return build_prompt(messages, 2);
+            } catch (const std::exception& error) {
+                LOGW("Jinja chat template failed; trying legacy formatter: %s", error.what());
+                template_mode = 1;
+            }
+        }
+        if (template_mode == 1) {
+            try {
+                return build_prompt(messages, 1);
+            } catch (const std::exception& error) {
+                LOGW("Legacy chat template failed; using role/content fallback: %s", error.what());
+                template_mode = 0;
+            }
+        }
+        return build_prompt(messages, 0);
+    };
+
+    std::vector<common_chat_msg> selected_messages = requested_messages;
+    std::string full_prompt = render_prompt(selected_messages);
     auto tokens = common_tokenize(engine->context, full_prompt, has_chat_template, has_chat_template);
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
+        engine->last_finish_reason = FINISH_ERROR;
         return 3;
     }
 
-    int prompt_size = (int)tokens.size();
     const int max_allowed = engine->context_size - OVERFLOW_HEADROOM;
-    if (prompt_size > max_allowed) {
-        LOGW("Prompt size %d exceeds context size %d, controlled truncation", prompt_size, max_allowed);
-        tokens.resize(max_allowed);
-        prompt_size = max_allowed;
+    size_t removed_message_count = 0;
+    while (tokens.size() > static_cast<size_t>(max_allowed)) {
+        if (engine->cancel_requested.load(std::memory_order_acquire)) {
+            engine->last_finish_reason = FINISH_CANCELLED;
+            return -2;
+        }
+
+        // Keep every system/developer message and the newest message. Remove the
+        // oldest complete conversational turn instead of truncating the prompt tail.
+        const size_t last_index = selected_messages.size() - 1;
+        const auto first_old_message = std::find_if(
+                selected_messages.begin(),
+                selected_messages.begin() + static_cast<std::ptrdiff_t>(last_index),
+                [](const common_chat_msg& message) {
+                    return message.role != "system" && message.role != "developer";
+                }
+        );
+
+        if (first_old_message == selected_messages.begin() + static_cast<std::ptrdiff_t>(last_index)) {
+            LOGE("System/developer prompt and newest message exceed the model context window");
+            engine->last_finish_reason = FINISH_ERROR;
+            return 5;
+        }
+
+        const size_t erase_start = static_cast<size_t>(
+                std::distance(selected_messages.begin(), first_old_message));
+        size_t erase_end = erase_start + 1;
+        while (erase_end < last_index) {
+            const std::string& role = selected_messages[erase_end].role;
+            if (role == "user" || role == "system" || role == "developer") break;
+            ++erase_end;
+        }
+
+        if (erase_end <= erase_start) {
+            engine->last_finish_reason = FINISH_ERROR;
+            return 5;
+        }
+        removed_message_count += erase_end - erase_start;
+        selected_messages.erase(
+                selected_messages.begin() + static_cast<std::ptrdiff_t>(erase_start),
+                selected_messages.begin() + static_cast<std::ptrdiff_t>(erase_end)
+        );
+
+        full_prompt = render_prompt(selected_messages);
+        tokens = common_tokenize(engine->context, full_prompt, has_chat_template, has_chat_template);
+        if (tokens.empty()) {
+            LOGE("Prompt tokenization returned empty tokens after trimming conversation history");
+            engine->last_finish_reason = FINISH_ERROR;
+            return 3;
+        }
     }
+
+    if (removed_message_count > 0) {
+        LOGW("Trimmed %zu older chat messages at turn boundaries to fit context", removed_message_count);
+    }
+
+    int prompt_size = static_cast<int>(tokens.size());
 
     int dec_res = decode_tokens(engine, tokens, engine->current_position, true);
     if (dec_res != 0) {
