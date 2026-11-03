@@ -12,6 +12,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 
 /**
  * Bounded app-private diagnostics. Never pass prompts, generated responses, credentials,
@@ -23,27 +25,35 @@ object EngineDiagnostics {
     private const val PREVIOUS_FILE = "engine-diagnostics.previous.log"
     private const val MAX_FILE_BYTES = 2L * 1024L * 1024L
     private val lock = Any()
+    private val writerExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "LocalLlmDiagnostics").apply { isDaemon = true }
+    }
 
     @Volatile
     private var directory: File? = null
 
     fun initialize(context: Context) {
-        synchronized(lock) {
-            runCatching {
-                val target = ensureDirectoryLocked(context.applicationContext)
-                appendLocked(
-                    "INFO",
-                    "diagnostics",
-                    "SESSION_STARTED",
-                    "apiLevel=${Build.VERSION.SDK_INT};device=${Build.MANUFACTURER} ${Build.MODEL};abis=${Build.SUPPORTED_ABIS.take(4).joinToString(",")};appVersion=${appVersion(context.applicationContext)}"
-                )
-                target
-            }.onFailure {
-                Log.e("EngineDiagnostics", "Could not initialize diagnostics storage", it)
+        try {
+            writerExecutor.execute {
+                synchronized(lock) {
+                    runCatching {
+                        val appContext = context.applicationContext
+                        ensureDirectoryLocked(appContext)
+                        appendLocked(
+                            "INFO",
+                            "diagnostics",
+                            "SESSION_STARTED",
+                            "apiLevel=${Build.VERSION.SDK_INT};device=${Build.MANUFACTURER} ${Build.MODEL};abis=${Build.SUPPORTED_ABIS.take(4).joinToString(",")};appVersion=${appVersion(appContext)}"
+                        )
+                    }.onFailure {
+                        Log.e("EngineDiagnostics", "Could not initialize diagnostics storage", it)
+                    }
+                }
             }
+        } catch (error: Throwable) {
+            Log.e("EngineDiagnostics", "Could not queue diagnostics initialization", error)
         }
     }
-
     fun info(component: String, event: String, details: String? = null) =
         write("INFO", component, event, details)
 
@@ -62,12 +72,17 @@ object EngineDiagnostics {
     }
 
     private fun write(level: String, component: String, event: String, details: String?) {
-        synchronized(lock) {
-            if (directory == null) return
-            appendLocked(level, component, event, details)
+        try {
+            writerExecutor.execute {
+                synchronized(lock) {
+                    if (directory == null) return@synchronized
+                    appendLocked(level, component, event, details)
+                }
+            }
+        } catch (error: Throwable) {
+            Log.e("EngineDiagnostics", "Could not queue diagnostic event: $event", error)
         }
     }
-
     private fun ensureDirectoryLocked(context: Context): File {
         val target = File(context.filesDir, LOG_DIRECTORY)
         if (!target.isDirectory && !target.mkdirs() && !target.isDirectory) {
@@ -96,7 +111,7 @@ object EngineDiagnostics {
             }
             FileOutputStream(current, true).use { output ->
                 output.write(encoded)
-                output.fd.sync()
+                output.flush()
             }
         }.onFailure {
             Log.e("EngineDiagnostics", "Could not append diagnostic event: $event", it)
@@ -110,14 +125,18 @@ object EngineDiagnostics {
     fun exportTo(context: Context, destination: Uri): Result<Long> {
         return try {
             val appContext = context.applicationContext
-            val snapshot = synchronized(lock) {
-                val target = ensureDirectoryLocked(appContext)
-                appendLocked("INFO", "diagnostics", "EXPORT_STARTED", null)
-                DiagnosticLogSnapshotter.capture(
-                    File(target, PREVIOUS_FILE),
-                    File(target, CURRENT_FILE)
-                )
-            }
+            // This task is queued behind all earlier log writes. Capture under the
+            // same lock so rotation and appends cannot split the exported snapshot.
+            val snapshot = writerExecutor.submit(Callable {
+                synchronized(lock) {
+                    val target = ensureDirectoryLocked(appContext)
+                    appendLocked("INFO", "diagnostics", "EXPORT_STARTED", null)
+                    DiagnosticLogSnapshotter.capture(
+                        File(target, PREVIOUS_FILE),
+                        File(target, CURRENT_FILE)
+                    )
+                }
+            }).get()
 
             val output = appContext.contentResolver.openOutputStream(destination, "wt")
                 ?: throw IOException("Could not open selected export destination")
@@ -142,22 +161,12 @@ object EngineDiagnostics {
                 writer.flush()
             }
 
-            synchronized(lock) {
-                appendLocked(
-                    "INFO", "diagnostics", "EXPORT_COMPLETED",
-                    "logBytes=${snapshot.totalBytes}"
-                )
-            }
+            info("diagnostics", "EXPORT_COMPLETED", "logBytes=${snapshot.totalBytes}")
             Result.success(snapshot.totalBytes)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            synchronized(lock) {
-                appendLocked(
-                    "ERROR", "diagnostics", "EXPORT_FAILED",
-                    "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
-                )
-            }
+            error("diagnostics", "EXPORT_FAILED", error)
             Result.failure(error)
         }
     }
