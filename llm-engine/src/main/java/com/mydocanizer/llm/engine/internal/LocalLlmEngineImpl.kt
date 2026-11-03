@@ -3,6 +3,8 @@ package com.mydocanizer.llm.engine.internal
 import android.content.Context
 import android.util.Log
 import com.mydocanizer.llm.engine.BackendInfo
+import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.finishReasonFromNative
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineState
@@ -59,6 +61,8 @@ internal class LocalLlmEngineImpl(
     @Volatile private var defaultMaxPredictTokens = EngineConfig().maxPredictTokens
 
     init {
+        EngineDiagnostics.initialize(context)
+        EngineDiagnostics.info("engine", "INSTANCE_CREATED")
         scope.launch {
             initialize()
         }
@@ -71,6 +75,7 @@ internal class LocalLlmEngineImpl(
                 (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded)
             ) return@runCatching
             _state.value = EngineState.Initializing
+            EngineDiagnostics.info("engine", "INITIALIZATION_STARTED")
 
             val loaded = NativeEngineHandle.ensureLoaded()
             if (!loaded) {
@@ -99,9 +104,15 @@ internal class LocalLlmEngineImpl(
 
             if (!isClosed.get()) {
                 _state.value = EngineState.Ready
+                EngineDiagnostics.info(
+                    "engine",
+                    "INITIALIZATION_SUCCEEDED",
+                    "backendAvailable=true;vulkanRegistered=$hasVulkanBackend;recommendedThreads=$recThreads"
+                )
                 Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
             }
         }.onFailure { err ->
+            EngineDiagnostics.error("engine", "INITIALIZATION_FAILED", err)
             Log.e(TAG, "Initialization failed", err)
             if (!isClosed.get()) {
                 _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
@@ -114,10 +125,16 @@ internal class LocalLlmEngineImpl(
         config: EngineConfig
     ): Result<ModelInfo> = withContext(llamaDispatcher) {
         runCatching {
+            EngineDiagnostics.info(
+                "model",
+                "MODEL_LOAD_STARTED",
+                "sourceType=${source.javaClass.simpleName};contextSize=${config.contextSize};batchSize=${config.batchSize};threads=${config.threads};temperature=${config.temperature};topP=${config.topP};maxPredictTokens=${config.maxPredictTokens};backend=${config.backendPreference};gpuLayers=${config.gpuLayers}"
+            )
             val handle = getValidHandle()
             _state.value = EngineState.LoadingModel(source)
 
             val file: File = ModelSourceResolver.resolveToFile(context, source)
+            EngineDiagnostics.info("model", "MODEL_FILE_READY", "sizeBytes=${file.length()}")
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
             // Resolve the new source before clearing the current model: a failed SAF/URL
             // import must not make the still-loaded previous model unreachable.
@@ -171,10 +188,16 @@ internal class LocalLlmEngineImpl(
             if (!isClosed.get()) {
                 _currentModel.value = info
                 _state.value = EngineState.ModelLoaded(info)
+                EngineDiagnostics.info(
+                    "model",
+                    "MODEL_LOAD_SUCCEEDED",
+                    "sizeBytes=${info.sizeBytes};architecture=${info.architecture};backend=${info.activeBackend};sha256=${info.sha256?.take(16) ?: "unavailable"};trainContext=${info.contextLengthTrain}"
+                )
                 Log.i(TAG, "Model loaded successfully: $info")
             }
             info
         }.onFailure { err ->
+            EngineDiagnostics.error("model", "MODEL_LOAD_FAILED", err)
             Log.e(TAG, "Model load failed", err)
             if (!isClosed.get()) {
                 val stillLoadedModel = _currentModel.value
@@ -196,6 +219,7 @@ internal class LocalLlmEngineImpl(
             }
             _currentModel.value = null
             _state.value = EngineState.Ready
+            EngineDiagnostics.info("model", "MODEL_UNLOADED")
             Log.i(TAG, "Model unloaded successfully")
             Unit
         }
@@ -216,7 +240,13 @@ internal class LocalLlmEngineImpl(
 
         val outputBuilder = StringBuilder()
         var tokenEventIndex = 0
+        val inferenceStartedNanos = System.nanoTime()
         try {
+            EngineDiagnostics.info(
+                "inference",
+                "INFERENCE_STARTED",
+                "messageCount=${request.messages.size};maxPredictTokens=${request.maxPredictTokens ?: defaultMaxPredictTokens};temperatureOverride=${request.temperature != null}"
+            )
             emit(InferenceEvent.Started(request.messages.size))
             val roles = request.messages.map { it.role.roleName }.toTypedArray()
             val contents = request.messages.map { it.content }.toTypedArray()
@@ -227,9 +257,9 @@ internal class LocalLlmEngineImpl(
                 handle, request.temperature ?: -1f
             )
             if (samplingResult != 0) {
-                emit(InferenceEvent.Error(
-                    IllegalStateException("Native sampling configuration failed with code $samplingResult")
-                ))
+                val error = IllegalStateException("Native sampling configuration failed with code $samplingResult")
+                EngineDiagnostics.error("inference", "SAMPLING_CONFIGURATION_FAILED", error)
+                emit(InferenceEvent.Error(error))
                 return@flow
             }
 
@@ -237,10 +267,19 @@ internal class LocalLlmEngineImpl(
             val effectiveMaxPredictTokens = request.maxPredictTokens ?: defaultMaxPredictTokens
 
             // Native prompt evaluation must not clear a cancel request arriving after reset.
+            EngineDiagnostics.info("inference", "PROMPT_EVALUATION_STARTED", "messageCount=${request.messages.size}")
+            val promptStartedNanos = System.nanoTime()
             val processRes = NativeEngineHandle.nativeProcessChat(
                 handle = handle, roles = roles, contents = contents, maxPredict = effectiveMaxPredictTokens
             )
+            val promptDurationMs = (System.nanoTime() - promptStartedNanos) / 1_000_000L
+            EngineDiagnostics.info(
+                "inference",
+                "PROMPT_EVALUATION_FINISHED",
+                "resultCode=$processRes;durationMs=$promptDurationMs"
+            )
             if (processRes == -2 || isCancelled.get()) {
+                EngineDiagnostics.warn("inference", "CANCELLED_DURING_PROMPT", "durationMs=$promptDurationMs")
                 emit(InferenceEvent.Cancelled("", 0))
                 return@flow
             }
@@ -250,7 +289,9 @@ internal class LocalLlmEngineImpl(
                 } else {
                     "Native prompt evaluation failed with code $processRes"
                 }
-                emit(InferenceEvent.Error(IllegalStateException(message)))
+                val error = IllegalStateException(message)
+                EngineDiagnostics.error("inference", "PROMPT_EVALUATION_FAILED", error, "nativeCode=$processRes")
+                emit(InferenceEvent.Error(error))
                 return@flow
             }
 
@@ -264,33 +305,45 @@ internal class LocalLlmEngineImpl(
             }
 
             val rawReason = NativeEngineHandle.nativeGetLastFinishReason(handle)
-            val finishReason = when {
-                isCancelled.get() -> FinishReason.CANCELLED
-                rawReason == 0 -> FinishReason.STOP
-                rawReason == 1 -> FinishReason.MAX_TOKENS
-                rawReason == 2 -> FinishReason.CANCELLED
-                else -> FinishReason.ERROR
-            }
+            val finishReason = finishReasonFromNative(rawReason, isCancelled.get())
             val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
             val durationMs = (NativeEngineHandle.nativeGetInferenceDurationUs(handle) / 1000L).coerceAtLeast(1L)
             val tokensPerSec = actualTokens * 1000.0 / durationMs
             val fullText = outputBuilder.toString()
 
             when (finishReason) {
-                FinishReason.CANCELLED -> emit(InferenceEvent.Cancelled(fullText, actualTokens))
-                FinishReason.ERROR -> emit(InferenceEvent.Error(
-                    IllegalStateException("Native generation ended with finish reason $rawReason"), fullText
-                ))
-                FinishReason.STOP, FinishReason.MAX_TOKENS -> emit(InferenceEvent.Completed(
-                    InferenceResult(fullText, actualTokens, durationMs, tokensPerSec, finishReason)
-                ))
+                FinishReason.CANCELLED -> {
+                    EngineDiagnostics.warn(
+                        "inference",
+                        "INFERENCE_CANCELLED",
+                        "tokens=$actualTokens;wallDurationMs=${(System.nanoTime() - inferenceStartedNanos) / 1_000_000L}"
+                    )
+                    emit(InferenceEvent.Cancelled(fullText, actualTokens))
+                }
+                FinishReason.ERROR -> {
+                    val error = IllegalStateException("Native generation ended with finish reason $rawReason")
+                    EngineDiagnostics.error("inference", "NATIVE_GENERATION_FAILED", error, "nativeFinishReason=$rawReason;tokens=$actualTokens")
+                    emit(InferenceEvent.Error(error, fullText))
+                }
+                FinishReason.STOP, FinishReason.MAX_TOKENS -> {
+                    EngineDiagnostics.info(
+                        "inference",
+                        "INFERENCE_COMPLETED",
+                        "finishReason=$finishReason;tokens=$actualTokens;durationMs=$durationMs;tokensPerSecond=${"%.3f".format(java.util.Locale.US, tokensPerSec)};wallDurationMs=${(System.nanoTime() - inferenceStartedNanos) / 1_000_000L}"
+                    )
+                    emit(InferenceEvent.Completed(
+                        InferenceResult(fullText, actualTokens, durationMs, tokensPerSec, finishReason)
+                    ))
+                }
             }
         } catch (e: CancellationException) {
+            EngineDiagnostics.warn("inference", "COROUTINE_CANCELLED", "partialOutputPresent=${outputBuilder.isNotEmpty()}")
             Log.i(TAG, "streamChat coroutine cancelled; notifying native engine")
             isCancelled.set(true)
             NativeEngineHandle.nativeCancel(handle)
             throw e
         } catch (t: Throwable) {
+            EngineDiagnostics.error("inference", "INFERENCE_FAILED", t, "partialOutputPresent=${outputBuilder.isNotEmpty()}")
             Log.e(TAG, "Error during inference", t)
             emit(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
@@ -326,6 +379,7 @@ internal class LocalLlmEngineImpl(
     }
 
     override fun cancelInference() {
+        EngineDiagnostics.warn("inference", "CANCEL_REQUESTED")
         isCancelled.set(true)
         synchronized(nativeHandleLock) {
             if (!isClosed.get()) {
@@ -346,6 +400,7 @@ internal class LocalLlmEngineImpl(
             }
         }
         if (!shouldClose) return
+        EngineDiagnostics.info("engine", "CLOSE_REQUESTED")
         _state.value = EngineState.Closed
         // Defer pointer destruction until the single engine dispatcher has left any JNI call.
         scope.launch {
@@ -354,6 +409,7 @@ internal class LocalLlmEngineImpl(
                 if (handle != 0L) NativeEngineHandle.nativeDestroyEngine(handle)
             }
             scope.cancel()
+            EngineDiagnostics.info("engine", "CLOSED")
             Log.i(TAG, "LocalLlmEngine closed")
         }
     }

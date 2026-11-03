@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.GgufHeaderValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -19,6 +21,8 @@ import java.util.UUID
 /** Imports model sources into app-private storage using staged, SHA-256-addressed files. */
 internal object ModelSourceResolver {
     suspend fun resolveToFile(context: Context, source: ModelSource): File = withContext(Dispatchers.IO) {
+        EngineDiagnostics.info("model-source", "RESOLUTION_STARTED", "sourceType=${source.javaClass.simpleName}")
+        try {
         val file = when (source) {
             is ModelSource.FilePath -> {
                 val candidate = source.file
@@ -41,7 +45,12 @@ internal object ModelSourceResolver {
             is ModelSource.RemoteUrl -> downloadRemote(context, source)
         }
         validateGgufHeader(file)
+        EngineDiagnostics.info("model-source", "RESOLUTION_SUCCEEDED", "sizeBytes=${file.length()}")
         file
+        } catch (error: Throwable) {
+            EngineDiagnostics.error("model-source", "RESOLUTION_FAILED", error)
+            throw error
+        }
     }
 
     private fun validateGgufHeader(file: File) {
@@ -51,7 +60,7 @@ internal object ModelSourceResolver {
         val magic = ByteArray(4)
         file.inputStream().use { input ->
             val count = input.read(magic)
-            require(count == 4 && magic.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46))) {
+            require(count == 4 && GgufHeaderValidator.isValid(magic, file.length())) {
                 "Invalid model file: GGUF magic header is missing"
             }
         }

@@ -10,6 +10,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.ChatMessage
 import com.mydocanizer.llm.engine.ChatRole
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceRequest
@@ -332,7 +333,20 @@ class DocAnizerViewModel(
         restartConversation()
     }
 
-
+    fun exportDiagnostics(destination: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                EngineDiagnostics.exportTo(getApplication<Application>(), destination)
+            }
+            result.onSuccess { byteCount ->
+                _statusMessage.value = "Diagnoseprotokoll exportiert ($byteCount Bytes)"
+                _errorMessage.value = null
+            }.onFailure { error ->
+                EngineDiagnostics.error("diagnostics", "EXPORT_FAILED", error)
+                _errorMessage.value = "Diagnoseprotokoll konnte nicht exportiert werden: ${error.message ?: error.javaClass.simpleName}"
+            }
+        }
+    }
 
     override fun onCleared() {
         super.onCleared()
