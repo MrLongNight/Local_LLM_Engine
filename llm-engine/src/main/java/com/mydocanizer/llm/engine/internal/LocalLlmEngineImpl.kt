@@ -196,9 +196,14 @@ internal class LocalLlmEngineImpl(
         val modelInfo = _currentModel.value
             ?: throw IllegalStateException("No model loaded. Call loadModel() before chat.")
         val handle = getValidHandle()
+        synchronized(nativeHandleLock) {
+            check(!isClosed.get()) { "Engine is closed" }
+            // Reset both flags under the same lock used by cancelInference()/close().
+            // This prevents a concurrent cancel from being cleared before native prefill.
+            isCancelled.set(false)
+            NativeEngineHandle.nativeResetCancellation(handle)
+        }
         _state.value = EngineState.Inferring(request)
-        isCancelled.set(false)
-        NativeEngineHandle.nativeResetCancellation(handle)
 
         val outputBuilder = StringBuilder()
         var tokenEventIndex = 0
