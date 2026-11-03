@@ -41,6 +41,9 @@ if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
     if(DEFINED ENV{SPIRV_HEADERS_INCLUDE_DIR})
         set(LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR "$ENV{SPIRV_HEADERS_INCLUDE_DIR}")
     endif()
+    if(DEFINED ENV{VULKAN_HEADERS_INCLUDE_DIR})
+        set(LOCAL_LLM_VULKAN_HEADERS_INCLUDE_DIR "$ENV{VULKAN_HEADERS_INCLUDE_DIR}")
+    endif()
 
     find_package(Vulkan COMPONENTS glslc QUIET)
     find_package(SPIRV-Headers CONFIG QUIET)
@@ -65,8 +68,15 @@ endif()
 
 add_subdirectory(${LLAMA_SRC} build-llama)
 
-if(TARGET ggml-vulkan AND LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR)
-    target_include_directories(ggml-vulkan SYSTEM PRIVATE "${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR}")
+if(TARGET ggml-vulkan)
+    if(LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR)
+        target_include_directories(ggml-vulkan SYSTEM PRIVATE "${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR}")
+    endif()
+    if(LOCAL_LLM_VULKAN_HEADERS_INCLUDE_DIR)
+        # Vulkan-Hpp is not shipped by the Android NDK; use Khronos headers only
+        # for compilation while keeping the Vulkan loader from the Android NDK.
+        target_include_directories(ggml-vulkan SYSTEM PRIVATE "${LOCAL_LLM_VULKAN_HEADERS_INCLUDE_DIR}")
+    endif()
 endif()
 
 add_library(localllm_engine SHARED

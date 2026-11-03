@@ -63,27 +63,30 @@ jobs:
       - name: Install Vulkan shader compiler and SPIR-V headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y glslc spirv-headers
+          sudo apt-get install -y glslc spirv-headers git
           SPIRV_HEADERS_INCLUDE_DIR=/usr/include
           if [ ! -f "$SPIRV_HEADERS_INCLUDE_DIR/spirv/unified1/spirv.hpp" ]; then
             echo "::error::SPIR-V unified headers are missing"
             dpkg -L spirv-headers || true
             exit 1
           fi
-          SPIRV_HEADERS_CMAKE_DIR="$(find /usr -name SPIRV-HeadersConfig.cmake -print -quit 2>/dev/null | xargs -r dirname)"
-          if [ -z "$SPIRV_HEADERS_CMAKE_DIR" ]; then
-            # Ubuntu's spirv-headers binary package may install headers without
-            # shipping Khronos' CMake package config. ggml-vulkan only needs the
-            # package marker plus the include directory supplied below.
-            SPIRV_HEADERS_CMAKE_DIR="$RUNNER_TEMP/spirv-headers-cmake"
-            mkdir -p "$SPIRV_HEADERS_CMAKE_DIR"
-            printf 'set(SPIRV-Headers_FOUND TRUE)\\n' > "$SPIRV_HEADERS_CMAKE_DIR/SPIRV-HeadersConfig.cmake"
+
+          # Vulkan-Hpp (vulkan.hpp) is not included in the Android NDK headers.
+          # Fetch the Khronos headers matching the Vulkan 1.3.275 generation used
+          # by the NDK; these are compile-time headers only, not a host loader.
+          VULKAN_HEADERS_DIR="$RUNNER_TEMP/Vulkan-Headers"
+          git clone --depth 1 --branch v1.3.275 https://github.com/KhronosGroup/Vulkan-Headers.git "$VULKAN_HEADERS_DIR"
+          VULKAN_HEADERS_INCLUDE_DIR="$VULKAN_HEADERS_DIR/include"
+          if [ ! -f "$VULKAN_HEADERS_INCLUDE_DIR/vulkan/vulkan.hpp" ]; then
+            echo "::error::Khronos Vulkan-Hpp header is missing"
+            exit 1
           fi
-          echo "SPIRV_HEADERS_CMAKE_DIR=$SPIRV_HEADERS_CMAKE_DIR" >> "$GITHUB_ENV"
+
           echo "SPIRV_HEADERS_INCLUDE_DIR=$SPIRV_HEADERS_INCLUDE_DIR" >> "$GITHUB_ENV"
+          echo "VULKAN_HEADERS_INCLUDE_DIR=$VULKAN_HEADERS_INCLUDE_DIR" >> "$GITHUB_ENV"
           echo "LOCAL_LLM_REQUIRE_VULKAN=1" >> "$GITHUB_ENV"
-          echo "Using SPIRV-Headers CMake package: $SPIRV_HEADERS_CMAKE_DIR"
           echo "Using SPIRV-Headers include directory: $SPIRV_HEADERS_INCLUDE_DIR"
+          echo "Using Vulkan-Hpp include directory: $VULKAN_HEADERS_INCLUDE_DIR"
           command -v glslc
 
       - name: Create temporary debug signing key
