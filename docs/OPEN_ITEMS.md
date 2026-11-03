@@ -2,7 +2,7 @@
 
 Stand: 03.11.2026
 Branch: `main`
-Aktueller Korrekturlauf basiert auf `07aed58fc19f58b2bc9db1fb31bd315cb1cff862`.
+Aktueller geprüfter Hauptstand vor dem nächsten Lauf: `59917925941f524bfafee7e324fcc1bee0c0f07a`.
 
 ## In den Korrekturläufen umgesetzt
 
@@ -26,13 +26,20 @@ Aktueller Korrekturlauf basiert auf `07aed58fc19f58b2bc9db1fb31bd315cb1cff862`.
 - Importierte Modelle geben die beim Import berechnete SHA-256-Prüfsumme weiter; dadurch entfällt das zweite vollständige Lesen der importierten GGUF-Datei.
 - Modellimporte prüfen den verfügbaren Speicher und halten eine Mindestreserve frei; der SAF-/Asset-/Remote-Input wird auch bei einem Fehler vor dem Kopieren geschlossen.
 - Chat-Autoscroll wird gebündelt statt pro Token neu animiert.
+- Inferenz- und Lifecycle-Methoden reichen Coroutine-Cancellation als CancellationException weiter, statt sie in Result.failure umzuwandeln.
+- Das Entladen eines Modells meldet Fehler korrekt, statt bei jedem Ausgang Erfolg in der Demo-App anzuzeigen.
+- Importierte Modellquellen geben die bereits beim Streaming berechnete SHA-256-Prüfsumme direkt an ModelInfo weiter; lokale FilePath-Modelle werden weiterhin gehasht.
+- Modellimporte reservieren mindestens 128 MiB freien App-Speicher und prüfen den freien Speicher in 16-MiB-Schritten erneut; SAF-/Asset-/Remote-Streams werden auch bei frühem Abbruch geschlossen.
+- Der native Samplerzustand (History/Repetition-Penalties) wird bei unabhängigen Requests und Lifecycle-Resets explizit zurückgesetzt.
 
 ## CI-Verifikation
 
-- Unit Tests #47 liefen erfolgreich auf Commit `07aed58fc19f58b2bc9db1fb31bd315cb1cff862`: [Run #47](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41594175452).
-- APK Build #16 kompilierte den Vulkan-C++-Quellcode, scheiterte anschließend jedoch beim nativen Linken mit `undefined symbol: vk::defaultDispatchLoaderDynamic`: [Run #16](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41594085549).
-- Der aktuelle Korrekturlauf verschiebt deshalb die Definition von `VULKAN_HPP_DEFAULT_DISPATCHER` vor den Vulkan-Hpp-Include. Dieser Stand muss noch durch den automatischen APK-Build bestätigt werden.
-- Ein installierbares APK und reale Geräte-Inferenz sind weiterhin nicht verifiziert.
+- Unit Tests #50 sind erfolgreich auf Commit `59917925941f524bfafee7e324fcc1bee0c0f07a`: [Run #50](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41595712956).
+- Android APK Build #18 ist erfolgreich auf Commit `a4fe58d692319e0e65b6bc9f80843aa9c0b95dd1`: [Run #18](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41595339179).
+- Der native Build lief für `arm64-v8a` (inkl. Vulkan) und `x86_64` durch. `app-debug.apk` wurde erzeugt und vom Workflow auf Existenz geprüft; Größe laut Runner: 93 MiB.
+- GitHub-Artefakt `Local-LMM-Engine-debug-apk`: 38.433.868 Bytes, SHA-256 des Artefakt-Archivs `852962c436da1a1e09f48d6bd77cee60b2975487ee5f698ce2e1da6332e97ea6`, verfügbar bis 17.11.2026.
+- Der APK-Build enthält denselben App-/Engine-Quellstand wie der aktuelle Hauptstand zum Zeitpunkt der Erstellung; der spätere Unterschied bis zum Unit-Test-Commit #50 war die Korrektur eines Test-Fixtures.
+- Build-Erfolg und Artefaktprüfung ersetzen weiterhin nicht die Installation und Inferenzprüfung auf einem realen Android-Gerät.
 
 ## Noch offen – nach Priorität
 

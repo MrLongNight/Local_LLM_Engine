@@ -247,8 +247,14 @@ class DocAnizerViewModel(
     fun unloadModel() {
         viewModelScope.launch {
             engine.unloadModel()
-            _statusMessage.value = "Modell entladen"
-            _errorMessage.value = null
+                .onSuccess {
+                    _statusMessage.value = "Modell entladen"
+                    _errorMessage.value = null
+                }
+                .onFailure { error ->
+                    _statusMessage.value = null
+                    _errorMessage.value = "Modell konnte nicht entladen werden: ${error.message ?: error.javaClass.simpleName}"
+                }
         }
     }
 

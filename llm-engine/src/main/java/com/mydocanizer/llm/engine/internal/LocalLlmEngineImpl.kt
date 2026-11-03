@@ -69,7 +69,7 @@ internal class LocalLlmEngineImpl(
     }
 
     override suspend fun initialize(): Result<Unit> = withContext(llamaDispatcher) {
-        runCatching {
+        runCatchingPreservingCancellation {
             check(!isClosed.get()) { "Engine is closed" }
             if (engineHandle.get() != 0L &&
                 (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded)
@@ -124,7 +124,7 @@ internal class LocalLlmEngineImpl(
         source: ModelSource,
         config: EngineConfig
     ): Result<ModelInfo> = withContext(llamaDispatcher) {
-        runCatching {
+        runCatchingPreservingCancellation {
             EngineDiagnostics.info(
                 "model",
                 "MODEL_LOAD_STARTED",
@@ -216,7 +216,7 @@ internal class LocalLlmEngineImpl(
     }
 
     override suspend fun unloadModel(): Result<Unit> = withContext(llamaDispatcher) {
-        runCatching {
+        runCatchingPreservingCancellation {
             check(!isClosed.get()) { "Engine is closed" }
             val handle = engineHandle.get()
             if (handle != 0L) {
@@ -360,7 +360,7 @@ internal class LocalLlmEngineImpl(
     }.flowOn(llamaDispatcher)
 
     override suspend fun generateChat(request: InferenceRequest): Result<InferenceResult> {
-        return runCatching {
+        return runCatchingPreservingCancellation {
             var completedResult: InferenceResult? = null
             var lastError: Throwable? = null
 
@@ -440,3 +440,17 @@ internal class LocalLlmEngineImpl(
         return h
     }
 }
+
+
+/**
+ * Converts ordinary failures into Result while preserving structured-concurrency cancellation.
+ * A cancelled caller must never receive a successful-looking Result.failure instead of cancellation.
+ */
+internal inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        Result.failure(error)
+    }

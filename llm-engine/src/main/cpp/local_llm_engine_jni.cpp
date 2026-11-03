@@ -73,6 +73,11 @@ struct EngineInstance {
     int32_t tokens_generated = 0;
 
     void reset_short_term() {
+        // Reset the sampler's repetition/grammar/history state whenever a new
+        // independent request or model lifecycle reset starts.
+        if (sampler) {
+            common_sampler_reset(sampler);
+        }
         max_predict_tokens = 1024;
         cached_token_chars.clear();
         assistant_ss.str("");

@@ -1,6 +1,9 @@
 package com.mydocanizer.llm.engine
 
+import com.mydocanizer.llm.engine.internal.runCatchingPreservingCancellation
+import java.util.concurrent.CancellationException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -51,6 +54,19 @@ class EngineValidationTest {
         assertEquals(BackendPreference.AUTO, BackendPreference.fromModeId(99))
         assertEquals(BackendPreference.VULKAN, BackendPreference.fromModeId(1))
         assertEquals(BackendPreference.CPU, BackendPreference.fromModeId(2))
+    }
+
+    @Test
+    fun coroutineCancellationIsRethrownInsteadOfConvertedToResultFailure() {
+        val cancellation = CancellationException("caller cancelled")
+        val thrown = runCatching {
+            runCatchingPreservingCancellation<Int> { throw cancellation }
+        }.exceptionOrNull()
+
+        assertSame(cancellation, thrown)
+        assertTrue(runCatchingPreservingCancellation<Int> {
+            throw IllegalStateException("ordinary failure")
+        }.isFailure)
     }
 
     @Test
