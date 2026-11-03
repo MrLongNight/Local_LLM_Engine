@@ -124,7 +124,8 @@ internal class LocalLlmEngineImpl(
         source: ModelSource,
         config: EngineConfig
     ): Result<ModelInfo> = withContext(llamaDispatcher) {
-        runCatchingPreservingCancellation {
+        try {
+            runCatchingPreservingCancellation {
             EngineDiagnostics.info(
                 "model",
                 "MODEL_LOAD_STARTED",
@@ -201,17 +202,30 @@ internal class LocalLlmEngineImpl(
                 Log.i(TAG, "Model loaded successfully: $info")
             }
             info
-        }.onFailure { err ->
-            EngineDiagnostics.error("model", "MODEL_LOAD_FAILED", err)
-            Log.e(TAG, "Model load failed", err)
+            }.onFailure { err ->
+                EngineDiagnostics.error("model", "MODEL_LOAD_FAILED", err)
+                Log.e(TAG, "Model load failed", err)
+                if (!isClosed.get()) {
+                    val stillLoadedModel = _currentModel.value
+                    _state.value = if (stillLoadedModel != null) {
+                        EngineState.ModelLoaded(stillLoadedModel)
+                    } else {
+                        EngineState.Error("Failed to load model: ${err.message}", err)
+                    }
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            // A cancelled import/load must not leave the public state stuck at LoadingModel.
             if (!isClosed.get()) {
                 val stillLoadedModel = _currentModel.value
                 _state.value = if (stillLoadedModel != null) {
                     EngineState.ModelLoaded(stillLoadedModel)
                 } else {
-                    EngineState.Error("Failed to load model: ${err.message}", err)
+                    EngineState.Ready
                 }
             }
+            EngineDiagnostics.warn("model", "MODEL_LOAD_CANCELLED")
+            throw cancelled
         }
     }
 

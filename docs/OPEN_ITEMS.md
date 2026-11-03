@@ -2,7 +2,7 @@
 
 Stand: 03.11.2026
 Branch: `main`
-Aktueller geprüfter Hauptstand vor dem nächsten Lauf: `59917925941f524bfafee7e324fcc1bee0c0f07a`.
+Aktueller geprüfter Hauptstand: `ac1b9d7c451f54b32067b63bb2bdb6371feebce2`.
 
 ## In den Korrekturläufen umgesetzt
 
@@ -34,12 +34,10 @@ Aktueller geprüfter Hauptstand vor dem nächsten Lauf: `59917925941f524bfafee7e
 
 ## CI-Verifikation
 
-- Unit Tests #50 sind erfolgreich auf Commit `59917925941f524bfafee7e324fcc1bee0c0f07a`: [Run #50](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41595712956).
-- Android APK Build #18 ist erfolgreich auf Commit `a4fe58d692319e0e65b6bc9f80843aa9c0b95dd1`: [Run #18](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41595339179).
-- Der native Build lief für `arm64-v8a` (inkl. Vulkan) und `x86_64` durch. `app-debug.apk` wurde erzeugt und vom Workflow auf Existenz geprüft; Größe laut Runner: 93 MiB.
-- GitHub-Artefakt `Local-LMM-Engine-debug-apk`: 38.433.868 Bytes, SHA-256 des Artefakt-Archivs `852962c436da1a1e09f48d6bd77cee60b2975487ee5f698ce2e1da6332e97ea6`, verfügbar bis 17.11.2026.
-- Der APK-Build enthält denselben App-/Engine-Quellstand wie der aktuelle Hauptstand zum Zeitpunkt der Erstellung; der spätere Unterschied bis zum Unit-Test-Commit #50 war die Korrektur eines Test-Fixtures.
-- Build-Erfolg und Artefaktprüfung ersetzen weiterhin nicht die Installation und Inferenzprüfung auf einem realen Android-Gerät.
+- Unit Tests #52 erfolgreich auf `ac1b9d7c451f54b32067b63bb2bdb6371feebce2`: [Run #52](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41599806870).
+- Android APK Build #20 erfolgreich auf demselben Commit: [Run #20](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41599806903).
+- APK-Artefakt `Local-LMM-Engine-debug-apk` wurde erzeugt und hochgeladen (38.435.095 Bytes, Archiv-SHA-256 `5fb85f3e75cdefd8a0957377e6565ed8b02d93f44a6f9706a449578a87c7dda0`), verfügbar bis 17.11.2026.
+- Der native Build enthält `arm64-v8a` inklusive erzwungenem Vulkan-Build sowie `x86_64`; der Workflow prüft die erzeugte APK auf Existenz. Das ist weiterhin kein Ersatz für die Installation und Inferenzprüfung auf einem realen Android-Gerät.
 
 ## Noch offen – nach Priorität
 
@@ -50,13 +48,14 @@ Aktueller geprüfter Hauptstand vor dem nächsten Lauf: `59917925941f524bfafee7e
 4. Modellwechsel auf Geräten mit knappem RAM testen: das transaktionale Laden hält das alte Modell bis zum erfolgreichen Wechsel im Speicher und kann dadurch vorübergehend mehr RAM benötigen.
 
 ### P1 – Native Sicherheit und Laufzeit
-5. AUTO-Fallback auch für Vulkan-Kontextinitialisierungsfehler absichern; bisher wird nach einem fehlgeschlagenen Vulkan-Modell-Load auf CPU zurückgefallen.
-6. JNI-Einstiegspunkte mit einer einheitlichen C++-Exception-Grenze absichern.
-7. Netzwerk-Read-Abbruch und Remote-Download-Timeouts auf realen Android-Geräten prüfen; Downloads sind nicht resumierbar.
-8. GGUF-Prüfung über Magic/Dateigröße hinaus um Header-/Metadaten-Grenzprüfungen erweitern.
-9. Native llama.cpp-Logcat-Ereignisse bei Bedarf zusätzlich in das exportierbare Diagnoseprotokoll übernehmen.
-10. Eine echte Inferenz-Deadline/Timeout-API ergänzen.
-11. Speicherreserve und Importabbruch mit großen Testdateien und knappem freien Speicher verifizieren.
+5. [x] Coroutine-Abbruch während Modellimport/-laden stellt den Engine-Zustand wieder her; die Demo-App darf Cancellation nicht als normalen Importfehler verschlucken.
+6. AUTO-Fallback auch für Vulkan-Kontextinitialisierungsfehler absichern; bisher wird nach einem fehlgeschlagenen Vulkan-Modell-Load auf CPU zurückgefallen.
+7. JNI-Einstiegspunkte mit einer einheitlichen C++-Exception-Grenze absichern.
+8. Netzwerk-Read-Abbruch und Remote-Download-Timeouts auf realen Android-Geräten prüfen; Downloads sind nicht resumierbar.
+9. GGUF-Prüfung über Magic/Dateigröße hinaus um Header-/Metadaten-Grenzprüfungen erweitern.
+10. Native llama.cpp-Logcat-Ereignisse bei Bedarf zusätzlich in das exportierbare Diagnoseprotokoll übernehmen.
+11. Eine echte Inferenz-Deadline/Timeout-API ergänzen.
+12. Speicherreserve und Importabbruch mit großen Testdateien und knappem freien Speicher verifizieren.
 
 ### P2 – API, Tests und weitere Optimierung
 12. Tool-/Function-Rollen und einen definierten Tool-Call-Vertrag ergänzen.

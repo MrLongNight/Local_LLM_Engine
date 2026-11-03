@@ -212,6 +212,9 @@ class DocAnizerViewModel(
                 }.onFailure { error ->
                     _errorMessage.value = "Modell konnte nicht geladen werden: ${error.message ?: "Unbekannter Fehler"}"
                 }
+            } catch (cancelled: CancellationException) {
+                // Preserve viewModelScope cancellation; do not turn it into a UI error.
+                throw cancelled
             } catch (error: Exception) {
                 Log.e(TAG, "Fehler beim Modellimport", error)
                 _errorMessage.value = "Import fehlgeschlagen: ${error.message ?: error.javaClass.simpleName}"
