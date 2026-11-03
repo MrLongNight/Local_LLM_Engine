@@ -344,7 +344,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     engine->batch = llama_batch_init(b_size, 0, 1);
     engine->is_batch_allocated = true;
 
-    engine->chat_templates = common_chat_templates_init(model, "");
+    // A malformed or unsupported GGUF Jinja template must not let a C++ exception
+    // cross the JNI boundary. Keep the model usable with the plain role/content format.
+    try {
+        engine->chat_templates = common_chat_templates_init(model, "");
+    } catch (const std::exception& error) {
+        LOGW("Could not initialize model chat template; using role/content fallback: %s", error.what());
+        engine->chat_templates.reset();
+    } catch (...) {
+        LOGW("Could not initialize model chat template; using role/content fallback");
+        engine->chat_templates.reset();
+    }
 
     common_params_sampling sparams;
     sparams.temp = temperature >= 0.0f ? temperature : DEFAULT_TEMP;
@@ -352,6 +362,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     engine->default_temperature = sparams.temp;
     engine->default_top_p = sparams.top_p;
     engine->sampler = common_sampler_init(model, sparams);
+    if (engine->sampler == nullptr) {
+        LOGE("Failed to initialize llama.cpp sampler");
+        engine->unload_locked();
+        return 6;
+    }
 
     engine->reset_short_term();
     engine->reset_long_term(true);
@@ -488,7 +503,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         env->DeleteLocalRef(jcontent);
     }
 
-    const bool has_chat_template = common_chat_templates_was_explicit(engine->chat_templates.get());
+    const bool has_chat_template = engine->chat_templates != nullptr &&
+            common_chat_templates_was_explicit(engine->chat_templates.get());
     // 2 = Jinja renderer, 1 = legacy template renderer, 0 = plain role/content fallback.
     int template_mode = has_chat_template ? 2 : 0;
 
