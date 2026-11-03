@@ -98,9 +98,14 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages.size, streamingText.length) {
-        if (messages.isNotEmpty() || streamingText.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size.coerceAtLeast(0))
+    // Follow the active message without starting a new animation for every token.
+    // The transient streaming/progress row exists only while generation is active.
+    LaunchedEffect(messages.size, streamingText.length / 80, isGenerating) {
+        if (messages.isNotEmpty()) {
+            val lastItemIndex = (
+                messages.size - 1 + if (isGenerating) 1 else 0
+            ).coerceAtLeast(0)
+            listState.animateScrollToItem(lastItemIndex)
         }
     }
 

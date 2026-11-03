@@ -18,19 +18,28 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
 
+/** Resolved model file and the hash calculated while importing, when applicable. */
+internal data class ResolvedModelFile(
+    val file: File,
+    val sha256: String?
+)
+
 /** Imports model sources into app-private storage using staged, SHA-256-addressed files. */
 internal object ModelSourceResolver {
-    suspend fun resolveToFile(context: Context, source: ModelSource): File = withContext(Dispatchers.IO) {
+    private const val MINIMUM_FREE_SPACE_BYTES = 128L * 1024L * 1024L
+    private const val STORAGE_CHECK_INTERVAL_BYTES = 16L * 1024L * 1024L
+
+    suspend fun resolve(context: Context, source: ModelSource): ResolvedModelFile = withContext(Dispatchers.IO) {
         EngineDiagnostics.info("model-source", "RESOLUTION_STARTED", "sourceType=${source.javaClass.simpleName}")
         try {
-        val file = when (source) {
+        val resolved = when (source) {
             is ModelSource.FilePath -> {
                 val candidate = source.file
                 require(candidate.exists() && candidate.isFile) {
                     "Model file does not exist or is not a regular file: ${source.path}"
                 }
                 require(candidate.canRead()) { "Cannot read model file at path: ${source.path}" }
-                candidate
+                ResolvedModelFile(candidate, sha256 = null)
             }
             is ModelSource.ContentUri -> {
                 val uri = Uri.parse(source.uriString)
@@ -44,9 +53,13 @@ internal object ModelSourceResolver {
             )
             is ModelSource.RemoteUrl -> downloadRemote(context, source)
         }
-        validateGgufHeader(file)
-        EngineDiagnostics.info("model-source", "RESOLUTION_SUCCEEDED", "sizeBytes=${file.length()}")
-        file
+        validateGgufHeader(resolved.file)
+        EngineDiagnostics.info(
+            "model-source",
+            "RESOLUTION_SUCCEEDED",
+            "sizeBytes=${resolved.file.length()};sha256Available=${resolved.sha256 != null}"
+        )
+        resolved
         } catch (error: Throwable) {
             EngineDiagnostics.error("model-source", "RESOLUTION_FAILED", error)
             throw error
@@ -66,7 +79,7 @@ internal object ModelSourceResolver {
         }
     }
 
-    private suspend fun downloadRemote(context: Context, source: ModelSource.RemoteUrl): File {
+    private suspend fun downloadRemote(context: Context, source: ModelSource.RemoteUrl): ResolvedModelFile {
         var currentUrl = URL(source.url)
         require(currentUrl.protocol.equals("https", ignoreCase = true)) {
             "Remote model URLs must use HTTPS"
@@ -115,27 +128,43 @@ internal object ModelSourceResolver {
         throw IOException("Model download did not complete")
     }
 
-    private suspend fun importStream(context: Context, input: java.io.InputStream, displayName: String): File {
+    private suspend fun importStream(
+        context: Context,
+        input: java.io.InputStream,
+        displayName: String
+    ): ResolvedModelFile = input.use { source ->
         val directory = File(context.filesDir, "models")
         check(directory.exists() || directory.mkdirs()) { "Could not create model storage directory" }
+        require(directory.usableSpace >= MINIMUM_FREE_SPACE_BYTES + STORAGE_CHECK_INTERVAL_BYTES) {
+            "Not enough free app storage to safely import this model; at least 144 MiB must remain available."
+        }
         val safeName = sanitizeModelName(displayName)
         val baseName = safeName.substringBeforeLast('.', safeName).take(72).ifBlank { "model" }
         val temporary = File(directory, ".${UUID.randomUUID()}.part")
         val jobContext = currentCoroutineContext()
         val digest = MessageDigest.getInstance("SHA-256")
         var copiedBytes = 0L
+        var nextStorageCheck = STORAGE_CHECK_INTERVAL_BYTES
         try {
-            input.use { source ->
-                FileOutputStream(temporary).buffered().use { output ->
-                    val buffer = ByteArray(1024 * 1024)
-                    while (true) {
-                        jobContext.ensureActive()
-                        val count = source.read(buffer)
-                        if (count < 0) break
-                        if (count == 0) continue
-                        digest.update(buffer, 0, count)
-                        output.write(buffer, 0, count)
-                        copiedBytes += count
+            FileOutputStream(temporary).buffered().use { output ->
+                val buffer = ByteArray(1024 * 1024)
+                while (true) {
+                    jobContext.ensureActive()
+                    val count = source.read(buffer)
+                    if (count < 0) break
+                    if (count == 0) continue
+                    digest.update(buffer, 0, count)
+                    output.write(buffer, 0, count)
+                    copiedBytes += count
+                    if (copiedBytes >= nextStorageCheck) {
+                        val freeBytes = directory.usableSpace
+                        if (freeBytes < MINIMUM_FREE_SPACE_BYTES + STORAGE_CHECK_INTERVAL_BYTES) {
+                            throw IOException(
+                                "Model import stopped to preserve free device storage " +
+                                    "(remaining=${freeBytes / (1024L * 1024L)} MiB)"
+                            )
+                        }
+                        nextStorageCheck = copiedBytes + STORAGE_CHECK_INTERVAL_BYTES
                     }
                 }
             }
@@ -145,12 +174,13 @@ internal object ModelSourceResolver {
             if (destination.exists()) {
                 require(destination.length() == copiedBytes) { "SHA-256 filename collision" }
                 temporary.delete()
-                return destination
+                ResolvedModelFile(destination, hash)
+            } else {
+                if (!temporary.renameTo(destination)) {
+                    throw IOException("Could not atomically finalize imported model file")
+                }
+                ResolvedModelFile(destination, hash)
             }
-            if (!temporary.renameTo(destination)) {
-                throw IOException("Could not atomically finalize imported model file")
-            }
-            return destination
         } catch (t: Throwable) {
             temporary.delete()
             throw t

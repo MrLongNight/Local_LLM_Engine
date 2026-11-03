@@ -133,8 +133,13 @@ internal class LocalLlmEngineImpl(
             val handle = getValidHandle()
             _state.value = EngineState.LoadingModel(source)
 
-            val file: File = ModelSourceResolver.resolveToFile(context, source)
-            EngineDiagnostics.info("model", "MODEL_FILE_READY", "sizeBytes=${file.length()}")
+            val resolvedFile = ModelSourceResolver.resolve(context, source)
+            val file = resolvedFile.file
+            EngineDiagnostics.info(
+                "model",
+                "MODEL_FILE_READY",
+                "sizeBytes=${file.length()};sha256Available=${resolvedFile.sha256 != null}"
+            )
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
             // Native loading is transactional: the current model remains active until
             // the replacement has fully initialized, or is restored on failure.
@@ -169,7 +174,9 @@ internal class LocalLlmEngineImpl(
             val architecture = NativeEngineHandle.nativeGetModelArchitecture(handle)
                 .ifBlank { "unknown" }
 
-            val sha256 = calculateSha256(file)
+            // Imports already calculate SHA-256 while streaming the source to app storage.
+            // Only direct FilePath sources need a separate pass over the model file.
+            val sha256 = resolvedFile.sha256 ?: calculateSha256(file)
 
             val info = ModelInfo(
                 name = file.name,

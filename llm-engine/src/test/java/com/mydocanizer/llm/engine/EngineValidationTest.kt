@@ -27,7 +27,7 @@ class EngineValidationTest {
             temperature = 0f,
             topP = 0f,
             maxPredictTokens = 1,
-            gpuLayers = 1
+            gpuLayers = 0
         )
         assertEquals(256, config.contextSize)
         assertEquals(64, config.batchSize)

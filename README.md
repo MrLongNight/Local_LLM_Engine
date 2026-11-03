@@ -36,17 +36,13 @@ gradle --no-daemon :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 
 This is a JVM/unit-test job. It does not build the native C++ libraries and does not prove that an APK can be installed or that inference works on a device.
 
-### Manual APK Build
+### Android APK Build
 
 Workflow: `.github/workflows/manual-apk.yml`
 
-1. Open the repository's **Actions** tab.
-2. Select **Manual Android APK Build**.
-3. Select **Run workflow** on the desired branch (only Debug is currently offered).
-4. Wait for the workflow to complete successfully.
-5. Download the `Local-LMM-Engine-debug-apk` artifact from the completed run.
+The workflow runs automatically on pushes to `main` when Android app/engine source, Gradle/toolchain configuration, or the workflow changes. It can also be started manually through **Actions → Android APK Build → Run workflow** (Debug only).
 
-The workflow builds `:app:assembleDebug`, including the configured native build, and uploads `app-debug.apk`. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days.
+The workflow builds `:app:assembleDebug`, including the native C++/Vulkan build, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
 
 ## Local commands
 

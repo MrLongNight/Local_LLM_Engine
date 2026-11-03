@@ -7,13 +7,10 @@
 
 // See https://github.com/KhronosGroup/Vulkan-Hpp?tab=readme-ov-file#extensions--per-device-function-pointers-
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
-// Include the complete Vulkan-Hpp dispatcher definition before accessing its
-// function-pointer members below. A forward declaration is not sufficient.
-#include <vulkan/vulkan.hpp>
-#include <stdexcept>
 
-// We use VULKAN_HPP_DEFAULT_DISPATCHER, but not VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
-// to avoid conflicts with applications or other libraries who might use it.
+// Select llama.cpp's dispatcher BEFORE Vulkan-Hpp is included. Otherwise
+// Vulkan-Hpp's inline functions bind to vk::defaultDispatchLoaderDynamic,
+// which this library intentionally does not define.
 #if VK_HEADER_VERSION >= 301
 namespace vk::detail { class DispatchLoaderDynamic; }
 using vk::detail::DispatchLoaderDynamic;
@@ -23,6 +20,11 @@ using vk::DispatchLoaderDynamic;
 #endif
 DispatchLoaderDynamic & ggml_vk_default_dispatcher();
 #define VULKAN_HPP_DEFAULT_DISPATCHER ggml_vk_default_dispatcher()
+
+// The type is complete here, while the dispatcher macro above was already
+// visible while Vulkan-Hpp defined its inline functions.
+#include <vulkan/vulkan.hpp>
+#include <stdexcept>
 
 // Android's API-24 Vulkan loader does not export every Vulkan 1.1 core
 // command as a link-time symbol. Resolve Features2 through the instance
