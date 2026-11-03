@@ -25,10 +25,6 @@ static constexpr int OVERFLOW_HEADROOM = 8;
 static constexpr int BATCH_SIZE = 512;
 static constexpr float DEFAULT_TEMP = 0.7f;
 
-static bool abort_decode(void* user_data) {
-    auto* engine = static_cast<EngineInstance*>(user_data);
-    return engine == nullptr || engine->cancel_requested.load(std::memory_order_acquire);
-}
 
 enum BackendMode {
     BACKEND_AUTO = 0,
@@ -122,6 +118,11 @@ struct EngineInstance {
         unload_locked();
     }
 };
+
+static bool abort_decode(void* user_data) {
+    auto* engine = static_cast<EngineInstance*>(user_data);
+    return engine == nullptr || engine->cancel_requested.load(std::memory_order_acquire);
+}
 
 static inline EngineInstance* fromHandle(jlong handle) {
     return reinterpret_cast<EngineInstance*>(handle);
