@@ -13,10 +13,10 @@ class DiagnosticLogFormatterTest {
         val directory = createTempDir(prefix = "llm-diagnostics-test")
         try {
             val previous = File(directory, "previous.log").apply {
-                writeText("older-event\\n")
+                writeText("older-event\n")
             }
             val current = File(directory, "current.log").apply {
-                writeText("newer-event\\n")
+                writeText("newer-event\n")
             }
 
             val snapshot = DiagnosticLogSnapshotter.capture(previous, current)

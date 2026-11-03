@@ -84,6 +84,9 @@ class DocAnizerViewModel(
     private val _currentStreamingText = MutableStateFlow("")
     val currentStreamingText: StateFlow<String> = _currentStreamingText.asStateFlow()
 
+    private val _inferenceProgress = MutableStateFlow<InferenceEvent.Progress?>(null)
+    val inferenceProgress: StateFlow<InferenceEvent.Progress?> = _inferenceProgress.asStateFlow()
+
     private val _engineConfig = MutableStateFlow(
         EngineConfig(
             contextSize = 4096,
@@ -274,6 +277,7 @@ class DocAnizerViewModel(
             ChatMessage.assistant("Gespräch neu gestartet. Wie kann ich dir behilflich sein?")
         )
         _currentStreamingText.value = ""
+        _inferenceProgress.value = null
         _inputText.value = ""
         _isGenerating.value = false
         _statusMessage.value = "Gespräch wurde zurückgesetzt"
@@ -294,6 +298,7 @@ class DocAnizerViewModel(
         _inputText.value = ""
         _isGenerating.value = true
         _currentStreamingText.value = ""
+        _inferenceProgress.value = null
         _errorMessage.value = null
 
         val messagesWithSystem = mutableListOf<ChatMessage>()
@@ -323,25 +328,42 @@ class DocAnizerViewModel(
                         streamBuilder.append(event.token)
                         _currentStreamingText.value = streamBuilder.toString()
                     }
+                    is InferenceEvent.Progress -> {
+                        _inferenceProgress.value = event
+                    }
                     is InferenceEvent.Completed -> {
                         val assistantMsg = ChatMessage.assistant(event.result.text)
                         _chatMessages.value = _chatMessages.value + assistantMsg
                         _currentStreamingText.value = ""
+                        _inferenceProgress.value = null
                         _isGenerating.value = false
                         Log.i(TAG, "Completed: ${event.result.tokensGenerated} tokens @ ${event.result.tokensPerSecond} t/s")
                     }
                     is InferenceEvent.Cancelled -> {
-                        val partial = if (event.partialText.isNotBlank()) {
-                            event.partialText + " [Abgebrochen]"
+                        val partialText = event.partialText.ifBlank { streamBuilder.toString() }
+                        val partial = if (partialText.isNotBlank()) {
+                            partialText + " [Abgebrochen]"
                         } else {
                             "[Generierung abgebrochen]"
                         }
                         _chatMessages.value = _chatMessages.value + ChatMessage.assistant(partial)
                         _currentStreamingText.value = ""
+                        _inferenceProgress.value = null
                         _isGenerating.value = false
                     }
                     is InferenceEvent.Error -> {
-                        _errorMessage.value = "Inferenz-Fehler: ${event.throwable.message}"
+                        // Keep generated text in the conversation; the streaming bubble is transient.
+                        val partialText = event.partialText.ifBlank { streamBuilder.toString() }
+                        if (partialText.isNotBlank()) {
+                            _chatMessages.value = _chatMessages.value + ChatMessage.assistant(
+                                "$partialText\\n\\n[Teilantwort – Inferenzfehler]"
+                            )
+                        }
+                        val reason = event.throwable.message ?: event.throwable.javaClass.simpleName
+                        EngineDiagnostics.error("chat", "VIEWMODEL_RECEIVED_INFERENCE_ERROR", event.throwable)
+                        _errorMessage.value = "Inferenz-Fehler: $reason"
+                        _currentStreamingText.value = ""
+                        _inferenceProgress.value = null
                         _isGenerating.value = false
                     }
                 }
@@ -357,6 +379,7 @@ class DocAnizerViewModel(
                 if (thisGeneration == generationSequence) {
                     _isGenerating.value = false
                     _currentStreamingText.value = ""
+                    _inferenceProgress.value = null
                     inferenceJob = null
                 }
             }

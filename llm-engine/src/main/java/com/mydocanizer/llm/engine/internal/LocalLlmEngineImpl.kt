@@ -322,8 +322,23 @@ internal class LocalLlmEngineImpl(
                 "maxPredictTokens=$effectiveMaxPredictTokens;promptDurationMs=$promptDurationMs"
             )
             // Native code enforces maxPredictTokens; UTF-8 chunks are not model-token counts.
+            // Some models emit control/reasoning tokens before visible text. Report native
+            // token progress independently so the UI cannot look frozen while this happens.
+            var lastProgressTokenCount = 0
             while (!isCancelled.get()) {
-                val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle) ?: break
+                val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
+                val generatedTokenCount = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
+                if (generatedTokenCount - lastProgressTokenCount >= 8) {
+                    val elapsedMs = (System.nanoTime() - inferenceStartedNanos) / 1_000_000L
+                    EngineDiagnostics.info(
+                        "inference",
+                        "TOKEN_GENERATION_PROGRESS",
+                        "nativeTokens=$generatedTokenCount;visibleCharacters=${outputBuilder.length};elapsedMs=$elapsedMs"
+                    )
+                    emit(InferenceEvent.Progress(generatedTokenCount, outputBuilder.length, elapsedMs))
+                    lastProgressTokenCount = generatedTokenCount
+                }
+                if (tokenPiece == null) break
                 if (tokenPiece.isNotEmpty()) {
                     outputBuilder.append(tokenPiece)
                     if (tokenEventIndex == 0) {
@@ -340,6 +355,15 @@ internal class LocalLlmEngineImpl(
             val rawReason = NativeEngineHandle.nativeGetLastFinishReason(handle)
             val finishReason = finishReasonFromNative(rawReason, isCancelled.get())
             val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
+            if (actualTokens > lastProgressTokenCount) {
+                val elapsedMs = (System.nanoTime() - inferenceStartedNanos) / 1_000_000L
+                EngineDiagnostics.info(
+                    "inference",
+                    "TOKEN_GENERATION_FINAL_PROGRESS",
+                    "nativeTokens=$actualTokens;visibleCharacters=${outputBuilder.length};elapsedMs=$elapsedMs"
+                )
+                emit(InferenceEvent.Progress(actualTokens, outputBuilder.length, elapsedMs))
+            }
             val durationMs = (NativeEngineHandle.nativeGetInferenceDurationUs(handle) / 1000L).coerceAtLeast(1L)
             val tokensPerSec = actualTokens * 1000.0 / durationMs
             val fullText = outputBuilder.toString()

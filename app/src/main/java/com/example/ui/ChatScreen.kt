@@ -78,6 +78,7 @@ fun ChatScreen(
     val inputText by viewModel.inputText.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
     val streamingText by viewModel.currentStreamingText.collectAsState()
+    val inferenceProgress by viewModel.inferenceProgress.collectAsState()
     val currentModel by viewModel.currentModel.collectAsState()
     val engineState by viewModel.engineState.collectAsState()
     val engineConfig by viewModel.engineConfig.collectAsState()
@@ -440,7 +441,9 @@ fun ChatScreen(
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Prompt wird verarbeitet – warte auf die erste Textausgabe…",
+                            text = inferenceProgress?.let { progress ->
+                                "Modell erzeugt Tokens, aber noch keine sichtbare Textausgabe: ${progress.tokensGenerated} Tokens, ${progress.elapsedMs / 1000}s"
+                            } ?: "Prompt wird verarbeitet – warte auf die erste Textausgabe…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.outline
                         )

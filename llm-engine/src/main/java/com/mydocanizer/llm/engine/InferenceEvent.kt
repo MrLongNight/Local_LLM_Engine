@@ -22,6 +22,16 @@ sealed interface InferenceEvent {
     data class Token(val token: String, val tokenIndex: Int) : InferenceEvent
 
     /**
+     * Native token progress when generated tokens have not yet produced visible UTF-8 text.
+     * This distinguishes control-token generation from a stalled stream.
+     */
+    data class Progress(
+        val tokensGenerated: Int,
+        val visibleCharacters: Int,
+        val elapsedMs: Long
+    ) : InferenceEvent
+
+    /**
      * Emitted when generation successfully finishes.
      *
      * @property result Final summary result.

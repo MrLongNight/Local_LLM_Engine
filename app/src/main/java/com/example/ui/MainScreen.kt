@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mydocanizer.llm.engine.EngineDiagnostics
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +42,10 @@ fun MainScreen(
     val currentTab: AppTab by viewModel.currentTab.collectAsState()
     val statusMessage: String? by viewModel.statusMessage.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(currentTab) {
+        EngineDiagnostics.info("ui", "TAB_CONTENT_RENDER_REQUESTED", "tab=$currentTab")
+    }
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let {
