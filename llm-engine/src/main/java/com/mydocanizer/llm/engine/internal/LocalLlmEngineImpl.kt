@@ -141,7 +141,7 @@ internal class LocalLlmEngineImpl(
                 "MODEL_FILE_READY",
                 "sizeBytes=${file.length()};sha256Available=${resolvedFile.sha256 != null}"
             )
-            Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
+            Log.i(TAG, "Loading model file (${file.length()} bytes)")
             // Native loading is transactional: the current model remains active until
             // the replacement has fully initialized, or is restored on failure.
             val ret = NativeEngineHandle.nativeLoadModel(
@@ -199,12 +199,12 @@ internal class LocalLlmEngineImpl(
                     "MODEL_LOAD_SUCCEEDED",
                     "sizeBytes=${info.sizeBytes};architecture=${info.architecture};backend=${info.activeBackend};sha256=${info.sha256?.take(16) ?: "unavailable"};trainContext=${info.contextLengthTrain}"
                 )
-                Log.i(TAG, "Model loaded successfully: $info")
+                Log.i(TAG, "Model loaded successfully: ${info.name}; backend=${info.activeBackend}; sizeBytes=${info.sizeBytes}")
             }
             info
             }.onFailure { err ->
                 EngineDiagnostics.error("model", "MODEL_LOAD_FAILED", err)
-                Log.e(TAG, "Model load failed", err)
+                Log.e(TAG, "Model load failed (${err.javaClass.simpleName})")
                 if (!isClosed.get()) {
                     val stillLoadedModel = _currentModel.value
                     _state.value = if (stillLoadedModel != null) {

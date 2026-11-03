@@ -39,9 +39,12 @@ class LocalLlmEngineApiTest {
     fun testChatMessageCreation() {
         val sysMsg = ChatMessage.system("System instruction")
         val userMsg = ChatMessage.user("Hello model")
+        val developerMsg = ChatMessage.developer("Follow this developer instruction")
         val assistantMsg = ChatMessage.assistant("Hello user")
 
         assertEquals(ChatRole.SYSTEM, sysMsg.role)
+        assertEquals(ChatRole.DEVELOPER, developerMsg.role)
+        assertEquals(ChatRole.DEVELOPER, ChatRole.fromString("developer"))
         assertEquals(ChatRole.USER, userMsg.role)
         assertEquals(ChatRole.ASSISTANT, assistantMsg.role)
         assertEquals("Hello model", userMsg.content)

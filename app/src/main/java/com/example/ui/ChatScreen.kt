@@ -525,7 +525,7 @@ fun ChatBubble(
     modifier: Modifier = Modifier
 ) {
     val isUser = message.role == ChatRole.USER
-    val isSystem = message.role == ChatRole.SYSTEM
+    val isSystem = message.role == ChatRole.SYSTEM || message.role == ChatRole.DEVELOPER
 
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val bgColor = when {
@@ -561,6 +561,7 @@ fun ChatBubble(
                     ChatRole.USER -> "Du"
                     ChatRole.ASSISTANT -> if (isStreaming) "Assistent (Streaming...)" else "Assistent"
                     ChatRole.SYSTEM -> "System-Instruktion"
+                    ChatRole.DEVELOPER -> "Developer-Instruktion"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline

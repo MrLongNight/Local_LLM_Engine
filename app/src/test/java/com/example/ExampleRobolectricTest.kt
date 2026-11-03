@@ -5,8 +5,6 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.ui.AppTab
 import com.example.ui.DocAnizerViewModel
 import com.mydocanizer.llm.engine.ChatRole
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -25,9 +23,6 @@ class ExampleRobolectricTest {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val appName = application.getString(R.string.app_name)
         assertEquals("Local LLM Engine", appName)
-
-        val vaultTitle = application.getString(R.string.vault_title)
-        assertEquals("Dokumenten Tresor", vaultTitle)
 
         val chatNav = application.getString(R.string.nav_chat)
         assertNotNull(chatNav)

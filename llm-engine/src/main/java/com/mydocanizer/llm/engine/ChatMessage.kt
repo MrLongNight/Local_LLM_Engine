@@ -5,6 +5,7 @@ package com.mydocanizer.llm.engine
  */
 enum class ChatRole(val roleName: String) {
     SYSTEM("system"),
+    DEVELOPER("developer"),
     USER("user"),
     ASSISTANT("assistant");
 
@@ -28,6 +29,7 @@ data class ChatMessage(
 ) {
     companion object {
         fun system(content: String): ChatMessage = ChatMessage(ChatRole.SYSTEM, content)
+        fun developer(content: String): ChatMessage = ChatMessage(ChatRole.DEVELOPER, content)
         fun user(content: String): ChatMessage = ChatMessage(ChatRole.USER, content)
         fun assistant(content: String): ChatMessage = ChatMessage(ChatRole.ASSISTANT, content)
     }

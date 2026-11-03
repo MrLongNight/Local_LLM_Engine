@@ -216,7 +216,7 @@ class DocAnizerViewModel(
                 // Preserve viewModelScope cancellation; do not turn it into a UI error.
                 throw cancelled
             } catch (error: Exception) {
-                Log.e(TAG, "Fehler beim Modellimport", error)
+                Log.e(TAG, "Fehler beim Modellimport (${error.javaClass.simpleName})")
                 _errorMessage.value = "Import fehlgeschlagen: ${error.message ?: error.javaClass.simpleName}"
             } finally {
                 _isImporting.value = false

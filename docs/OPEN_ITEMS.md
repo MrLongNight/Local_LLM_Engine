@@ -2,7 +2,7 @@
 
 Stand: 03.11.2026
 Branch: `main`
-Aktueller geprüfter Hauptstand: `ac1b9d7c451f54b32067b63bb2bdb6371feebce2`.
+Aktueller geprüfter Hauptstand: `47e3bd918de4f1f80c3a71bac10089b47edb05c0`.
 
 ## In den Korrekturläufen umgesetzt
 
@@ -31,12 +31,17 @@ Aktueller geprüfter Hauptstand: `ac1b9d7c451f54b32067b63bb2bdb6371feebce2`.
 - Importierte Modellquellen geben die bereits beim Streaming berechnete SHA-256-Prüfsumme direkt an ModelInfo weiter; lokale FilePath-Modelle werden weiterhin gehasht.
 - Modellimporte reservieren mindestens 128 MiB freien App-Speicher und prüfen den freien Speicher in 16-MiB-Schritten erneut; SAF-/Asset-/Remote-Streams werden auch bei frühem Abbruch geschlossen.
 - Der native Samplerzustand (History/Repetition-Penalties) wird bei unabhängigen Requests und Lifecycle-Resets explizit zurückgesetzt.
+- Abbruch während eines Modellimports/-ladens stellt den Engine-State wieder her; die Demo-App verschluckt Coroutine-Cancellation nicht.
+- Bereits vorhandene SHA-256-importierte Modelldateien werden vor Wiederverwendung vollständig gegen den erwarteten Hash geprüft.
+- Modelldateipfade und das vollständige ModelInfo-Objekt werden nicht mehr in Logcat geschrieben.
+- Die öffentliche Chat-API unterstützt jetzt auch die native Developer-Rolle.
+- Nicht mehr verwendete Dokumenten-Tresor-Resource und Google-Services-Gradle-Altlast entfernt.
 
 ## CI-Verifikation
 
-- Unit Tests #52 erfolgreich auf `ac1b9d7c451f54b32067b63bb2bdb6371feebce2`: [Run #52](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41599806870).
-- Android APK Build #20 erfolgreich auf demselben Commit: [Run #20](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41599806903).
-- APK-Artefakt `Local-LMM-Engine-debug-apk` wurde erzeugt und hochgeladen (38.435.095 Bytes, Archiv-SHA-256 `5fb85f3e75cdefd8a0957377e6565ed8b02d93f44a6f9706a449578a87c7dda0`), verfügbar bis 17.11.2026.
+- Unit Tests #53 erfolgreich auf `47e3bd918de4f1f80c3a71bac10089b47edb05c0`: [Run #53](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41617797814).
+- Android APK Build #21 erfolgreich auf demselben Commit: [Run #21](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41617797810).
+- APK-Artefakt `Local-LMM-Engine-debug-apk` wurde erzeugt und hochgeladen (38.435.107 Bytes, Archiv-SHA-256 `be8fc02e039725c2fe076d247ba4694cc7babd8f2aedd8a71978a8d492f839a4`), verfügbar bis 17.11.2026.
 - Der native Build enthält `arm64-v8a` inklusive erzwungenem Vulkan-Build sowie `x86_64`; der Workflow prüft die erzeugte APK auf Existenz. Das ist weiterhin kein Ersatz für die Installation und Inferenzprüfung auf einem realen Android-Gerät.
 
 ## Noch offen – nach Priorität
@@ -48,14 +53,13 @@ Aktueller geprüfter Hauptstand: `ac1b9d7c451f54b32067b63bb2bdb6371feebce2`.
 4. Modellwechsel auf Geräten mit knappem RAM testen: das transaktionale Laden hält das alte Modell bis zum erfolgreichen Wechsel im Speicher und kann dadurch vorübergehend mehr RAM benötigen.
 
 ### P1 – Native Sicherheit und Laufzeit
-5. [x] Coroutine-Abbruch während Modellimport/-laden stellt den Engine-Zustand wieder her; die Demo-App darf Cancellation nicht als normalen Importfehler verschlucken.
-6. AUTO-Fallback auch für Vulkan-Kontextinitialisierungsfehler absichern; bisher wird nach einem fehlgeschlagenen Vulkan-Modell-Load auf CPU zurückgefallen.
-7. JNI-Einstiegspunkte mit einer einheitlichen C++-Exception-Grenze absichern.
-8. Netzwerk-Read-Abbruch und Remote-Download-Timeouts auf realen Android-Geräten prüfen; Downloads sind nicht resumierbar.
-9. GGUF-Prüfung über Magic/Dateigröße hinaus um Header-/Metadaten-Grenzprüfungen erweitern.
-10. Native llama.cpp-Logcat-Ereignisse bei Bedarf zusätzlich in das exportierbare Diagnoseprotokoll übernehmen.
-11. Eine echte Inferenz-Deadline/Timeout-API ergänzen.
-12. Speicherreserve und Importabbruch mit großen Testdateien und knappem freien Speicher verifizieren.
+5. AUTO-Fallback auch für Vulkan-Kontextinitialisierungsfehler absichern; bisher wird nach einem fehlgeschlagenen Vulkan-Modell-Load auf CPU zurückgefallen.
+6. JNI-Einstiegspunkte mit einer einheitlichen C++-Exception-Grenze absichern.
+7. Netzwerk-Read-Abbruch und Remote-Download-Timeouts auf realen Android-Geräten prüfen; Downloads sind nicht resumierbar.
+8. GGUF-Prüfung über Magic/Dateigröße hinaus um Header-/Metadaten-Grenzprüfungen erweitern.
+9. Native llama.cpp-Logcat-Ereignisse bei Bedarf zusätzlich in das exportierbare Diagnoseprotokoll übernehmen.
+10. Eine echte Inferenz-Deadline/Timeout-API ergänzen.
+11. Speicherreserve und Importabbruch mit großen Testdateien und knappem freien Speicher verifizieren.
 
 ### P2 – API, Tests und weitere Optimierung
 12. Tool-/Function-Rollen und einen definierten Tool-Call-Vertrag ergänzen.

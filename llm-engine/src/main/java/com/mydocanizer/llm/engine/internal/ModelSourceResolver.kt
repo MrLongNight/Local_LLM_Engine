@@ -173,6 +173,9 @@ internal object ModelSourceResolver {
             val destination = File(directory, "$baseName-$hash.gguf")
             if (destination.exists()) {
                 require(destination.length() == copiedBytes) { "SHA-256 filename collision" }
+                require(sha256File(destination) == hash) {
+                    "An existing imported model file failed SHA-256 verification"
+                }
                 temporary.delete()
                 ResolvedModelFile(destination, hash)
             } else {
@@ -185,6 +188,19 @@ internal object ModelSourceResolver {
             temporary.delete()
             throw t
         }
+    }
+
+    internal fun sha256File(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count > 0) digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun sanitizeModelName(value: String): String {
