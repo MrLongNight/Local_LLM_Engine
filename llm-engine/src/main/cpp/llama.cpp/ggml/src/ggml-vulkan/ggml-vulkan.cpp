@@ -7,8 +7,10 @@
 
 // See https://github.com/KhronosGroup/Vulkan-Hpp?tab=readme-ov-file#extensions--per-device-function-pointers-
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
-// We use VULKAN_HPP_DEFAULT_DISPATCHER, but not VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
-// to avoid conflicts with applications or other libraries who might use it.
+
+// Select llama.cpp's dispatcher BEFORE Vulkan-Hpp is included. Otherwise
+// Vulkan-Hpp's inline functions bind to vk::defaultDispatchLoaderDynamic,
+// which this library intentionally does not define.
 #if VK_HEADER_VERSION >= 301
 namespace vk::detail { class DispatchLoaderDynamic; }
 using vk::detail::DispatchLoaderDynamic;
@@ -19,7 +21,24 @@ using vk::DispatchLoaderDynamic;
 DispatchLoaderDynamic & ggml_vk_default_dispatcher();
 #define VULKAN_HPP_DEFAULT_DISPATCHER ggml_vk_default_dispatcher()
 
+// The type is complete here, while the dispatcher macro above was already
+// visible while Vulkan-Hpp defined its inline functions.
 #include <vulkan/vulkan.hpp>
+#include <stdexcept>
+
+// Android's API-24 Vulkan loader does not export every Vulkan 1.1 core
+// command as a link-time symbol. Resolve Features2 through the instance
+// dispatcher initialized with vkGetInstanceProcAddr instead of referencing
+// vkGetPhysicalDeviceFeatures2 directly from libvulkan.so.
+static void ggml_vk_get_physical_device_features2(
+        VkPhysicalDevice physical_device,
+        VkPhysicalDeviceFeatures2* features) {
+    const auto function = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2;
+    if (function == nullptr) {
+        throw std::runtime_error("Vulkan vkGetPhysicalDeviceFeatures2 entrypoint is unavailable");
+    }
+    function(physical_device, features);
+}
 
 // Fallback definitions for VK_NV_cooperative_matrix_decode_vector in case the
 // installed Vulkan headers predate the extension.
@@ -6185,7 +6204,7 @@ static vk_device ggml_vk_get_device(size_t idx) {
         }
 #endif
 
-        vkGetPhysicalDeviceFeatures2(device->physical_device, &device_features2);
+        ggml_vk_get_physical_device_features2(device->physical_device, &device_features2);
 
         device->pipeline_executable_properties_support = pipeline_executable_properties_support;
 
@@ -6755,7 +6774,7 @@ static void ggml_vk_print_gpu_info(size_t idx) {
         last_struct = (VkBaseOutStructure *)&dot2_features;
     }
 
-    vkGetPhysicalDeviceFeatures2(physical_device, &device_features2);
+    ggml_vk_get_physical_device_features2(physical_device, &device_features2);
 
     fp16 = fp16 && vk12_features.shaderFloat16;
 
@@ -18004,7 +18023,7 @@ static bool ggml_vk_device_is_supported(const vk::PhysicalDevice & vkdev) {
     vk11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     device_features2.pNext = &vk11_features;
 
-    vkGetPhysicalDeviceFeatures2(vkdev, &device_features2);
+    ggml_vk_get_physical_device_features2(vkdev, &device_features2);
 
     return vk11_features.storageBuffer16BitAccess;
 }

@@ -10,15 +10,37 @@ class LocalLlmEngineApiTest {
     @Test
     fun testEngineConfigDefaults() {
         val config = EngineConfig()
-        assertEquals(4096, config.contextSize)
-        assertEquals(512, config.batchSize)
+        assertEquals(2048, config.contextSize)
+        assertEquals(128, config.batchSize)
         assertEquals(4, config.threads)
         assertEquals(0.7f, config.temperature, 0.001f)
-        assertEquals(1024, config.maxPredictTokens)
-        assertEquals(BackendPreference.AUTO, config.backendPreference)
-        assertEquals(99, config.gpuLayers)
+        assertEquals(512, config.maxPredictTokens)
+        assertEquals(BackendPreference.CPU, config.backendPreference)
+        assertEquals(16, config.gpuLayers)
     }
 
+
+    @Test
+    fun testSamplingParametersAreValidated() {
+        assertTrue(runCatching { EngineConfig(topP = 1.01f) }.isFailure)
+        assertTrue(runCatching { EngineConfig(temperature = Float.NaN) }.isFailure)
+        assertTrue(
+            runCatching {
+                InferenceRequest(
+                    messages = listOf(ChatMessage.user("Hello")),
+                    temperature = Float.NaN
+                )
+            }.isFailure
+        )
+        assertTrue(
+            runCatching {
+                InferenceRequest(
+                    messages = listOf(ChatMessage.user("Hello")),
+                    topP = 1.01f
+                )
+            }.isFailure
+        )
+    }
 
     @Test
     fun testChatMessageCreation() {
@@ -38,7 +60,7 @@ class LocalLlmEngineApiTest {
         assertEquals(2, request.messages.size)
         assertEquals(ChatRole.SYSTEM, request.messages[0].role)
         assertEquals(ChatRole.USER, request.messages[1].role)
-        assertEquals(1024, request.maxPredictTokens)
+        assertEquals(512, request.maxPredictTokens)
     }
 
     @Test

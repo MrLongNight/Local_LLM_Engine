@@ -56,6 +56,17 @@ Geprüfter Ausgangsstand: `a754052304db19f8411a3555598016d8758e8943`.
 
 Task 1 darf erst nach Behebung des Service-Lifecycle-Fehlers und einem echten Android-Prozesstest als abgeschlossen gelten. Die Umstellung der produktiven Factory-Aufrufer und der echte Prozessabbruch sind zusätzlich separat zu prüfen.
 
+## Nachaudit Task 1 – zusätzliche Regressionen
+
+Geprüfter Implementierungscommit: `a754052304db19f8411a3555598016d8758e8943`.
+
+- Der Task-1-Commit änderte zwei Dateien unter `llm-engine/src/main/cpp/llama.cpp/ggml/` und löschte vier weitere Vendor-Dateien. Diese Änderungen waren für die IPC-Grundlage nicht erforderlich und werden auf den vorherigen Stand zurückgesetzt.
+- Insbesondere entfernte die Änderung in `ggml-vulkan.cpp` den dynamisch aufgelösten `vkGetPhysicalDeviceFeatures2`-Aufruf für Android API 24 und verwendete stattdessen einen direkten Symbolaufruf. Die vorherige API-24-Kompatibilitätsbehandlung bleibt erhalten.
+- Der Buildfehler `SPIRV-HeadersConfig.cmake` entstand durch eine neu eingeführte Package-Abhängigkeit im Vendor-CMake. Die ursprüngliche Header-Verzeichnis-Konfiguration genügt; der zusätzliche CMake-Paket-Installationsschritt wird entfernt. Vulkan bleibt für ARM64 aktiviert.
+- Der Task-1-Commit änderte außerdem die Engine-Defaults von CPU / Kontext 2048 / Batch 128 / 512 Ausgabetokens / 16 GPU-Layer auf AUTO / 4096 / 512 / 1024 / 99. Das wird auf die zuvor vorhandenen konservativen CPU-Defaults zurückgestellt. Vulkan und manuelle Vulkan-Auswahl bleiben verfügbar.
+- Eingabevalidierung für endliche Temperatur-, Top-P- und GPU-Layer-Werte wird wiederhergestellt und mit API-Tests abgesichert.
+- Zusätzlich wurden vier bestehende Engine-Tests entfernt. Diese Testlücken sind noch nicht vollständig rückgeführt und müssen nach dem Build-Fix gesondert abgearbeitet werden.
+
 ## Gerätefehler vom 03.11.2026
 
 - Diagnose vom nubia Z2462N: Qwen3-GGUF mit ca. 2,5 GB lädt über Vulkan; Prompt-Evaluation endet mit Code 0. Der Prozess startet während der nativen Token-Generierung neu. Im exportierten App-Log steht kein regulärer Kotlin-/JNI-Fehler.
@@ -66,7 +77,9 @@ Task 1 darf erst nach Behebung des Service-Lifecycle-Fehlers und einem echten An
 ## CI-Verifikation
 
 - Auf dem Audit-Ausgangscommit `a754052304db19f8411a3555598016d8758e8943` schlugen Unit Tests #66 und APK Build #32 fehl. Unit Tests #66: drei Robolectric-Tests wählten wegen fest verdrahtetem `robolectric.dependency.dir=/home/appuser/.m2/repository` den lokalen Resolver auf dem GitHub-Runner. APK Build #32: `find_package(SPIRV-Headers CONFIG REQUIRED)` fand keine Package-Konfiguration, weil nur das Header-Repository geklont, aber nicht als CMake-Paket installiert wurde.
-- Die beiden Ursachen werden im nachfolgenden Build-Fix-Commit getrennt behoben. Erst die anschließenden Actions-Ergebnisse entscheiden über den tatsächlichen Status.
+- Build-Fix-Versuch `e886268`: Unit Tests #67 und APK Build #33 scheiterten bereits beim Kompilieren von `app/build.gradle.kts` (`java.io.File` im Kotlin-DSL-Skript nicht aufgelöst).
+- Korrektur `2a411b1`: Unit Tests #68 erfolgreich; APK Build #34 scheiterte anschließend beim Auffinden von `SPIRV-HeadersConfig.cmake`, obwohl der Workflow die Package-Konfiguration installiert hatte.
+- Der nächste Fix entfernt die unnötige `find_package(SPIRV-Headers)`-Abhängigkeit durch Wiederherstellung der vorherigen Header-Include-Konfiguration; danach müssen Unit- und APK-Actions erneut erfolgreich sein.
 - Unit Tests #60 erfolgreich auf `48f8fb8b2d4d11e96eb350cd823712e10a2c0027`: [Run #60](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402289).
 - Android APK Build #28 erfolgreich auf demselben Commit: [Run #28](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402174).
 - Unit Tests #63 erfolgreich auf `aaaef521170cad70ce9c1d36eb8bfd4d6592c880`: [Run #63](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41688075347).
