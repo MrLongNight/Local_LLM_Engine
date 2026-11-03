@@ -88,8 +88,7 @@ struct EngineInstance {
         current_position -= n_discard;
     }
 
-    void unload() {
-        std::lock_guard<std::mutex> lock(mtx);
+    void unload_locked() {
         reset_short_term();
         reset_long_term(false);
 
@@ -111,6 +110,11 @@ struct EngineInstance {
             model = nullptr;
         }
         active_backend = "None";
+    }
+
+    void unload() {
+        std::lock_guard<std::mutex> lock(mtx);
+        unload_locked();
     }
 };
 
@@ -255,7 +259,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     if (!engine) return 1;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
-    engine->unload();
+    engine->unload_locked();
 
     const char* model_path = env->GetStringUTFChars(jmodel_path, nullptr);
     if (!model_path) return 2;
