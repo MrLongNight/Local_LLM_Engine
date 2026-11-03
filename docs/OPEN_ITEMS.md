@@ -2,7 +2,7 @@
 
 Stand: 03.11.2026
 Branch: `main`
-Vorheriger App-/Engine-Quellstand: `47632ee5f4137c17a5c273ed496f5cd52accfc4c`.
+App-/Engine-Quellstand für APK Build #30: `aaaef521170cad70ce9c1d36eb8bfd4d6592c880`.
 
 ## In den Korrekturläufen umgesetzt
 
@@ -28,6 +28,9 @@ Vorheriger App-/Engine-Quellstand: `47632ee5f4137c17a5c273ed496f5cd52accfc4c`.
 - Chat-Autoscroll wird gebündelt statt pro Token neu animiert.
 - Inferenz- und Lifecycle-Methoden reichen Coroutine-Cancellation als CancellationException weiter, statt sie in Result.failure umzuwandeln.
 - Das Entladen eines Modells meldet Fehler korrekt, statt bei jedem Ausgang Erfolg in der Demo-App anzuzeigen.
+- Die Chat-Oberfläche zeigt den Fortschritt nativer Tokens auch dann, wenn noch kein sichtbarer UTF-8-Text entstanden ist; Teilantworten bleiben bei späteren Inferenzfehlern erhalten.
+- Der Diagnose-Export ist zusätzlich direkt über die obere App-Leiste erreichbar und hängt nicht mehr davon ab, dass der Settings-Bildschirm geöffnet werden kann.
+- Die obere Titelleiste kennzeichnet den aktiven Bereich (Chat, Modell-Import oder Einstellungen); Tab-Wechsel werden an Auswahl, Render-Anforderung und sichtbarem Settings-Screen protokolliert.
 - Importierte Modellquellen geben die bereits beim Streaming berechnete SHA-256-Prüfsumme direkt an ModelInfo weiter; lokale FilePath-Modelle werden weiterhin gehasht.
 - Modellimporte reservieren mindestens 128 MiB freien App-Speicher und prüfen den freien Speicher in 16-MiB-Schritten erneut; SAF-/Asset-/Remote-Streams werden auch bei frühem Abbruch geschlossen.
 - Der native Samplerzustand (History/Repetition-Penalties) wird bei unabhängigen Requests und Lifecycle-Resets explizit zurückgesetzt.
@@ -41,6 +44,8 @@ Vorheriger App-/Engine-Quellstand: `47632ee5f4137c17a5c273ed496f5cd52accfc4c`.
 
 - Unit Tests #60 erfolgreich auf `48f8fb8b2d4d11e96eb350cd823712e10a2c0027`: [Run #60](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402289).
 - Android APK Build #28 erfolgreich auf demselben Commit: [Run #28](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402174).
+- Unit Tests #63 erfolgreich auf `aaaef521170cad70ce9c1d36eb8bfd4d6592c880`: [Run #63](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41688075347).
+- Android APK Build #30 erfolgreich auf demselben Commit; APK-Artefakt `Local-LMM-Engine-debug-apk` vorhanden (38.445.110 Bytes, Archiv-SHA-256 `0b6920ecf3ce77deaf42f380df9c78be2b9b5164c5ff83f6d0e84a5565e67ea2`), verfügbar bis 17.11.2026: [Run #30](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41688075363).
 - Unit Tests #62 erfolgreich auf `27966cd62855af7df4a7e744c3ae5c4891d5c6bf`: [Run #62](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41687470987).
 - Unit Tests #61 auf `47632ee5f4137c17a5c273ed496f5cd52accfc4c`: Kotlin-Compile erfolgreich; ein Log-Snapshot-Test schlug wegen uneinheitlicher Newline-Testdaten fehl: [Run #61](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41686101022).
 - Android APK Build #29 auf demselben Commit erfolgreich; APK-Artefakt `Local-LMM-Engine-debug-apk` vorhanden (38.444.545 Bytes, Archiv-SHA-256 `f5042ce8a717d276aa058a0600854a1f83936b07d1ebd291232e30d46b33f4c0`), verfügbar bis 17.11.2026: [Run #29](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41686101062).
