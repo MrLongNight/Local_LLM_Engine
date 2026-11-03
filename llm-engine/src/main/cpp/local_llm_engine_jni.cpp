@@ -136,6 +136,48 @@ static bool abort_decode(void* user_data) {
     return engine == nullptr || engine->cancel_requested.load(std::memory_order_acquire);
 }
 
+/**
+ * Evaluate prompt tokens in bounded batches. The llama context's abort callback
+ * is also active inside llama_decode(), so cancellation works during prefill.
+ * Only the final token of the complete prompt requests logits for sampling.
+ */
+static int decode_tokens(
+        EngineInstance* engine,
+        const std::vector<llama_token>& tokens,
+        llama_pos start_position,
+        bool request_last_logits) {
+    if (engine == nullptr || engine->context == nullptr || !engine->is_batch_allocated) {
+        return 1;
+    }
+
+    const size_t batch_capacity = static_cast<size_t>(std::max(1, engine->batch_size));
+    for (size_t offset = 0; offset < tokens.size(); offset += batch_capacity) {
+        if (engine->cancel_requested.load(std::memory_order_acquire)) {
+            return -2;
+        }
+
+        common_batch_clear(engine->batch);
+        const size_t count = std::min(batch_capacity, tokens.size() - offset);
+        for (size_t i = 0; i < count; ++i) {
+            const size_t token_index = offset + i;
+            const bool request_logits = request_last_logits && token_index + 1 == tokens.size();
+            common_batch_add(
+                    engine->batch,
+                    tokens[token_index],
+                    start_position + static_cast<llama_pos>(token_index),
+                    {0},
+                    request_logits
+            );
+        }
+
+        const int result = llama_decode(engine->context, engine->batch);
+        if (result != 0) {
+            return engine->cancel_requested.load(std::memory_order_acquire) ? -2 : result;
+        }
+    }
+    return 0;
+}
+
 static inline EngineInstance* fromHandle(jlong handle) {
     return reinterpret_cast<EngineInstance*>(handle);
 }

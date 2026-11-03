@@ -92,7 +92,7 @@ fun ChatScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
-            viewModel.importModelFromSaf(it, copyToPrivate = true)
+            viewModel.importModelFromSaf(it)
         }
     }
 

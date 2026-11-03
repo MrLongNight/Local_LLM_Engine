@@ -63,11 +63,13 @@ jobs:
       - name: Install Vulkan shader compiler and SPIR-V headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y glslc spirv-headers git
-          SPIRV_HEADERS_INCLUDE_DIR=/usr/include
+          sudo apt-get install -y glslc git
+          # Match the SPIR-V headers to the pinned Vulkan 1.3.275 header set.
+          SPIRV_HEADERS_DIR="$RUNNER_TEMP/SPIRV-Headers"
+          git clone --depth 1 --branch vulkan-sdk-1.3.275.0 https://github.com/KhronosGroup/SPIRV-Headers.git "$SPIRV_HEADERS_DIR"
+          SPIRV_HEADERS_INCLUDE_DIR="$SPIRV_HEADERS_DIR/include"
           if [ ! -f "$SPIRV_HEADERS_INCLUDE_DIR/spirv/unified1/spirv.hpp" ]; then
-            echo "::error::SPIR-V unified headers are missing"
-            dpkg -L spirv-headers || true
+            echo "::error::Pinned Khronos SPIR-V unified header is missing"
             exit 1
           fi
 
