@@ -13,7 +13,7 @@ import android.os.Parcelable
  */
 data class InferenceRequest(
     val messages: List<ChatMessage>,
-    val maxPredictTokens: Int = 1024,
+    val maxPredictTokens: Int = 512,
     val temperature: Float? = null,
     val topP: Float? = null
 ) : Parcelable {
@@ -61,7 +61,7 @@ data class InferenceRequest(
             override fun newArray(size: Int): Array<InferenceRequest?> = arrayOfNulls(size)
         }
 
-        fun single(userPrompt: String, systemPrompt: String? = null, maxPredictTokens: Int = 1024): InferenceRequest {
+        fun single(userPrompt: String, systemPrompt: String? = null, maxPredictTokens: Int = 512): InferenceRequest {
             val list = mutableListOf<ChatMessage>()
             if (!systemPrompt.isNullOrBlank()) {
                 list.add(ChatMessage.system(systemPrompt))

@@ -67,6 +67,25 @@ Geprüfter Implementierungscommit: `a754052304db19f8411a3555598016d8758e8943`.
 - Eingabevalidierung für endliche Temperatur-, Top-P- und GPU-Layer-Werte wird wiederhergestellt und mit API-Tests abgesichert.
 - Zusätzlich wurden vier bestehende Engine-Tests entfernt. Diese Testlücken sind noch nicht vollständig rückgeführt und müssen nach dem Build-Fix gesondert abgearbeitet werden.
 
+## Nachaudit Task 1 – weitere Befunde
+
+**Task 1 bleibt teilweise umgesetzt.**
+
+- Die App-Integration in `DocAnizerViewModel` verwendet weiterhin `LocalLlmEngine.create(application)`. Da der Factory-Parameter `useIpcProcess` standardmäßig `false` ist, läuft die produktive App-Engine noch im Hauptprozess. Die Factory-API wurde zudem um `useIpcProcess` und `createIpcClient` erweitert und `InferenceServiceClient` ist öffentlich; das widerspricht der Vorgabe, die öffentliche `LocalLlmEngine`-API stabil zu halten. Vor produktiver Aktivierung ist diese API-Ausweitung zurückzunehmen bzw. intern zu kapseln.
+- `InferenceServiceClient` verwendet ein einmalig angelegtes `CompletableDeferred`. `onServiceDisconnected` und `onBindingDied` setzen nur einen Fehlerzustand; sie erzeugen keine neue Verbindung/Deferred und starten keinen Reconnect. Nach Prozess-Tod kann `getService()` daher an einer veralteten bzw. unerfüllbaren Verbindung hängen.
+- `InferenceService.onDestroy()` startet Cleanup in `serviceScope` und cancelt denselben Scope sofort. `engine.close()` und `workerExecutor.shutdown()` sind damit nicht zuverlässig abgeschlossen.
+- Der neue IPC-Unit-Test nutzt einen Fake-Service mit künstlicher PID `99999`. Es gibt keinen Android-Instrumentationstest, der Service-Binding, getrennte App-/Service-PIDs oder native Inferenz im `:inference`-Prozess nachweist.
+- `ModelSourceResolver.kt` wurde im Task-1-Commit von ca. 10 KB auf ca. 3 KB reduziert. Der zuvor vorhandene HTTPS-Remote-Download mit Redirect-/Downgrade-Schutz, gestreamtem Import, SHA-256 und GGUF-Headerprüfung wurde entfernt. `ModelSource.RemoteUrl` erzeugt aktuell lediglich einen Dateipfad und lädt keine Datei herunter.
+- `EngineDiagnostics.kt` wurde von persistentem, rotiertem und bereinigtem Datei-Logging auf höchstens 500 flüchtige RAM-Einträge reduziert. Dadurch gehen Diagnosen des separaten Inferenzprozesses beim Prozessabbruch verloren und sind aus dem App-Prozess nicht zuverlässig exportierbar.
+- Vier bestehende Engine-Tests wurden entfernt (`DiagnosticLogFormatterTest`, `EngineValidationTest`, `GgufHeaderValidatorTest`, `ModelSourceResolverTest`). Die erneute Testabdeckung ist noch nicht vollständig wiederhergestellt.
+- Echter Prozess-Level-Abbruch, PID-Ende-Bestätigung, Binder-Death-Recovery und Reconnect sind weiterhin nicht implementiert bzw. nicht nachgewiesen. Sie sind zentrale Folgeaufgaben und dürfen nicht als durch den Service-Skeleton erledigt gelten.
+
+## CI-Verifikation – Nachlauf 03.11.2026
+
+- Unit Tests #69 auf `7e60ece`: fehlgeschlagen, weil `LocalLlmEngineApiTest.testInferenceRequest` 512 erwartete, `InferenceRequest.single()` aber weiter 1024 als Standard lieferte.
+- Android APK Build #35 auf `7e60ece`: fehlgeschlagen beim Linken von `liblocalllm_engine.so` für x86_64 (`vkCreateInstance`, `vkEnumeratePhysicalDevices`, `vkDestroyInstance`, `vkGetPhysicalDeviceProperties` nicht aufgelöst). Der JNI-Gerätecheck ruft diese Vulkan-Symbole direkt auf; dem JNI-Target fehlte die Link-Abhängigkeit `vulkan`.
+- Die nachfolgende Korrektur stellt beide Request-Token-Defaults auf 512 und ergänzt `vulkan` beim Linken von `localllm_engine`. Die nächsten Actions-Ergebnisse entscheiden über den Status; ein erfolgreicher APK-Build liegt bis dahin nicht vor.
+
 ## Gerätefehler vom 03.11.2026
 
 - Diagnose vom nubia Z2462N: Qwen3-GGUF mit ca. 2,5 GB lädt über Vulkan; Prompt-Evaluation endet mit Code 0. Der Prozess startet während der nativen Token-Generierung neu. Im exportierten App-Log steht kein regulärer Kotlin-/JNI-Fehler.
