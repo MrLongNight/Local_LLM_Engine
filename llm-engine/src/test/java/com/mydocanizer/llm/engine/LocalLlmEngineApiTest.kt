@@ -2,7 +2,6 @@ package com.mydocanizer.llm.engine
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -11,40 +10,23 @@ class LocalLlmEngineApiTest {
     @Test
     fun testEngineConfigDefaults() {
         val config = EngineConfig()
-        assertEquals(2048, config.contextSize)
-        assertEquals(128, config.batchSize)
+        assertEquals(4096, config.contextSize)
+        assertEquals(512, config.batchSize)
         assertEquals(4, config.threads)
         assertEquals(0.7f, config.temperature, 0.001f)
-        assertEquals(512, config.maxPredictTokens)
-        assertEquals(BackendPreference.CPU, config.backendPreference)
-        assertEquals(16, config.gpuLayers)
+        assertEquals(1024, config.maxPredictTokens)
+        assertEquals(BackendPreference.AUTO, config.backendPreference)
+        assertEquals(99, config.gpuLayers)
     }
 
-
-    @Test
-    fun testSamplingParametersAreValidated() {
-        assertTrue(runCatching { EngineConfig(topP = 1.01f) }.isFailure)
-        assertTrue(runCatching { EngineConfig(temperature = Float.NaN) }.isFailure)
-        assertTrue(
-            runCatching {
-                InferenceRequest(
-                    messages = listOf(ChatMessage.user("Hello")),
-                    temperature = Float.NaN
-                )
-            }.isFailure
-        )
-    }
 
     @Test
     fun testChatMessageCreation() {
         val sysMsg = ChatMessage.system("System instruction")
         val userMsg = ChatMessage.user("Hello model")
-        val developerMsg = ChatMessage.developer("Follow this developer instruction")
         val assistantMsg = ChatMessage.assistant("Hello user")
 
         assertEquals(ChatRole.SYSTEM, sysMsg.role)
-        assertEquals(ChatRole.DEVELOPER, developerMsg.role)
-        assertEquals(ChatRole.DEVELOPER, ChatRole.fromString("developer"))
         assertEquals(ChatRole.USER, userMsg.role)
         assertEquals(ChatRole.ASSISTANT, assistantMsg.role)
         assertEquals("Hello model", userMsg.content)
@@ -56,8 +38,7 @@ class LocalLlmEngineApiTest {
         assertEquals(2, request.messages.size)
         assertEquals(ChatRole.SYSTEM, request.messages[0].role)
         assertEquals(ChatRole.USER, request.messages[1].role)
-        assertNull(request.maxPredictTokens)
-        assertEquals(512, InferenceRequest.single("Prompt", maxPredictTokens = 512).maxPredictTokens)
+        assertEquals(1024, request.maxPredictTokens)
     }
 
     @Test
@@ -80,11 +61,6 @@ class LocalLlmEngineApiTest {
         val tokenEvent = InferenceEvent.Token("token", 0)
         assertEquals("token", tokenEvent.token)
         assertEquals(0, tokenEvent.tokenIndex)
-
-        val progressEvent = InferenceEvent.Progress(tokensGenerated = 8, visibleCharacters = 0, elapsedMs = 1_200)
-        assertEquals(8, progressEvent.tokensGenerated)
-        assertEquals(0, progressEvent.visibleCharacters)
-        assertEquals(1_200L, progressEvent.elapsedMs)
 
         val result = InferenceResult(
             text = "Completed generation",

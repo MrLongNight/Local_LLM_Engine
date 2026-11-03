@@ -1,5 +1,8 @@
 package com.mydocanizer.llm.engine
 
+import android.os.Parcel
+import android.os.Parcelable
+
 /**
  * Reason why token generation concluded.
  */
@@ -29,4 +32,30 @@ data class InferenceResult(
     val durationMs: Long,
     val tokensPerSecond: Double,
     val finishReason: FinishReason
-)
+) : Parcelable {
+    constructor(parcel: Parcel) : this(
+        text = parcel.readString() ?: "",
+        tokensGenerated = parcel.readInt(),
+        durationMs = parcel.readLong(),
+        tokensPerSecond = parcel.readDouble(),
+        finishReason = FinishReason.valueOf(parcel.readString() ?: FinishReason.STOP.name)
+    )
+
+    override fun writeToParcel(parcel: Parcel, flags: Int) {
+        parcel.writeString(text)
+        parcel.writeInt(tokensGenerated)
+        parcel.writeLong(durationMs)
+        parcel.writeDouble(tokensPerSecond)
+        parcel.writeString(finishReason.name)
+    }
+
+    override fun describeContents(): Int = 0
+
+    companion object {
+        @JvmField
+        val CREATOR: Parcelable.Creator<InferenceResult> = object : Parcelable.Creator<InferenceResult> {
+            override fun createFromParcel(parcel: Parcel): InferenceResult = InferenceResult(parcel)
+            override fun newArray(size: Int): Array<InferenceResult?> = arrayOfNulls(size)
+        }
+    }
+}

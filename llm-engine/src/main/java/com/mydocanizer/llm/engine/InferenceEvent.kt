@@ -15,21 +15,17 @@ sealed interface InferenceEvent {
      * Emitted for each newly generated UTF-8 token piece.
      *
      * @property token Decoded token piece.
-     * @property tokenIndex 0-indexed index of emitted text chunks. A single model token
-     * may produce no visible UTF-8 chunk while a multibyte code point is being assembled;
-     * use InferenceResult.tokensGenerated for the native model-token count.
+     * @property tokenIndex 0-indexed count of tokens generated so far.
      */
     data class Token(val token: String, val tokenIndex: Int) : InferenceEvent
 
     /**
-     * Native token progress when generated tokens have not yet produced visible UTF-8 text.
-     * This distinguishes control-token generation from a stalled stream.
+     * Emitted periodically during generation with token metrics.
+     *
+     * @property tokensGenerated Number of tokens generated so far.
+     * @property elapsedMs Elapsed time in milliseconds since generation started.
      */
-    data class Progress(
-        val tokensGenerated: Int,
-        val visibleCharacters: Int,
-        val elapsedMs: Long
-    ) : InferenceEvent
+    data class Progress(val tokensGenerated: Int, val elapsedMs: Long) : InferenceEvent
 
     /**
      * Emitted when generation successfully finishes.
@@ -42,7 +38,7 @@ sealed interface InferenceEvent {
      * Emitted when inference was cancelled cooperatively.
      *
      * @property partialText Text generated up until cancellation.
-     * @property tokensGenerated Native model-token count generated before cancellation.
+     * @property tokensGenerated Number of tokens emitted before cancellation.
      */
     data class Cancelled(
         val partialText: String,

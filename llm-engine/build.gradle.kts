@@ -7,6 +7,11 @@ android {
     compileSdk { version = release(36) { minorApiLevel = 1 } }
     ndkVersion = "27.2.12479018"
 
+    buildFeatures {
+        aidl = true
+        buildConfig = true
+    }
+
     defaultConfig {
         minSdk = 24
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -39,6 +44,12 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
         }
     }
 }

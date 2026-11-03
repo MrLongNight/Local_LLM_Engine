@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <service
+            android:name="com.mydocanizer.llm.engine.ipc.InferenceService"
+            android:process=":inference"
+            android:exported="false"
+            android:isolatedProcess="false" />
+    </application>
 </manifest>

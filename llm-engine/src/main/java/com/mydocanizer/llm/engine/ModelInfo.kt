@@ -1,5 +1,8 @@
 package com.mydocanizer.llm.engine
 
+import android.os.Parcel
+import android.os.Parcelable
+
 /**
  * Detailed metadata of a loaded GGUF model.
  *
@@ -22,7 +25,33 @@ data class ModelInfo(
     val description: String = "",
     val activeBackend: String = "CPU",
     val sha256: String? = null
-) {
+) : Parcelable {
+    constructor(parcel: Parcel) : this(
+        name = parcel.readString() ?: "",
+        path = parcel.readString() ?: "",
+        sizeBytes = parcel.readLong(),
+        parameterCount = parcel.readLong(),
+        contextLengthTrain = parcel.readInt(),
+        architecture = parcel.readString() ?: "GGUF",
+        description = parcel.readString() ?: "",
+        activeBackend = parcel.readString() ?: "CPU",
+        sha256 = parcel.readString()
+    )
+
+    override fun writeToParcel(parcel: Parcel, flags: Int) {
+        parcel.writeString(name)
+        parcel.writeString(path)
+        parcel.writeLong(sizeBytes)
+        parcel.writeLong(parameterCount)
+        parcel.writeInt(contextLengthTrain)
+        parcel.writeString(architecture)
+        parcel.writeString(description)
+        parcel.writeString(activeBackend)
+        parcel.writeString(sha256)
+    }
+
+    override fun describeContents(): Int = 0
+
     val sizeMb: Double
         get() = sizeBytes / (1024.0 * 1024.0)
 
@@ -36,4 +65,12 @@ data class ModelInfo(
             parameterCount > 0 -> "$parameterCount"
             else -> "Unknown"
         }
+
+    companion object {
+        @JvmField
+        val CREATOR: Parcelable.Creator<ModelInfo> = object : Parcelable.Creator<ModelInfo> {
+            override fun createFromParcel(parcel: Parcel): ModelInfo = ModelInfo(parcel)
+            override fun newArray(size: Int): Array<ModelInfo?> = arrayOfNulls(size)
+        }
+    }
 }

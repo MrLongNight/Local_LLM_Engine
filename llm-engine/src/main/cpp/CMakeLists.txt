@@ -100,4 +100,5 @@ target_link_libraries(localllm_engine PRIVATE
     llama-common
     android
     log
+    vulkan
 )

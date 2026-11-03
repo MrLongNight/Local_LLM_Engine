@@ -36,7 +36,7 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Loads a GGUF model into memory from the provided [source].
      *
-     * @param source The filesystem path, content URI, HTTPS URL, or asset of the model.
+     * @param source The filesystem path, content URI, or asset of the model.
      * @param config Configuration parameters (context size, threads, temperature, etc.).
      * @return [Result] containing [ModelInfo] on success, or exception on failure.
      */
@@ -83,9 +83,24 @@ interface LocalLlmEngine : AutoCloseable {
          * Creates a new instance of [LocalLlmEngine].
          *
          * @param context Android Application Context used for resolving ContentUris and cache storage.
+         * @param useIpcProcess If true, delegates execution to the dedicated :inference process via AIDL IPC.
          */
-        fun create(context: Context): LocalLlmEngine {
-            return LocalLlmEngineImpl(context.applicationContext)
+        fun create(context: Context, useIpcProcess: Boolean = false): LocalLlmEngine {
+            return if (useIpcProcess) {
+                com.mydocanizer.llm.engine.ipc.InferenceServiceClient(context.applicationContext)
+            } else {
+                LocalLlmEngineImpl(context.applicationContext)
+            }
+        }
+
+        /**
+         * Creates an IPC client connected to the isolated :inference process or a mock service.
+         */
+        fun createIpcClient(
+            context: Context,
+            mockService: com.mydocanizer.llm.engine.ipc.IInferenceService? = null
+        ): com.mydocanizer.llm.engine.ipc.InferenceServiceClient {
+            return com.mydocanizer.llm.engine.ipc.InferenceServiceClient(context.applicationContext, mockService)
         }
     }
 }

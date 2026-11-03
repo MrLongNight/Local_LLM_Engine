@@ -3,8 +3,6 @@ package com.mydocanizer.llm.engine.internal
 import android.content.Context
 import android.util.Log
 import com.mydocanizer.llm.engine.BackendInfo
-import com.mydocanizer.llm.engine.EngineDiagnostics
-import com.mydocanizer.llm.engine.finishReasonFromNative
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineState
@@ -56,26 +54,19 @@ internal class LocalLlmEngineImpl(
 
     private val engineHandle = AtomicLong(0L)
     private val isCancelled = AtomicBoolean(false)
-    private val isClosed = AtomicBoolean(false)
-    private val nativeHandleLock = Any()
-    @Volatile private var defaultMaxPredictTokens = EngineConfig().maxPredictTokens
 
     init {
-        EngineDiagnostics.initialize(context)
-        EngineDiagnostics.info("engine", "INSTANCE_CREATED")
         scope.launch {
             initialize()
         }
     }
 
     override suspend fun initialize(): Result<Unit> = withContext(llamaDispatcher) {
-        runCatchingPreservingCancellation {
-            check(!isClosed.get()) { "Engine is closed" }
-            if (engineHandle.get() != 0L &&
-                (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded)
-            ) return@runCatchingPreservingCancellation
+        runCatching {
+            if (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded) {
+                return@runCatching
+            }
             _state.value = EngineState.Initializing
-            EngineDiagnostics.info("engine", "INITIALIZATION_STARTED")
 
             val loaded = NativeEngineHandle.ensureLoaded()
             if (!loaded) {
@@ -90,33 +81,18 @@ internal class LocalLlmEngineImpl(
 
             val sysInfo = runCatching { NativeEngineHandle.nativeGetSystemInfo() }.getOrDefault("")
             val recThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
-            val hasVulkanBackend = NativeEngineHandle.nativeIsVulkanBackendAvailable()
             _backendInfo.value = BackendInfo(
-                backendName = if (hasVulkanBackend) {
-                    "llama.cpp (Vulkan GPU + CPU)"
-                } else {
-                    "llama.cpp (CPU; Vulkan-Backend nicht in diesem Build enthalten)"
-                },
+                backendName = "llama.cpp (Vulkan / ARM NEON / KleidiAI / AVX)",
                 systemInfo = sysInfo,
                 isAvailable = true,
                 recommendedThreads = recThreads
             )
 
-            if (!isClosed.get()) {
-                _state.value = EngineState.Ready
-                EngineDiagnostics.info(
-                    "engine",
-                    "INITIALIZATION_SUCCEEDED",
-                    "backendAvailable=true;vulkanRegistered=$hasVulkanBackend;recommendedThreads=$recThreads"
-                )
-                Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
-            }
+            _state.value = EngineState.Ready
+            Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
         }.onFailure { err ->
-            EngineDiagnostics.error("engine", "INITIALIZATION_FAILED", err)
             Log.e(TAG, "Initialization failed", err)
-            if (!isClosed.get()) {
-                _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
-            }
+            _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
         }
     }
 
@@ -124,26 +100,13 @@ internal class LocalLlmEngineImpl(
         source: ModelSource,
         config: EngineConfig
     ): Result<ModelInfo> = withContext(llamaDispatcher) {
-        try {
-            runCatchingPreservingCancellation {
-            EngineDiagnostics.info(
-                "model",
-                "MODEL_LOAD_STARTED",
-                "sourceType=${source.javaClass.simpleName};contextSize=${config.contextSize};batchSize=${config.batchSize};threads=${config.threads};temperature=${config.temperature};topP=${config.topP};maxPredictTokens=${config.maxPredictTokens};backend=${config.backendPreference};gpuLayers=${config.gpuLayers}"
-            )
+        runCatching {
             val handle = getValidHandle()
             _state.value = EngineState.LoadingModel(source)
 
-            val resolvedFile = ModelSourceResolver.resolve(context, source)
-            val file = resolvedFile.file
-            EngineDiagnostics.info(
-                "model",
-                "MODEL_FILE_READY",
-                "sizeBytes=${file.length()};sha256Available=${resolvedFile.sha256 != null}"
-            )
-            Log.i(TAG, "Loading model file (${file.length()} bytes)")
-            // Native loading is transactional: the current model remains active until
-            // the replacement has fully initialized, or is restored on failure.
+            val file: File = ModelSourceResolver.resolveToFile(context, source)
+            Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
+
             val ret = NativeEngineHandle.nativeLoadModel(
                 handle = handle,
                 modelPath = file.absolutePath,
@@ -159,12 +122,11 @@ internal class LocalLlmEngineImpl(
             when (ret) {
                 0 -> { /* Success */ }
                 101 -> throw IllegalStateException(
-                    "Vulkan was explicitly requested, but this llama.cpp build has no registered Vulkan backend or usable Vulkan device."
+                    "Vulkan backend was explicitly requested, but no Vulkan GPU device is available or initialization failed."
                 )
                 else -> throw IllegalStateException("Native model load failed with error code: $ret")
             }
 
-            defaultMaxPredictTokens = config.maxPredictTokens
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)
             val parts = rawMetadata.split(";")
             val desc = parts.getOrNull(0) ?: ""
@@ -172,12 +134,8 @@ internal class LocalLlmEngineImpl(
             val nCtxTrain = parts.getOrNull(2)?.toIntOrNull() ?: 0
             val sizeBytes = parts.getOrNull(3)?.toLongOrNull() ?: file.length()
             val activeBackend = parts.getOrNull(4) ?: NativeEngineHandle.nativeGetActiveBackend(handle)
-            val architecture = NativeEngineHandle.nativeGetModelArchitecture(handle)
-                .ifBlank { "unknown" }
 
-            // Imports already calculate SHA-256 while streaming the source to app storage.
-            // Only direct FilePath sources need a separate pass over the model file.
-            val sha256 = resolvedFile.sha256 ?: calculateSha256(file)
+            val sha256 = calculateSha256(file)
 
             val info = ModelInfo(
                 name = file.name,
@@ -185,60 +143,30 @@ internal class LocalLlmEngineImpl(
                 sizeBytes = sizeBytes,
                 parameterCount = nParams,
                 contextLengthTrain = nCtxTrain,
-                architecture = architecture,
+                architecture = "GGUF",
                 description = desc,
                 activeBackend = activeBackend,
                 sha256 = sha256
             )
 
-            if (!isClosed.get()) {
-                _currentModel.value = info
-                _state.value = EngineState.ModelLoaded(info)
-                EngineDiagnostics.info(
-                    "model",
-                    "MODEL_LOAD_SUCCEEDED",
-                    "sizeBytes=${info.sizeBytes};architecture=${info.architecture};backend=${info.activeBackend};sha256=${info.sha256?.take(16) ?: "unavailable"};trainContext=${info.contextLengthTrain}"
-                )
-                Log.i(TAG, "Model loaded successfully: ${info.name}; backend=${info.activeBackend}; sizeBytes=${info.sizeBytes}")
-            }
+            _currentModel.value = info
+            _state.value = EngineState.ModelLoaded(info)
+            Log.i(TAG, "Model loaded successfully: $info")
             info
-            }.onFailure { err ->
-                EngineDiagnostics.error("model", "MODEL_LOAD_FAILED", err)
-                Log.e(TAG, "Model load failed (${err.javaClass.simpleName})")
-                if (!isClosed.get()) {
-                    val stillLoadedModel = _currentModel.value
-                    _state.value = if (stillLoadedModel != null) {
-                        EngineState.ModelLoaded(stillLoadedModel)
-                    } else {
-                        EngineState.Error("Failed to load model: ${err.message}", err)
-                    }
-                }
-            }
-        } catch (cancelled: CancellationException) {
-            // A cancelled import/load must not leave the public state stuck at LoadingModel.
-            if (!isClosed.get()) {
-                val stillLoadedModel = _currentModel.value
-                _state.value = if (stillLoadedModel != null) {
-                    EngineState.ModelLoaded(stillLoadedModel)
-                } else {
-                    EngineState.Ready
-                }
-            }
-            EngineDiagnostics.warn("model", "MODEL_LOAD_CANCELLED")
-            throw cancelled
+        }.onFailure { err ->
+            Log.e(TAG, "Model load failed", err)
+            _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
         }
     }
 
     override suspend fun unloadModel(): Result<Unit> = withContext(llamaDispatcher) {
-        runCatchingPreservingCancellation {
-            check(!isClosed.get()) { "Engine is closed" }
+        runCatching {
             val handle = engineHandle.get()
             if (handle != 0L) {
                 NativeEngineHandle.nativeUnloadModel(handle)
             }
             _currentModel.value = null
             _state.value = EngineState.Ready
-            EngineDiagnostics.info("model", "MODEL_UNLOADED")
             Log.i(TAG, "Model unloaded successfully")
             Unit
         }
@@ -247,186 +175,93 @@ internal class LocalLlmEngineImpl(
     override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = flow {
         val modelInfo = _currentModel.value
             ?: throw IllegalStateException("No model loaded. Call loadModel() before chat.")
+
         val handle = getValidHandle()
-        synchronized(nativeHandleLock) {
-            check(!isClosed.get()) { "Engine is closed" }
-            // Reset both flags under the same lock used by cancelInference()/close().
-            // This prevents a concurrent cancel from being cleared before native prefill.
-            isCancelled.set(false)
-            NativeEngineHandle.nativeResetCancellation(handle)
-        }
         _state.value = EngineState.Inferring(request)
+        isCancelled.set(false)
+
+        emit(InferenceEvent.Started(request.messages.size))
+
+        val roles = request.messages.map { it.role.roleName }.toTypedArray()
+        val contents = request.messages.map { it.content }.toTypedArray()
+
+        val processRes = NativeEngineHandle.nativeProcessChat(
+            handle = handle,
+            roles = roles,
+            contents = contents,
+            maxPredict = request.maxPredictTokens
+        )
+
+        if (processRes != 0) {
+            val err = IllegalStateException("Native prompt evaluation failed with code $processRes")
+            emit(InferenceEvent.Error(err))
+            _state.value = EngineState.ModelLoaded(modelInfo)
+            return@flow
+        }
 
         val outputBuilder = StringBuilder()
-        var tokenEventIndex = 0
-        val inferenceStartedNanos = System.nanoTime()
+        var tokenCount = 0
+
         try {
-            EngineDiagnostics.info(
-                "inference",
-                "INFERENCE_STARTED",
-                "messageCount=${request.messages.size};maxPredictTokens=${request.maxPredictTokens ?: defaultMaxPredictTokens};temperatureOverride=${request.temperature != null};topPOverride=${request.topP != null}"
-            )
-            emit(InferenceEvent.Started(request.messages.size))
-            val roles = request.messages.map { it.role.roleName }.toTypedArray()
-            val contents = request.messages.map { it.content }.toTypedArray()
-
-            // -1 restores the model-load temperature; a non-negative value overrides it
-            // for this request only.
-            val samplingResult = NativeEngineHandle.nativeSetRequestSampling(
-                handle,
-                request.temperature ?: -1f,
-                request.topP ?: -1f
-            )
-            if (samplingResult != 0) {
-                val error = IllegalStateException("Native sampling configuration failed with code $samplingResult")
-                EngineDiagnostics.error("inference", "SAMPLING_CONFIGURATION_FAILED", error)
-                emit(InferenceEvent.Error(error))
-                return@flow
-            }
-
-            // Null means use the maxPredictTokens value from the active EngineConfig.
-            val effectiveMaxPredictTokens = request.maxPredictTokens ?: defaultMaxPredictTokens
-
-            // Native prompt evaluation must not clear a cancel request arriving after reset.
-            EngineDiagnostics.info("inference", "PROMPT_EVALUATION_STARTED", "messageCount=${request.messages.size}")
-            val promptStartedNanos = System.nanoTime()
-            val processRes = NativeEngineHandle.nativeProcessChat(
-                handle = handle, roles = roles, contents = contents, maxPredict = effectiveMaxPredictTokens
-            )
-            val promptDurationMs = (System.nanoTime() - promptStartedNanos) / 1_000_000L
-            EngineDiagnostics.info(
-                "inference",
-                "PROMPT_EVALUATION_FINISHED",
-                "resultCode=$processRes;durationMs=$promptDurationMs"
-            )
-            if (processRes == -2 || isCancelled.get()) {
-                EngineDiagnostics.warn("inference", "CANCELLED_DURING_PROMPT", "durationMs=$promptDurationMs")
-                emit(InferenceEvent.Cancelled("", 0))
-                return@flow
-            }
-            if (processRes != 0) {
-                val message = if (processRes == 5) {
-                    "The system/developer prompt and newest message exceed the model context window. Reduce the prompt or use a model with a larger context."
-                } else {
-                    "Native prompt evaluation failed with code $processRes"
-                }
-                val error = IllegalStateException(message)
-                EngineDiagnostics.error("inference", "PROMPT_EVALUATION_FAILED", error, "nativeCode=$processRes")
-                emit(InferenceEvent.Error(error))
-                return@flow
-            }
-
-            EngineDiagnostics.info(
-                "inference",
-                "TOKEN_GENERATION_STARTED",
-                "maxPredictTokens=$effectiveMaxPredictTokens;promptDurationMs=$promptDurationMs;" +
-                    EngineDiagnostics.memorySnapshot(context, "before_token_generation")
-            )
-            // Native code enforces maxPredictTokens; UTF-8 chunks are not model-token counts.
-            // Some models emit control/reasoning tokens before visible text. Report native
-            // token progress independently so the UI cannot look frozen while this happens.
-            var lastProgressTokenCount = 0
             while (!isCancelled.get()) {
                 val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
-                val generatedTokenCount = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
-                if (generatedTokenCount - lastProgressTokenCount >= 8) {
-                    val elapsedMs = (System.nanoTime() - inferenceStartedNanos) / 1_000_000L
-                    EngineDiagnostics.info(
-                        "inference",
-                        "TOKEN_GENERATION_PROGRESS",
-                        "nativeTokens=$generatedTokenCount;visibleCharacters=${outputBuilder.length};elapsedMs=$elapsedMs;" +
-                        EngineDiagnostics.memorySnapshot(context, "token_generation")
-                    )
-                    emit(InferenceEvent.Progress(generatedTokenCount, outputBuilder.length, elapsedMs))
-                    lastProgressTokenCount = generatedTokenCount
+                if (tokenPiece == null) {
+                    break
                 }
-                if (tokenPiece == null) break
                 if (tokenPiece.isNotEmpty()) {
                     outputBuilder.append(tokenPiece)
-                    if (tokenEventIndex == 0) {
-                        EngineDiagnostics.info(
-                            "inference",
-                            "FIRST_VISIBLE_TOKEN",
-                            "elapsedMs=${(System.nanoTime() - inferenceStartedNanos) / 1_000_000L};nativeTokens=${NativeEngineHandle.nativeGetTokensGenerated(handle)}"
-                        )
+                    emit(InferenceEvent.Token(tokenPiece, tokenCount))
+                    tokenCount++
+                    if (tokenCount >= request.maxPredictTokens) {
+                        break
                     }
-                    emit(InferenceEvent.Token(tokenPiece, tokenEventIndex++))
                 }
             }
 
             val rawReason = NativeEngineHandle.nativeGetLastFinishReason(handle)
-            val finishReason = finishReasonFromNative(rawReason, isCancelled.get())
-            val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
-            if (actualTokens > lastProgressTokenCount) {
-                val elapsedMs = (System.nanoTime() - inferenceStartedNanos) / 1_000_000L
-                EngineDiagnostics.info(
-                    "inference",
-                    "TOKEN_GENERATION_FINAL_PROGRESS",
-                    "nativeTokens=$actualTokens;visibleCharacters=${outputBuilder.length};elapsedMs=$elapsedMs"
-                )
-                emit(InferenceEvent.Progress(actualTokens, outputBuilder.length, elapsedMs))
+            val finishReason = when {
+                isCancelled.get() -> FinishReason.CANCELLED
+                rawReason == 0 -> FinishReason.STOP
+                rawReason == 1 -> FinishReason.MAX_TOKENS
+                rawReason == 2 -> FinishReason.CANCELLED
+                else -> FinishReason.STOP
             }
-            val durationMs = (NativeEngineHandle.nativeGetInferenceDurationUs(handle) / 1000L).coerceAtLeast(1L)
-            val tokensPerSec = actualTokens * 1000.0 / durationMs
+
+            val durationUs = NativeEngineHandle.nativeGetInferenceDurationUs(handle)
+            val durationMs = (durationUs / 1000L).coerceAtLeast(1L)
+            val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
+            val tokensPerSec = (actualTokens * 1000.0) / durationMs
             val fullText = outputBuilder.toString()
 
-            if (fullText.isBlank() && finishReason != FinishReason.CANCELLED) {
-                val error = IllegalStateException(
-                    "The model ended generation without visible text (finishReason=$finishReason; nativeTokens=$actualTokens). Check the model's chat template and prompt format."
+            if (finishReason == FinishReason.CANCELLED) {
+                emit(InferenceEvent.Cancelled(fullText, actualTokens))
+            } else {
+                val result = InferenceResult(
+                    text = fullText,
+                    tokensGenerated = actualTokens,
+                    durationMs = durationMs,
+                    tokensPerSecond = tokensPerSec,
+                    finishReason = finishReason
                 )
-                EngineDiagnostics.error(
-                    "inference",
-                    "EMPTY_MODEL_RESPONSE",
-                    error,
-                    "finishReason=$finishReason;nativeFinishReason=$rawReason;nativeTokens=$actualTokens;durationMs=$durationMs"
-                )
-                emit(InferenceEvent.Error(error))
-                return@flow
-            }
-
-            when (finishReason) {
-                FinishReason.CANCELLED -> {
-                    EngineDiagnostics.warn(
-                        "inference",
-                        "INFERENCE_CANCELLED",
-                        "tokens=$actualTokens;wallDurationMs=${(System.nanoTime() - inferenceStartedNanos) / 1_000_000L}"
-                    )
-                    emit(InferenceEvent.Cancelled(fullText, actualTokens))
-                }
-                FinishReason.ERROR -> {
-                    val error = IllegalStateException("Native generation ended with finish reason $rawReason")
-                    EngineDiagnostics.error("inference", "NATIVE_GENERATION_FAILED", error, "nativeFinishReason=$rawReason;tokens=$actualTokens")
-                    emit(InferenceEvent.Error(error, fullText))
-                }
-                FinishReason.STOP, FinishReason.MAX_TOKENS -> {
-                    EngineDiagnostics.info(
-                        "inference",
-                        "INFERENCE_COMPLETED",
-                        "finishReason=$finishReason;tokens=$actualTokens;durationMs=$durationMs;tokensPerSecond=${"%.3f".format(java.util.Locale.US, tokensPerSec)};wallDurationMs=${(System.nanoTime() - inferenceStartedNanos) / 1_000_000L}"
-                    )
-                    emit(InferenceEvent.Completed(
-                        InferenceResult(fullText, actualTokens, durationMs, tokensPerSec, finishReason)
-                    ))
-                }
+                emit(InferenceEvent.Completed(result))
             }
         } catch (e: CancellationException) {
-            EngineDiagnostics.warn("inference", "COROUTINE_CANCELLED", "partialOutputPresent=${outputBuilder.isNotEmpty()}")
-            Log.i(TAG, "streamChat coroutine cancelled; notifying native engine")
-            isCancelled.set(true)
+            Log.i(TAG, "streamChat coroutine cancelled, notifying native engine")
             NativeEngineHandle.nativeCancel(handle)
+            val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
+            emit(InferenceEvent.Cancelled(outputBuilder.toString(), actualTokens))
             throw e
         } catch (t: Throwable) {
-            EngineDiagnostics.error("inference", "INFERENCE_FAILED", t, "partialOutputPresent=${outputBuilder.isNotEmpty()}")
-            Log.e(TAG, "Error during inference", t)
+            Log.e(TAG, "Error during generation loop", t)
             emit(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
             isCancelled.set(false)
-            if (!isClosed.get()) _state.value = EngineState.ModelLoaded(modelInfo)
+            _state.value = EngineState.ModelLoaded(modelInfo)
         }
     }.flowOn(llamaDispatcher)
 
     override suspend fun generateChat(request: InferenceRequest): Result<InferenceResult> {
-        return runCatchingPreservingCancellation {
+        return runCatching {
             var completedResult: InferenceResult? = null
             var lastError: Throwable? = null
 
@@ -452,39 +287,22 @@ internal class LocalLlmEngineImpl(
     }
 
     override fun cancelInference() {
-        EngineDiagnostics.warn("inference", "CANCEL_REQUESTED")
         isCancelled.set(true)
-        synchronized(nativeHandleLock) {
-            if (!isClosed.get()) {
-                val handle = engineHandle.get()
-                if (handle != 0L) NativeEngineHandle.nativeCancel(handle)
-            }
+        val handle = engineHandle.get()
+        if (handle != 0L) {
+            NativeEngineHandle.nativeCancel(handle)
         }
     }
 
     override fun close() {
-        val shouldClose = synchronized(nativeHandleLock) {
-            if (!isClosed.compareAndSet(false, true)) false
-            else {
-                isCancelled.set(true)
-                val handle = engineHandle.get()
-                if (handle != 0L) NativeEngineHandle.nativeCancel(handle)
-                true
-            }
+        cancelInference()
+        val handle = engineHandle.getAndSet(0L)
+        if (handle != 0L) {
+            NativeEngineHandle.nativeDestroyEngine(handle)
         }
-        if (!shouldClose) return
-        EngineDiagnostics.info("engine", "CLOSE_REQUESTED")
         _state.value = EngineState.Closed
-        // Defer pointer destruction until the single engine dispatcher has left any JNI call.
-        scope.launch {
-            synchronized(nativeHandleLock) {
-                val handle = engineHandle.getAndSet(0L)
-                if (handle != 0L) NativeEngineHandle.nativeDestroyEngine(handle)
-            }
-            scope.cancel()
-            EngineDiagnostics.info("engine", "CLOSED")
-            Log.i(TAG, "LocalLlmEngine closed")
-        }
+        scope.cancel()
+        Log.i(TAG, "LocalLlmEngine closed")
     }
 
     private fun calculateSha256(file: File): String = runCatching {
@@ -500,23 +318,8 @@ internal class LocalLlmEngineImpl(
     }.getOrDefault("N/A")
 
     private fun getValidHandle(): Long {
-        check(!isClosed.get()) { "Engine is closed" }
         val h = engineHandle.get()
         check(h != 0L) { "Engine handle is invalid or closed" }
         return h
     }
 }
-
-
-/**
- * Converts ordinary failures into Result while preserving structured-concurrency cancellation.
- * A cancelled caller must never receive a successful-looking Result.failure instead of cancellation.
- */
-internal inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> =
-    try {
-        Result.success(block())
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (error: Throwable) {
-        Result.failure(error)
-    }
