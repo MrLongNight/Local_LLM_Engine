@@ -38,6 +38,9 @@ internal object NativeEngineHandle {
     external fun nativeGetSystemInfo(): String
 
     @JvmStatic
+    external fun nativeIsVulkanBackendAvailable(): Boolean
+
+    @JvmStatic
     external fun nativeCreateEngine(): Long
 
     @JvmStatic
@@ -58,6 +61,12 @@ internal object NativeEngineHandle {
 
     @JvmStatic
     external fun nativeGetModelMetadata(handle: Long): String
+
+    @JvmStatic
+    external fun nativeGetModelArchitecture(handle: Long): String
+
+    @JvmStatic
+    external fun nativeResetCancellation(handle: Long)
 
     @JvmStatic
     external fun nativeProcessChat(

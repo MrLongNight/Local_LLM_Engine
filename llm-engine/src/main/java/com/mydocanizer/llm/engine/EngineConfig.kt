@@ -8,13 +8,13 @@ enum class BackendPreference(val modeId: Int, val label: String) {
      * Tries Vulkan GPU acceleration first.
      * If Vulkan is unavailable on device, transparently falls back to CPU.
      */
-    AUTO(0, "Automatisch (Vulkan GPU -> CPU)"),
+    AUTO(0, "Automatisch (GPU-Backend falls verfügbar, sonst CPU)"),
 
     /**
      * Enforces Vulkan GPU execution.
      * Fails with a hard error if Vulkan cannot be initialized or no GPU is found (no silent fallback).
      */
-    VULKAN(1, "Vulkan GPU erzwingen"),
+    VULKAN(1, "Vulkan GPU erzwingen (nur bei eingebautem Backend)"),
 
     /**
      * Enforces CPU execution (ARM NEON / KleidiAI / AVX).
@@ -53,7 +53,12 @@ data class EngineConfig(
         require(contextSize >= 256) { "contextSize must be at least 256" }
         require(batchSize >= 64) { "batchSize must be at least 64" }
         require(threads >= 1) { "threads must be at least 1" }
-        require(temperature >= 0f) { "temperature must be non-negative" }
+        require(temperature.isFinite() && temperature >= 0f) {
+            "temperature must be a finite, non-negative value"
+        }
+        require(topP.isFinite() && topP in 0f..1f) {
+            "topP must be a finite value between 0 and 1"
+        }
         require(maxPredictTokens >= 1) { "maxPredictTokens must be at least 1" }
     }
 }

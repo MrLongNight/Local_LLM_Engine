@@ -5,57 +5,115 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
+import java.util.UUID
 
+/** Imports model sources into app-private storage using staged, SHA-256-addressed files. */
 internal object ModelSourceResolver {
-
     suspend fun resolveToFile(context: Context, source: ModelSource): File = withContext(Dispatchers.IO) {
         when (source) {
             is ModelSource.FilePath -> {
-                val f = source.file
-                require(f.exists()) { "Model file does not exist at path: ${source.path}" }
-                require(f.canRead()) { "Cannot read model file at path: ${source.path}" }
-                f
+                val file = source.file
+                require(file.exists() && file.isFile) { "Model file does not exist or is not a regular file: ${source.path}" }
+                require(file.canRead()) { "Cannot read model file at path: ${source.path}" }
+                file
             }
-
             is ModelSource.ContentUri -> {
                 val uri = Uri.parse(source.uriString)
-                val targetDir = File(context.filesDir, "models").apply { mkdirs() }
-                val displayName = source.displayName ?: queryFileName(context, uri) ?: "imported_model.gguf"
-                val destFile = File(targetDir, displayName)
-
-                // If already copied and size matches, reuse it
-                val cr = context.contentResolver
-                cr.openInputStream(uri)?.use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        input.copyTo(output)
-                    }
-                } ?: throw IllegalArgumentException("Could not open Content URI: ${source.uriString}")
-
-                destFile
+                val name = source.displayName ?: queryFileName(context, uri) ?: "imported_model.gguf"
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: throw IllegalArgumentException("Could not open Content URI: ${source.uriString}")
+                importStream(context, input, name)
             }
+            is ModelSource.AssetPath -> importStream(
+                context, context.assets.open(source.assetName), source.assetName.substringAfterLast('/')
+            )
+            is ModelSource.RemoteUrl -> downloadRemote(context, source)
+        }
+    }
 
-            is ModelSource.AssetPath -> {
-                val targetDir = File(context.filesDir, "models").apply { mkdirs() }
-                val destFile = File(targetDir, source.assetName)
-                if (!destFile.exists()) {
-                    context.assets.open(source.assetName).use { input ->
-                        FileOutputStream(destFile).use { output ->
-                            input.copyTo(output)
-                        }
+    private suspend fun downloadRemote(context: Context, source: ModelSource.RemoteUrl): File {
+        val url = URL(source.url)
+        require(url.protocol.equals("https", ignoreCase = true)) { "Remote model URLs must use HTTPS" }
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/octet-stream")
+            setRequestProperty("User-Agent", "LocalLlmEngine/1.0")
+        }
+        try {
+            val status = connection.responseCode
+            require(status in 200..299) { "Model download failed with HTTP $status" }
+            require(connection.url.protocol.equals("https", ignoreCase = true)) {
+                "HTTPS model download redirected to an insecure URL"
+            }
+            val name = source.suggestedFileName
+                ?: connection.url.path.substringAfterLast('/').takeIf { it.isNotBlank() }
+                ?: "downloaded_model.gguf"
+            return importStream(context, connection.inputStream, name)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private suspend fun importStream(context: Context, input: java.io.InputStream, displayName: String): File {
+        val directory = File(context.filesDir, "models")
+        check(directory.exists() || directory.mkdirs()) { "Could not create model storage directory" }
+        val safeName = sanitizeModelName(displayName)
+        val baseName = safeName.substringBeforeLast('.', safeName).take(72).ifBlank { "model" }
+        val temporary = File(directory, ".${UUID.randomUUID()}.part")
+        val jobContext = currentCoroutineContext()
+        val digest = MessageDigest.getInstance("SHA-256")
+        var copiedBytes = 0L
+        try {
+            input.use { source ->
+                FileOutputStream(temporary).buffered().use { output ->
+                    val buffer = ByteArray(1024 * 1024)
+                    while (true) {
+                        jobContext.ensureActive()
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        if (count == 0) continue
+                        digest.update(buffer, 0, count)
+                        output.write(buffer, 0, count)
+                        copiedBytes += count
                     }
                 }
-                destFile
             }
-
-            is ModelSource.RemoteUrl -> {
-                val targetDir = File(context.filesDir, "models").apply { mkdirs() }
-                val fileName = source.suggestedFileName ?: "downloaded_model.gguf"
-                File(targetDir, fileName)
+            require(copiedBytes > 0L) { "Downloaded/imported model file is empty" }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            val destination = File(directory, "$baseName-$hash.gguf")
+            if (destination.exists()) {
+                require(destination.length() == copiedBytes) { "SHA-256 filename collision" }
+                temporary.delete()
+                return destination
             }
+            if (!temporary.renameTo(destination)) {
+                throw IOException("Could not atomically finalize imported model file")
+            }
+            return destination
+        } catch (t: Throwable) {
+            temporary.delete()
+            throw t
         }
+    }
+
+    private fun sanitizeModelName(value: String): String {
+        val leaf = value.substringAfterLast('/').substringAfterLast('\\')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('.', '_', '-')
+            .take(96)
+        return leaf.substringBeforeLast('.', leaf).ifBlank { "model" } + ".gguf"
     }
 
     private fun queryFileName(context: Context, uri: Uri): String? {
@@ -63,13 +121,13 @@ internal object ModelSourceResolver {
             try {
                 context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex != -1) {
-                            return cursor.getString(nameIndex)
-                        }
+                        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (index != -1) return cursor.getString(index)
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // Providers may not expose OpenableColumns.
+            }
         }
         return uri.lastPathSegment
     }

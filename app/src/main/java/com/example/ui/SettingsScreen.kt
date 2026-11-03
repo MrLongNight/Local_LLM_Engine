@@ -84,7 +84,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Vulkan ist der bevorzugte GPU-Ausführungspfad. VULKAN liefert einen klaren Fehler, falls nicht verfügbar (kein stiller Fallback). AUTO fällt transparent auf CPU zurück.",
+                        text = "AUTO nutzt ein tatsächlich eingebautes GPU-Backend, sofern llama.cpp eines registriert hat, sonst CPU. Dieser aktuelle Build enthält kein Vulkan-Backend; VULKAN meldet deshalb einen klaren Fehler statt GPU-Nutzung vorzutäuschen.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -105,7 +105,7 @@ fun SettingsScreen(
                     if (config.backendPreference != BackendPreference.CPU) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "GPU VRAM Offload: ${config.gpuLayers} Layer",
+                            text = "GPU-Layer-Offload: ${config.gpuLayers} Layer (nur bei eingebautem GPU-Backend)",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )

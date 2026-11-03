@@ -15,6 +15,9 @@ data class InferenceRequest(
     init {
         require(messages.isNotEmpty()) { "InferenceRequest messages must not be empty" }
         require(maxPredictTokens > 0) { "maxPredictTokens must be greater than zero" }
+        require(temperature == null || (temperature.isFinite() && temperature >= 0f)) {
+            "temperature must be a finite, non-negative value"
+        }
     }
 
     companion object {

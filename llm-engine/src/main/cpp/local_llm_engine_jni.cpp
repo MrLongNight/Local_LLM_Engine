@@ -1,6 +1,5 @@
 #include <android/log.h>
 #include <jni.h>
-#include <vulkan/vulkan.h>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -14,6 +13,7 @@
 #include "common.h"
 #include "chat.h"
 #include "sampling.h"
+#include "ggml-backend.h"
 
 #define TAG "LocalLlmEngineNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
@@ -24,6 +24,11 @@
 static constexpr int OVERFLOW_HEADROOM = 8;
 static constexpr int BATCH_SIZE = 512;
 static constexpr float DEFAULT_TEMP = 0.7f;
+
+static constexpr int FINISH_STOP = 0;
+static constexpr int FINISH_MAX_TOKENS = 1;
+static constexpr int FINISH_CANCELLED = 2;
+static constexpr int FINISH_ERROR = 3;
 
 
 enum BackendMode {
@@ -56,7 +61,7 @@ struct EngineInstance {
     bool is_batch_allocated = false;
 
     // Inference tracking
-    int32_t last_finish_reason = 0; // 0=STOP, 1=MAX_TOKENS, 2=CANCELLED, 3=ERROR
+    int32_t last_finish_reason = FINISH_ERROR;
     int64_t inference_start_us = 0;
     int32_t tokens_generated = 0;
 
@@ -64,7 +69,7 @@ struct EngineInstance {
         stop_generation_position = 0;
         cached_token_chars.clear();
         assistant_ss.str("");
-        last_finish_reason = 0;
+        last_finish_reason = FINISH_ERROR;
         tokens_generated = 0;
         inference_start_us = 0;
     }
@@ -128,42 +133,16 @@ static inline EngineInstance* fromHandle(jlong handle) {
     return reinterpret_cast<EngineInstance*>(handle);
 }
 
-static bool probeVulkanDevice(std::string& out_device_name) {
-    VkApplicationInfo appInfo = {};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "LocalLlmEngine";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "llama.cpp";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
-
-    VkInstanceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
-
-    VkInstance instance = VK_NULL_HANDLE;
-    VkResult res = vkCreateInstance(&createInfo, nullptr, &instance);
-    if (res != VK_SUCCESS || instance == VK_NULL_HANDLE) {
-        LOGD("Vulkan vkCreateInstance returned %d", res);
-        return false;
-    }
-
-    uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-    if (deviceCount == 0) {
-        vkDestroyInstance(instance, nullptr);
-        return false;
-    }
-
-    std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
-
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(devices[0], &props);
-    out_device_name = props.deviceName;
-    LOGI("Found Vulkan physical device: %s (Type: %d)", props.deviceName, props.deviceType);
-
-    vkDestroyInstance(instance, nullptr);
+static bool getVulkanBackendDeviceName(std::string& out_device_name) {
+    // Check llama.cpp's registered backend, not merely Android's Vulkan loader.
+    (void) llama_supports_gpu_offload();
+    ggml_backend_reg_t registry = ggml_backend_reg_by_name("Vulkan");
+    if (registry == nullptr || ggml_backend_reg_dev_count(registry) == 0) return false;
+    ggml_backend_dev_t device = ggml_backend_reg_dev_get(registry, 0);
+    if (device == nullptr) return false;
+    const char* name = ggml_backend_dev_name(device);
+    out_device_name = name != nullptr ? name : "Vulkan device";
+    LOGI("Registered llama.cpp Vulkan backend device: %s", out_device_name.c_str());
     return true;
 }
 
@@ -241,6 +220,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetSystemInfo(
     return env->NewStringUTF(sys_info ? sys_info : "N/A");
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeIsVulkanBackendAvailable(
+        JNIEnv* /*env*/, jclass /*clazz*/) {
+    std::string device_name;
+    return getVulkanBackendDeviceName(device_name) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jlong JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeCreateEngine(JNIEnv* /*env*/, jclass /*clazz*/) {
     auto* engine = new EngineInstance();
@@ -276,7 +262,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     // GPU / Vulkan offload resolution
     std::string vk_device_name;
-    bool has_vulkan = probeVulkanDevice(vk_device_name);
+    bool has_vulkan = getVulkanBackendDeviceName(vk_device_name);
 
     if (backend_mode == BACKEND_VULKAN) {
         if (!has_vulkan) {
@@ -398,6 +384,25 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelMetada
     return env->NewStringUTF(ss.str().c_str());
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelArchitecture(
+        JNIEnv* env, jclass /*clazz*/, jlong handle) {
+    auto* engine = fromHandle(handle);
+    if (!engine || !engine->model) return env->NewStringUTF("unknown");
+    char architecture[128] = {};
+    const int32_t result = llama_model_meta_val_str(
+            engine->model, "general.architecture", architecture, sizeof(architecture));
+    if (result < 0 || architecture[0] == '\\0') return env->NewStringUTF("unknown");
+    return env->NewStringUTF(architecture);
+}
+
+JNIEXPORT void JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeResetCancellation(
+        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
+    auto* engine = fromHandle(handle);
+    if (engine) engine->cancel_requested.store(false, std::memory_order_release);
+}
+
 JNIEXPORT jint JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         JNIEnv* env,
@@ -410,9 +415,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     if (!engine || !engine->model || !engine->context) return 1;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
-    engine->cancel_requested.store(false);
     engine->reset_short_term();
     engine->reset_long_term(true);
+    engine->last_finish_reason = FINISH_ERROR;
+    engine->inference_start_us = llama_time_us();
+    if (engine->cancel_requested.load(std::memory_order_acquire)) {
+        engine->last_finish_reason = FINISH_CANCELLED;
+        return -2;
+    }
 
     jsize count = env->GetArrayLength(jroles);
     if (count == 0 || count != env->GetArrayLength(jcontents)) {
@@ -471,15 +481,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
 
     int dec_res = decode_tokens(engine, tokens, engine->current_position, true);
     if (dec_res != 0) {
+        if (engine->cancel_requested.load(std::memory_order_acquire) || dec_res == -2) {
+            engine->last_finish_reason = FINISH_CANCELLED;
+            return -2;
+        }
         LOGE("Prompt decoding failed with code %d", dec_res);
+        engine->last_finish_reason = FINISH_ERROR;
         return 4;
     }
-
     engine->current_position += prompt_size;
     int predict_len = max_predict > 0 ? max_predict : 1024;
     engine->stop_generation_position = engine->current_position + predict_len;
-    engine->inference_start_us = llama_time_us();
-
     return 0;
 }
 
@@ -493,7 +505,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     if (engine->cancel_requested.load()) {
         LOGI("Inference cancelled cooperatively");
-        engine->last_finish_reason = 2; // CANCELLED
+        engine->last_finish_reason = FINISH_CANCELLED;
         return nullptr;
     }
 
@@ -504,7 +516,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     if (engine->current_position >= engine->stop_generation_position) {
         LOGI("Reached stop generation token count");
-        engine->last_finish_reason = 1; // MAX_TOKENS
+        engine->last_finish_reason = FINISH_MAX_TOKENS;
         return nullptr;
     }
 
@@ -516,7 +528,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     if (llama_decode(engine->context, engine->batch) != 0) {
         LOGE("llama_decode failed during token generation");
-        engine->last_finish_reason = 3; // ERROR
+        engine->last_finish_reason = engine->cancel_requested.load(std::memory_order_acquire)
+                ? FINISH_CANCELLED : FINISH_ERROR;
         return nullptr;
     }
 
@@ -526,7 +539,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
     if (llama_vocab_is_eog(vocab, new_token_id)) {
         LOGI("Generated EOG token: %d", new_token_id);
-        engine->last_finish_reason = 0; // STOP
+        engine->last_finish_reason = FINISH_STOP;
         return nullptr;
     }
 

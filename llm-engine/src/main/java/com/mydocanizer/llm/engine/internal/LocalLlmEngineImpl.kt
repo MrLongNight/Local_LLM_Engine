@@ -54,6 +54,8 @@ internal class LocalLlmEngineImpl(
 
     private val engineHandle = AtomicLong(0L)
     private val isCancelled = AtomicBoolean(false)
+    private val isClosed = AtomicBoolean(false)
+    private val nativeHandleLock = Any()
 
     init {
         scope.launch {
@@ -63,9 +65,10 @@ internal class LocalLlmEngineImpl(
 
     override suspend fun initialize(): Result<Unit> = withContext(llamaDispatcher) {
         runCatching {
-            if (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded) {
-                return@runCatching
-            }
+            check(!isClosed.get()) { "Engine is closed" }
+            if (engineHandle.get() != 0L &&
+                (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded)
+            ) return@runCatching
             _state.value = EngineState.Initializing
 
             val loaded = NativeEngineHandle.ensureLoaded()
@@ -81,18 +84,27 @@ internal class LocalLlmEngineImpl(
 
             val sysInfo = runCatching { NativeEngineHandle.nativeGetSystemInfo() }.getOrDefault("")
             val recThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+            val hasVulkanBackend = NativeEngineHandle.nativeIsVulkanBackendAvailable()
             _backendInfo.value = BackendInfo(
-                backendName = "llama.cpp (Vulkan / ARM NEON / KleidiAI / AVX)",
+                backendName = if (hasVulkanBackend) {
+                    "llama.cpp (Vulkan GPU + CPU)"
+                } else {
+                    "llama.cpp (CPU; Vulkan-Backend nicht in diesem Build enthalten)"
+                },
                 systemInfo = sysInfo,
                 isAvailable = true,
                 recommendedThreads = recThreads
             )
 
-            _state.value = EngineState.Ready
-            Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
+            if (!isClosed.get()) {
+                _state.value = EngineState.Ready
+                Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
+            }
         }.onFailure { err ->
             Log.e(TAG, "Initialization failed", err)
-            _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
+            if (!isClosed.get()) {
+                _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
+            }
         }
     }
 
@@ -102,6 +114,7 @@ internal class LocalLlmEngineImpl(
     ): Result<ModelInfo> = withContext(llamaDispatcher) {
         runCatching {
             val handle = getValidHandle()
+            _currentModel.value = null
             _state.value = EngineState.LoadingModel(source)
 
             val file: File = ModelSourceResolver.resolveToFile(context, source)
@@ -134,6 +147,8 @@ internal class LocalLlmEngineImpl(
             val nCtxTrain = parts.getOrNull(2)?.toIntOrNull() ?: 0
             val sizeBytes = parts.getOrNull(3)?.toLongOrNull() ?: file.length()
             val activeBackend = parts.getOrNull(4) ?: NativeEngineHandle.nativeGetActiveBackend(handle)
+            val architecture = NativeEngineHandle.nativeGetModelArchitecture(handle)
+                .ifBlank { "unknown" }
 
             val sha256 = calculateSha256(file)
 
@@ -143,24 +158,29 @@ internal class LocalLlmEngineImpl(
                 sizeBytes = sizeBytes,
                 parameterCount = nParams,
                 contextLengthTrain = nCtxTrain,
-                architecture = "GGUF",
+                architecture = architecture,
                 description = desc,
                 activeBackend = activeBackend,
                 sha256 = sha256
             )
 
-            _currentModel.value = info
-            _state.value = EngineState.ModelLoaded(info)
-            Log.i(TAG, "Model loaded successfully: $info")
+            if (!isClosed.get()) {
+                _currentModel.value = info
+                _state.value = EngineState.ModelLoaded(info)
+                Log.i(TAG, "Model loaded successfully: $info")
+            }
             info
         }.onFailure { err ->
             Log.e(TAG, "Model load failed", err)
-            _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
+            if (!isClosed.get()) {
+                _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
+            }
         }
     }
 
     override suspend fun unloadModel(): Result<Unit> = withContext(llamaDispatcher) {
         runCatching {
+            check(!isClosed.get()) { "Engine is closed" }
             val handle = engineHandle.get()
             if (handle != 0L) {
                 NativeEngineHandle.nativeUnloadModel(handle)
@@ -175,46 +195,39 @@ internal class LocalLlmEngineImpl(
     override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = flow {
         val modelInfo = _currentModel.value
             ?: throw IllegalStateException("No model loaded. Call loadModel() before chat.")
-
         val handle = getValidHandle()
         _state.value = EngineState.Inferring(request)
         isCancelled.set(false)
-
-        emit(InferenceEvent.Started(request.messages.size))
-
-        val roles = request.messages.map { it.role.roleName }.toTypedArray()
-        val contents = request.messages.map { it.content }.toTypedArray()
-
-        val processRes = NativeEngineHandle.nativeProcessChat(
-            handle = handle,
-            roles = roles,
-            contents = contents,
-            maxPredict = request.maxPredictTokens
-        )
-
-        if (processRes != 0) {
-            val err = IllegalStateException("Native prompt evaluation failed with code $processRes")
-            emit(InferenceEvent.Error(err))
-            _state.value = EngineState.ModelLoaded(modelInfo)
-            return@flow
-        }
+        NativeEngineHandle.nativeResetCancellation(handle)
 
         val outputBuilder = StringBuilder()
-        var tokenCount = 0
-
+        var tokenEventIndex = 0
         try {
+            emit(InferenceEvent.Started(request.messages.size))
+            val roles = request.messages.map { it.role.roleName }.toTypedArray()
+            val contents = request.messages.map { it.content }.toTypedArray()
+
+            // Native prompt evaluation must not clear a cancel request arriving after reset.
+            val processRes = NativeEngineHandle.nativeProcessChat(
+                handle = handle, roles = roles, contents = contents, maxPredict = request.maxPredictTokens
+            )
+            if (processRes == -2 || isCancelled.get()) {
+                emit(InferenceEvent.Cancelled("", 0))
+                return@flow
+            }
+            if (processRes != 0) {
+                emit(InferenceEvent.Error(
+                    IllegalStateException("Native prompt evaluation failed with code $processRes")
+                ))
+                return@flow
+            }
+
+            // Native code enforces maxPredictTokens; UTF-8 chunks are not model-token counts.
             while (!isCancelled.get()) {
-                val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
-                if (tokenPiece == null) {
-                    break
-                }
+                val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle) ?: break
                 if (tokenPiece.isNotEmpty()) {
                     outputBuilder.append(tokenPiece)
-                    emit(InferenceEvent.Token(tokenPiece, tokenCount))
-                    tokenCount++
-                    if (tokenCount >= request.maxPredictTokens) {
-                        break
-                    }
+                    emit(InferenceEvent.Token(tokenPiece, tokenEventIndex++))
                 }
             }
 
@@ -224,39 +237,33 @@ internal class LocalLlmEngineImpl(
                 rawReason == 0 -> FinishReason.STOP
                 rawReason == 1 -> FinishReason.MAX_TOKENS
                 rawReason == 2 -> FinishReason.CANCELLED
-                else -> FinishReason.STOP
+                else -> FinishReason.ERROR
             }
-
-            val durationUs = NativeEngineHandle.nativeGetInferenceDurationUs(handle)
-            val durationMs = (durationUs / 1000L).coerceAtLeast(1L)
-            val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
-            val tokensPerSec = (actualTokens * 1000.0) / durationMs
+            val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
+            val durationMs = (NativeEngineHandle.nativeGetInferenceDurationUs(handle) / 1000L).coerceAtLeast(1L)
+            val tokensPerSec = actualTokens * 1000.0 / durationMs
             val fullText = outputBuilder.toString()
 
-            if (finishReason == FinishReason.CANCELLED) {
-                emit(InferenceEvent.Cancelled(fullText, actualTokens))
-            } else {
-                val result = InferenceResult(
-                    text = fullText,
-                    tokensGenerated = actualTokens,
-                    durationMs = durationMs,
-                    tokensPerSecond = tokensPerSec,
-                    finishReason = finishReason
-                )
-                emit(InferenceEvent.Completed(result))
+            when (finishReason) {
+                FinishReason.CANCELLED -> emit(InferenceEvent.Cancelled(fullText, actualTokens))
+                FinishReason.ERROR -> emit(InferenceEvent.Error(
+                    IllegalStateException("Native generation ended with finish reason $rawReason"), fullText
+                ))
+                FinishReason.STOP, FinishReason.MAX_TOKENS -> emit(InferenceEvent.Completed(
+                    InferenceResult(fullText, actualTokens, durationMs, tokensPerSec, finishReason)
+                ))
             }
         } catch (e: CancellationException) {
-            Log.i(TAG, "streamChat coroutine cancelled, notifying native engine")
+            Log.i(TAG, "streamChat coroutine cancelled; notifying native engine")
+            isCancelled.set(true)
             NativeEngineHandle.nativeCancel(handle)
-            val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
-            emit(InferenceEvent.Cancelled(outputBuilder.toString(), actualTokens))
             throw e
         } catch (t: Throwable) {
-            Log.e(TAG, "Error during generation loop", t)
+            Log.e(TAG, "Error during inference", t)
             emit(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
             isCancelled.set(false)
-            _state.value = EngineState.ModelLoaded(modelInfo)
+            if (!isClosed.get()) _state.value = EngineState.ModelLoaded(modelInfo)
         }
     }.flowOn(llamaDispatcher)
 
@@ -288,21 +295,35 @@ internal class LocalLlmEngineImpl(
 
     override fun cancelInference() {
         isCancelled.set(true)
-        val handle = engineHandle.get()
-        if (handle != 0L) {
-            NativeEngineHandle.nativeCancel(handle)
+        synchronized(nativeHandleLock) {
+            if (!isClosed.get()) {
+                val handle = engineHandle.get()
+                if (handle != 0L) NativeEngineHandle.nativeCancel(handle)
+            }
         }
     }
 
     override fun close() {
-        cancelInference()
-        val handle = engineHandle.getAndSet(0L)
-        if (handle != 0L) {
-            NativeEngineHandle.nativeDestroyEngine(handle)
+        val shouldClose = synchronized(nativeHandleLock) {
+            if (!isClosed.compareAndSet(false, true)) false
+            else {
+                isCancelled.set(true)
+                val handle = engineHandle.get()
+                if (handle != 0L) NativeEngineHandle.nativeCancel(handle)
+                true
+            }
         }
+        if (!shouldClose) return
         _state.value = EngineState.Closed
-        scope.cancel()
-        Log.i(TAG, "LocalLlmEngine closed")
+        // Defer pointer destruction until the single engine dispatcher has left any JNI call.
+        scope.launch {
+            synchronized(nativeHandleLock) {
+                val handle = engineHandle.getAndSet(0L)
+                if (handle != 0L) NativeEngineHandle.nativeDestroyEngine(handle)
+            }
+            scope.cancel()
+            Log.i(TAG, "LocalLlmEngine closed")
+        }
     }
 
     private fun calculateSha256(file: File): String = runCatching {
@@ -318,6 +339,7 @@ internal class LocalLlmEngineImpl(
     }.getOrDefault("N/A")
 
     private fun getValidHandle(): Long {
+        check(!isClosed.get()) { "Engine is closed" }
         val h = engineHandle.get()
         check(h != 0L) { "Engine handle is invalid or closed" }
         return h
