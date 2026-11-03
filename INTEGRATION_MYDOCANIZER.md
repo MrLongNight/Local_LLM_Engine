@@ -28,11 +28,11 @@ dependencies {
 ## 2. Erforderliche Gradle-Abhängigkeiten & Toolchain-Voraussetzungen
 
 ### Modul `:llm-engine` (`build.gradle.kts`)
-- **Android Gradle Plugin (AGP)**: 9.1.1 (kompatibel mit 8.x - 9.x)
+- **Android Gradle Plugin (AGP)**: 9.1.1 (die Version des Zielprojekts muss mit dessen Gradle-/Kotlin-Plugin-Konfiguration kompatibel sein)
 - **Kotlin**: 2.2.10
 - **Android NDK**: `27.2.12479018` (in `ndkVersion` fixiert)
 - **CMake**: `3.22.1`
-- **Java-Version**: 17 (JavaVersion.VERSION_17)
+- **Java-Bytecode**: 17 (JavaVersion.VERSION_17). Der aktuelle Robolectric-API-36-Unit-Test-Workflow benötigt zum Ausführen JDK 21; das ist keine Laufzeitvoraussetzung für die Android-App.
 - **minSdk**: 24
 - **targetSdk**: 36
 - **Externe Bibliotheken**:
@@ -85,7 +85,7 @@ Die Engine verwendet intern einen isolierten Single-Thread-IO-Dispatcher (`Dispa
 
 ## 6. Übergabe eines GGUF-Modells
 
-Unterstützt werden lokale Pfade (`ModelSource.FilePath`), SAF Content-URIs (`ModelSource.ContentUri`) sowie Assets (`ModelSource.AssetPath`):
+Unterstützt werden lokale Pfade (`ModelSource.FilePath`), SAF Content-URIs (`ModelSource.ContentUri`), Assets (`ModelSource.AssetPath`) und HTTPS-Downloads (`ModelSource.RemoteUrl`). Importierte Quellen werden zunächst in eine temporäre Datei geschrieben und erst nach erfolgreichem Abschluss in den privaten Modellordner verschoben. Der Dateiname erhält einen SHA-256-Suffix, damit unterschiedliche Modelle mit gleichem Anzeigenamen einander nicht überschreiben. Downloads sind derzeit nicht resumierbar.
 
 ```kotlin
 import com.mydocanizer.llm.engine.ModelSource
@@ -161,7 +161,7 @@ val request = InferenceRequest(
 
 ## 8. Mehrnachrichten-Chats (Multi-Turn)
 
-Die Engine akzeptiert eine vollständige Gesprächshistorie. Native Jinja-Chat-Templates des Modells (z. B. ChatML, Llama-3-Header) werden automatisch nativ formatiert:
+Die Engine akzeptiert eine vollständige Gesprächshistorie. llama.cpp stellt das im GGUF hinterlegte Chat-Template bereit; die aktuelle JNI-Implementierung ruft die nicht-Jinja-Formatierungsvariante auf. Modelle, deren Template zwingend Jinja-Kontrollstrukturen oder komplexe Template-Logik benötigen, sind daher noch nicht garantiert kompatibel:
 
 ```kotlin
 val history = listOf(
@@ -216,35 +216,35 @@ engine.streamChat(request).collect { event ->
 ## 10. Cancellation (Nativer Inferenz-Abbruch)
 
 Der Abbruch kann auf zwei konsistente Arten ausgelöst werden:
-1. **Coroutine-Cancellation**: Wenn der aufrufende Coroutine-Scope gecancelt wird (z. B. Benutzer verlässt Screen), wird über den `onCompletion`-Handler der native atomare Abbruch-Flag `cancel_requested` gesetzt.
+1. **Coroutine-Cancellation**: Wenn der aufrufende Flow-Scope gecancelt wird, setzt die Engine den nativen atomaren Abbruch-Flag. llama.cpp prüft ihn über den Abort-Callback auch während der Prompt-Auswertung.
 2. **Expliziter Methodenaufruf**:
 ```kotlin
 // Bricht die laufende Generierung sofort nativ ab
 engine.cancelInference()
 ```
-Unmittelbar nach dem Abbruch ist der Handle sofort wieder im Status `Idle`, sodass der Benutzer ohne Neustart direkt eine neue Nachricht absenden kann.
+Nach einem expliziten Abbruch wird ein `InferenceEvent.Cancelled` mit dem bis dahin erzeugten Text gemeldet. Nach Coroutine-Cancellation wird die Cancellation an den aufrufenden Scope weitergereicht. Der Engine-Zustand kehrt nach Abschluss der laufenden nativen Arbeit zu `ModelLoaded` zurück. Das Schließen der Engine signalisiert zuerst den Abbruch und zerstört den nativen Handle erst serialisiert auf dem Engine-Dispatcher; dadurch wird kein Handle während einer laufenden Inferenz freigegeben.
 
 ---
 
 ## 11. Fehlerbehandlung
 
 Die Engine unterscheidet strikt zwischen erwartbaren Zuständen und echten Hardware-/Ladefehlern:
-- **`BackendPreference.VULKAN`**: Schlägt mit einem klaren `IllegalStateException` fehl, falls Vulkan auf dem Gerät nicht initialisiert werden kann (kein stiller Fallback).
-- **`BackendPreference.AUTO`**: Erkennt das Nichtvorhandensein von Vulkan und nutzt transparent die CPU (ARM NEON / AVX).
+- **`BackendPreference.VULKAN`**: Schlägt mit einem klaren Fehler fehl, falls das llama.cpp-Vulkan-Backend nicht mitgebaut oder kein nutzbares Vulkan-Backend registriert ist. Der aktuelle CMake-Build kompiliert `GGML_VULKAN` nicht.
+- **`BackendPreference.AUTO`**: Verwendet nur ein tatsächlich registriertes llama.cpp-GPU-Backend; andernfalls CPU.
 - **Fehler werden niemals als angebliche Modellantwort formatiert**, sondern immer als `InferenceEvent.Error` bzw. `Result.failure()` geliefert.
 
 ---
 
 ## 12. `InferenceResult` Metriken
 
-Am Ende jeder erfolgreichen Inferenz liefert `InferenceResult` echte Messwerte:
+Am Ende jeder erfolgreichen Inferenz liefert `InferenceResult` native Messwerte. Die Zeitmessung umfasst Prompt-Tokenisierung, Prefill und Generierung:
 - `text`: Vollständiger generierter Antworttext
 - `tokensGenerated`: Tatsächliche Anzahl erzeugter Token
 - `durationMs`: Reale Inferenzzeit in Millisekunden
 - `tokensPerSecond`: Exakte Generierungsrate (`tokensGenerated / (durationMs / 1000.0)`)
 - `finishReason`:
   - `FinishReason.STOP`: Reguläres EOS-Token (End of Sequence) erreicht
-  - `FinishReason.LENGTH`: `maxPredictTokens` erreicht
+  - `FinishReason.MAX_TOKENS`: `maxPredictTokens` erreicht
   - `FinishReason.CANCELLED`: Abbruch durch Benutzer
   - `FinishReason.ERROR`: Interner Fehler
 

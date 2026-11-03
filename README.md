@@ -13,7 +13,7 @@ A standalone Android application and reusable Android library for running local 
 
 ## Requirements
 
-- JDK 17
+- JDK 17 for the Android/Native APK build; JDK 21 for the Robolectric SDK 36 unit-test workflow
 - Gradle 9.3.1
 - Android SDK platform 36
 - Android NDK 27.2.12479018
@@ -59,9 +59,11 @@ gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 
 ## Current limitations
 
-- The native backend must be verified independently; detecting a Vulkan-capable device is not equivalent to using the GGML Vulkan backend.
+- The current CMake configuration does not compile GGML_VULKAN. The engine checks llama.cpp's registered backend (not the Android Vulkan loader) and reports CPU execution; an explicit Vulkan request fails instead of claiming GPU acceleration. Enabling Vulkan requires the Vulkan SDK/shader compiler and a separately verified Android cross-build.
 - Unit tests and APK compilation do not replace real-device model loading, generation, cancellation, memory, and performance checks.
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
+- Remote model imports are HTTPS-only and staged in app-private storage under a SHA-256-addressed filename. Downloads are not resumable yet.
+- Coroutine and explicit cancellation are propagated to llama.cpp's native abort callback; real-device latency and cancellation behaviour still require device verification.
 - The API and integration document may evolve while the engine implementation is stabilized.
 
 ## Integration direction

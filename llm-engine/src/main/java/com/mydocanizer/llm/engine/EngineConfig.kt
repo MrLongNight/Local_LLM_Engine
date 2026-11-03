@@ -5,14 +5,14 @@ package com.mydocanizer.llm.engine
  */
 enum class BackendPreference(val modeId: Int, val label: String) {
     /**
-     * Tries Vulkan GPU acceleration first.
-     * If Vulkan is unavailable on device, transparently falls back to CPU.
+     * Uses a GPU backend only when llama.cpp has actually registered one;
+     * otherwise falls back to CPU.
      */
     AUTO(0, "Automatisch (GPU-Backend falls verfügbar, sonst CPU)"),
 
     /**
-     * Enforces Vulkan GPU execution.
-     * Fails with a hard error if Vulkan cannot be initialized or no GPU is found (no silent fallback).
+     * Enforces llama.cpp's Vulkan backend.
+     * Fails if the backend is not compiled, registered, or usable (no silent fallback).
      */
     VULKAN(1, "Vulkan GPU erzwingen (nur bei eingebautem Backend)"),
 
