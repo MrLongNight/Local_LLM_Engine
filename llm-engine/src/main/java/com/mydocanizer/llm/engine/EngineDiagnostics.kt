@@ -205,7 +205,7 @@ internal object DiagnosticLogFormatter {
         details: String?
     ): String {
         val fields = listOf(timestampUtc, level, component, event, details.orEmpty())
-        return fields.joinToString(separator = "\\t", postfix = "\\n") { sanitize(it) }
+        return fields.joinToString(separator = "\t", postfix = "\n") { sanitize(it) }
     }
 
     fun sanitize(value: String): String = value
