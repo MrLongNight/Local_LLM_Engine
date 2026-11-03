@@ -356,7 +356,7 @@ class DocAnizerViewModel(
                         val partialText = event.partialText.ifBlank { streamBuilder.toString() }
                         if (partialText.isNotBlank()) {
                             _chatMessages.value = _chatMessages.value + ChatMessage.assistant(
-                                "$partialText\\n\\n[Teilantwort – Inferenzfehler]"
+                                "$partialText\n\n[Teilantwort – Inferenzfehler]"
                             )
                         }
                         val reason = event.throwable.message ?: event.throwable.javaClass.simpleName

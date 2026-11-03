@@ -4,8 +4,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
@@ -42,6 +45,10 @@ fun MainScreen(
     val currentTab: AppTab by viewModel.currentTab.collectAsState()
     val statusMessage: String? by viewModel.statusMessage.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val diagnosticsExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain"),
+        onResult = { uri -> if (uri != null) viewModel.exportDiagnostics(uri) }
+    )
 
     LaunchedEffect(currentTab) {
         EngineDiagnostics.info("ui", "TAB_CONTENT_RENDER_REQUESTED", "tab=$currentTab")
@@ -59,19 +66,37 @@ fun MainScreen(
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = "Local LLM Engine",
+                        text = when (currentTab) {
+                            AppTab.CHAT -> "Local LLM Engine"
+                            AppTab.IMPORT -> "Modell-Import"
+                            AppTab.SETTINGS -> "Einstellungen"
+                        },
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleLarge
                     )
                 },
                 actions = {
+                    if (currentTab == AppTab.CHAT) {
+                        IconButton(
+                            onClick = { viewModel.restartConversation() },
+                            modifier = Modifier.testTag("top_app_bar_reset_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Gespräch neu starten"
+                            )
+                        }
+                    }
                     IconButton(
-                        onClick = { viewModel.restartConversation() },
-                        modifier = Modifier.testTag("top_app_bar_reset_button")
+                        onClick = {
+                            EngineDiagnostics.info("ui", "DIAGNOSTICS_EXPORT_REQUESTED_FROM_APP_BAR")
+                            diagnosticsExportLauncher.launch("local-llm-engine-diagnostics.log")
+                        },
+                        modifier = Modifier.testTag("top_app_bar_diagnostics_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Gespräch neu starten"
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = "Diagnoseprotokoll exportieren"
                         )
                     }
                     IconButton(

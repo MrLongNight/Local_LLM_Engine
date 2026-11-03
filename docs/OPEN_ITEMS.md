@@ -2,7 +2,7 @@
 
 Stand: 03.11.2026
 Branch: `main`
-Aktueller App-/Engine-Quellstand (APK-Quelle): `47632ee5f4137c17a5c273ed496f5cd52accfc4c`; dieser Folgecommit ändert nur Tests und Dokumentation.
+Vorheriger App-/Engine-Quellstand: `47632ee5f4137c17a5c273ed496f5cd52accfc4c`.
 
 ## In den Korrekturläufen umgesetzt
 
@@ -41,6 +41,7 @@ Aktueller App-/Engine-Quellstand (APK-Quelle): `47632ee5f4137c17a5c273ed496f5cd5
 
 - Unit Tests #60 erfolgreich auf `48f8fb8b2d4d11e96eb350cd823712e10a2c0027`: [Run #60](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402289).
 - Android APK Build #28 erfolgreich auf demselben Commit: [Run #28](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402174).
+- Unit Tests #62 erfolgreich auf `27966cd62855af7df4a7e744c3ae5c4891d5c6bf`: [Run #62](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41687470987).
 - Unit Tests #61 auf `47632ee5f4137c17a5c273ed496f5cd52accfc4c`: Kotlin-Compile erfolgreich; ein Log-Snapshot-Test schlug wegen uneinheitlicher Newline-Testdaten fehl: [Run #61](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41686101022).
 - Android APK Build #29 auf demselben Commit erfolgreich; APK-Artefakt `Local-LMM-Engine-debug-apk` vorhanden (38.444.545 Bytes, Archiv-SHA-256 `f5042ce8a717d276aa058a0600854a1f83936b07d1ebd291232e30d46b33f4c0`), verfügbar bis 17.11.2026: [Run #29](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41686101062).
 - Die nachfolgenden Änderungen betreffen nur Tests/Dokumentation und verändern die APK-Quelle nicht.
@@ -49,7 +50,7 @@ Aktueller App-/Engine-Quellstand (APK-Quelle): `47632ee5f4137c17a5c273ed496f5cd5
 ## Noch offen – nach Priorität
 
 ### P0 – Geräteverhalten und Chat-Ausgabe
-1. Settings-Tab auf einem realen Gerät öffnen und per exportiertem TAB_SELECTED/TAB_CONTENT_RENDER_REQUESTED/SETTINGS_SCREEN_VISIBLE-Log den gesamten Navigationspfad prüfen.
+1. Settings-Tab auf einem realen Gerät öffnen und per exportiertem TAB_SELECTED/TAB_CONTENT_RENDER_REQUESTED/SETTINGS_SCREEN_VISIBLE-Log den gesamten Navigationspfad prüfen. Der Diagnose-Export ist dafür jetzt zusätzlich direkt in der oberen App-Leiste erreichbar.
 2. Chat mit einem realen GGUF-Modell prüfen: sichtbare Token-Ausgabe, nur interne/control tokens, leere Modellantwort, Teilantwort bei Inferenzfehler, Abbruch und Tokenlimit.
 3. Neue Progress-Events und Erhalt von Teilantworten nach Inferenzfehlern mit einem echten nativen Modelllauf verifizieren.
 
