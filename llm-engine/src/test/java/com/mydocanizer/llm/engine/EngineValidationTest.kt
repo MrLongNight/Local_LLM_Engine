@@ -37,6 +37,9 @@ class EngineValidationTest {
         assertTrue(runCatching { InferenceRequest(listOf(ChatMessage.user("hi")), maxPredictTokens = 0) }.isFailure)
         assertTrue(runCatching { InferenceRequest(listOf(ChatMessage.user("hi")), temperature = -0.1f) }.isFailure)
         assertTrue(runCatching { InferenceRequest(listOf(ChatMessage.user("hi")), temperature = Float.NaN) }.isFailure)
+        assertTrue(runCatching { InferenceRequest(listOf(ChatMessage.user("hi")), topP = -0.01f) }.isFailure)
+        assertTrue(runCatching { InferenceRequest(listOf(ChatMessage.user("hi")), topP = 1.01f) }.isFailure)
+        assertEquals(0.75f, InferenceRequest(listOf(ChatMessage.user("hi")), topP = 0.75f).topP)
     }
 
     @Test

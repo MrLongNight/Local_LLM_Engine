@@ -10,22 +10,28 @@ internal object NativeEngineHandle {
     private const val LIB_NAME = "localllm_engine"
 
     @Volatile
-    private var isLoaded = false
+    private var isLibraryLoaded = false
+
+    @Volatile
+    private var isBackendInitialized = false
 
     @Synchronized
     fun ensureLoaded(): Boolean {
-        if (!isLoaded) {
-            try {
+        return try {
+            if (!isLibraryLoaded) {
                 System.loadLibrary(LIB_NAME)
-                isLoaded = true
-                nativeInitBackend()
-                Log.i(TAG, "Native library $LIB_NAME successfully loaded and backend initialized")
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to load native library $LIB_NAME: ${t.message}", t)
-                return false
+                isLibraryLoaded = true
             }
+            if (!isBackendInitialized) {
+                nativeInitBackend()
+                isBackendInitialized = true
+            }
+            Log.i(TAG, "Native library $LIB_NAME loaded and llama.cpp backend initialized")
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to initialize native library $LIB_NAME: ${t.message}", t)
+            false
         }
-        return isLoaded
     }
 
     @JvmStatic
@@ -69,7 +75,7 @@ internal object NativeEngineHandle {
     external fun nativeResetCancellation(handle: Long)
 
     @JvmStatic
-    external fun nativeSetRequestTemperature(handle: Long, temperature: Float): Int
+    external fun nativeSetRequestSampling(handle: Long, temperature: Float, topP: Float): Int
 
     @JvmStatic
     external fun nativeProcessChat(

@@ -6,11 +6,13 @@ package com.mydocanizer.llm.engine
  * @property messages Chronological sequence of messages in this conversation.
  * @property maxPredictTokens Maximum tokens for this turn; null uses the active model's EngineConfig default.
  * @property temperature Custom temperature override for this request, or null for engine default.
+ * @property topP Custom nucleus sampling threshold, or null for the model-load default.
  */
 data class InferenceRequest(
     val messages: List<ChatMessage>,
     val maxPredictTokens: Int? = null,
-    val temperature: Float? = null
+    val temperature: Float? = null,
+    val topP: Float? = null
 ) {
     init {
         require(messages.isNotEmpty()) { "InferenceRequest messages must not be empty" }
@@ -19,6 +21,9 @@ data class InferenceRequest(
         }
         require(temperature == null || (temperature.isFinite() && temperature >= 0f)) {
             "temperature must be a finite, non-negative value"
+        }
+        require(topP == null || (topP.isFinite() && topP in 0f..1f)) {
+            "topP must be null or a finite value between 0 and 1"
         }
     }
 

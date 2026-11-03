@@ -62,7 +62,7 @@ struct EngineInstance {
     std::vector<common_chat_msg> chat_msgs;
     llama_pos system_prompt_position = 0;
     llama_pos current_position = 0;
-    llama_pos stop_generation_position = 0;
+    int32_t max_predict_tokens = 1024;
     std::string cached_token_chars;
     std::ostringstream assistant_ss;
     bool is_batch_allocated = false;
@@ -73,7 +73,7 @@ struct EngineInstance {
     int32_t tokens_generated = 0;
 
     void reset_short_term() {
-        stop_generation_position = 0;
+        max_predict_tokens = 1024;
         cached_token_chars.clear();
         assistant_ss.str("");
         last_finish_reason = FINISH_ERROR;
@@ -99,6 +99,22 @@ struct EngineInstance {
         llama_memory_seq_rm(llama_get_memory(context), 0, system_prompt_position, system_prompt_position + n_discard);
         llama_memory_seq_add(llama_get_memory(context), 0, system_prompt_position + n_discard, current_position, -n_discard);
         current_position -= n_discard;
+    }
+
+    void swap_model_resources(EngineInstance& other) {
+        using std::swap;
+        swap(model, other.model);
+        swap(context, other.context);
+        swap(batch, other.batch);
+        swap(sampler, other.sampler);
+        swap(chat_templates, other.chat_templates);
+        swap(context_size, other.context_size);
+        swap(batch_size, other.batch_size);
+        swap(n_threads, other.n_threads);
+        swap(active_backend, other.active_backend);
+        swap(default_temperature, other.default_temperature);
+        swap(default_top_p, other.default_top_p);
+        swap(is_batch_allocated, other.is_batch_allocated);
     }
 
     void unload_locked() {
@@ -377,9 +393,23 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         return 2;
     }
 
-    // Preserve the currently loaded model if the incoming Java path is invalid.
-    engine->unload_locked();
-    LOGI("Loading GGUF model: %s (mode=%d, gpu_layers=%d)", model_path.c_str(), backend_mode, gpu_layers);
+    // Keep the active model alive until the replacement has loaded completely.
+    // On any failure, release partial resources and restore the previous model.
+    EngineInstance previous;
+    engine->swap_model_resources(previous);
+    engine->reset_short_term();
+    engine->reset_long_term(false);
+    auto restore_previous = [&](int error_code) {
+        engine->unload_locked();
+        engine->swap_model_resources(previous);
+        engine->reset_short_term();
+        engine->reset_long_term(false);
+        engine->cancel_requested.store(false, std::memory_order_release);
+        return error_code;
+    };
+
+    LOGI("Loading GGUF model transactionally: %s (mode=%d, gpu_layers=%d)",
+         model_path.c_str(), backend_mode, gpu_layers);
 
     llama_model_params model_params = llama_model_default_params();
 
@@ -390,7 +420,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     if (backend_mode == BACKEND_VULKAN) {
         if (!has_vulkan) {
             LOGE("Vulkan backend explicitly requested, but no registered llama.cpp Vulkan backend is available");
-            return 101; // Vulkan init failure error code (no silent fallback!)
+            return restore_previous(101); // Explicit Vulkan never silently falls back.
         }
         model_params.n_gpu_layers = gpu_layers > 0 ? gpu_layers : 999;
         engine->active_backend = "Vulkan GPU (" + vk_device_name + ")";
@@ -412,10 +442,16 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     }
 
     llama_model* model = llama_model_load_from_file(model_path.c_str(), model_params);
+    if (!model && backend_mode == BACKEND_AUTO && has_vulkan) {
+        LOGW("AUTO Vulkan model load failed; retrying model load on CPU");
+        model_params.n_gpu_layers = 0;
+        engine->active_backend = "CPU (ARM NEON / AVX)";
+        model = llama_model_load_from_file(model_path.c_str(), model_params);
+    }
 
     if (!model) {
-        LOGE("llama_model_load_from_file failed");
-        return 3;
+        LOGE("llama_model_load_from_file failed on the selected backend");
+        return restore_previous(3);
     }
     engine->model = model;
 
@@ -451,9 +487,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     llama_context* ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
         LOGE("Failed to create llama_context with dynamic n_ctx=%d", ctx_size);
-        llama_model_free(model);
-        engine->model = nullptr;
-        return 4;
+        return restore_previous(4);
     }
     engine->context = ctx;
 
@@ -480,13 +514,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     engine->sampler = common_sampler_init(model, sparams);
     if (engine->sampler == nullptr) {
         LOGE("Failed to initialize llama.cpp sampler");
-        engine->unload_locked();
-        return 6;
+        return restore_previous(6);
     }
 
     engine->reset_short_term();
     engine->reset_long_term(true);
     engine->cancel_requested.store(false);
+    // The newly loaded model is now active; free the previously loaded resources.
+    previous.unload_locked();
 
     LOGI("Model loaded: n_ctx=%d, batch=%d, threads=%d, active_backend=%s",
          ctx_size, b_size, n_threads, engine->active_backend.c_str());
@@ -542,16 +577,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeResetCancellat
 }
 
 JNIEXPORT jint JNICALL
-Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetRequestTemperature(
-        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle, jfloat temperature) {
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetRequestSampling(
+        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle, jfloat temperature, jfloat top_p) {
     auto* engine = fromHandle(handle);
     if (!engine || !engine->model) return 1;
     if (!std::isfinite(temperature) || (temperature < 0.0f && temperature != -1.0f)) return 2;
+    if (!std::isfinite(top_p) || (top_p < 0.0f && top_p != -1.0f) || top_p > 1.0f) return 4;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
     common_params_sampling sparams;
     sparams.temp = temperature >= 0.0f ? temperature : engine->default_temperature;
-    sparams.top_p = engine->default_top_p;
+    sparams.top_p = top_p >= 0.0f ? top_p : engine->default_top_p;
     common_sampler* replacement = common_sampler_init(engine->model, sparams);
     if (!replacement) return 3;
 
@@ -668,7 +704,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
 
     std::vector<common_chat_msg> selected_messages = requested_messages;
     std::string full_prompt = render_prompt(selected_messages);
-    auto tokens = common_tokenize(engine->context, full_prompt, has_chat_template, has_chat_template);
+    auto tokens = common_tokenize(engine->context, full_prompt, template_mode != 0, template_mode != 0);
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
         engine->last_finish_reason = FINISH_ERROR;
@@ -720,7 +756,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         );
 
         full_prompt = render_prompt(selected_messages);
-        tokens = common_tokenize(engine->context, full_prompt, has_chat_template, has_chat_template);
+        tokens = common_tokenize(engine->context, full_prompt, template_mode != 0, template_mode != 0);
         if (tokens.empty()) {
             LOGE("Prompt tokenization returned empty tokens after trimming conversation history");
             engine->last_finish_reason = FINISH_ERROR;
@@ -730,6 +766,33 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
 
     if (removed_message_count > 0) {
         LOGW("Trimmed %zu older chat messages at turn boundaries to fit context", removed_message_count);
+    }
+
+    engine->system_prompt_position = 0;
+    std::vector<common_chat_msg> protected_messages;
+    for (const auto& message : selected_messages) {
+        if (message.role == "system" || message.role == "developer") {
+            protected_messages.push_back(message);
+        } else {
+            break;
+        }
+    }
+    if (!protected_messages.empty()) {
+        // The prompt is composed incrementally with the same formatter, so tokenizing
+        // its leading system/developer segment gives the KV boundary that context
+        // shifting must never remove.
+        const std::string protected_prompt = build_prompt(protected_messages, template_mode);
+        const bool parse_special_tokens = template_mode != 0;
+        const auto protected_tokens = common_tokenize(
+                engine->context, protected_prompt, parse_special_tokens, parse_special_tokens);
+        if (protected_tokens.empty()) {
+            LOGE("Could not tokenize protected system/developer prompt prefix");
+            return 3;
+        }
+        engine->system_prompt_position = static_cast<llama_pos>(
+                std::min(protected_tokens.size(), tokens.size()));
+        // Restore the complete conversation formatter state after the prefix pass.
+        (void) build_prompt(selected_messages, template_mode);
     }
 
     int prompt_size = static_cast<int>(tokens.size());
@@ -745,8 +808,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         return 4;
     }
     engine->current_position += prompt_size;
-    int predict_len = max_predict > 0 ? max_predict : 1024;
-    engine->stop_generation_position = engine->current_position + predict_len;
+    engine->max_predict_tokens = max_predict > 0 ? max_predict : 1024;
     return 0;
 }
 
@@ -769,7 +831,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->shift_context();
     }
 
-    if (engine->current_position >= engine->stop_generation_position) {
+    if (engine->tokens_generated >= engine->max_predict_tokens) {
         LOGI("Reached stop generation token count");
         engine->last_finish_reason = FINISH_MAX_TOKENS;
         return nullptr;

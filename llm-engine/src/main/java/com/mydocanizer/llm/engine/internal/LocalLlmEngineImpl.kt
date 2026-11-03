@@ -136,10 +136,8 @@ internal class LocalLlmEngineImpl(
             val file: File = ModelSourceResolver.resolveToFile(context, source)
             EngineDiagnostics.info("model", "MODEL_FILE_READY", "sizeBytes=${file.length()}")
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
-            // Resolve the new source before clearing the current model: a failed SAF/URL
-            // import must not make the still-loaded previous model unreachable.
-            _currentModel.value = null
-
+            // Native loading is transactional: the current model remains active until
+            // the replacement has fully initialized, or is restored on failure.
             val ret = NativeEngineHandle.nativeLoadModel(
                 handle = handle,
                 modelPath = file.absolutePath,
@@ -245,7 +243,7 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.info(
                 "inference",
                 "INFERENCE_STARTED",
-                "messageCount=${request.messages.size};maxPredictTokens=${request.maxPredictTokens ?: defaultMaxPredictTokens};temperatureOverride=${request.temperature != null}"
+                "messageCount=${request.messages.size};maxPredictTokens=${request.maxPredictTokens ?: defaultMaxPredictTokens};temperatureOverride=${request.temperature != null};topPOverride=${request.topP != null}"
             )
             emit(InferenceEvent.Started(request.messages.size))
             val roles = request.messages.map { it.role.roleName }.toTypedArray()
@@ -253,8 +251,10 @@ internal class LocalLlmEngineImpl(
 
             // -1 restores the model-load temperature; a non-negative value overrides it
             // for this request only.
-            val samplingResult = NativeEngineHandle.nativeSetRequestTemperature(
-                handle, request.temperature ?: -1f
+            val samplingResult = NativeEngineHandle.nativeSetRequestSampling(
+                handle,
+                request.temperature ?: -1f,
+                request.topP ?: -1f
             )
             if (samplingResult != 0) {
                 val error = IllegalStateException("Native sampling configuration failed with code $samplingResult")

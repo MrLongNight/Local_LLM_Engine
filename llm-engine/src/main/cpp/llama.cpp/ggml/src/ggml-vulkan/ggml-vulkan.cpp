@@ -7,6 +7,11 @@
 
 // See https://github.com/KhronosGroup/Vulkan-Hpp?tab=readme-ov-file#extensions--per-device-function-pointers-
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
+// Include the complete Vulkan-Hpp dispatcher definition before accessing its
+// function-pointer members below. A forward declaration is not sufficient.
+#include <vulkan/vulkan.hpp>
+#include <stdexcept>
+
 // We use VULKAN_HPP_DEFAULT_DISPATCHER, but not VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 // to avoid conflicts with applications or other libraries who might use it.
 #if VK_HEADER_VERSION >= 301
@@ -32,8 +37,6 @@ static void ggml_vk_get_physical_device_features2(
     }
     function(physical_device, features);
 }
-
-#include <vulkan/vulkan.hpp>
 
 // Fallback definitions for VK_NV_cooperative_matrix_decode_vector in case the
 // installed Vulkan headers predate the extension.

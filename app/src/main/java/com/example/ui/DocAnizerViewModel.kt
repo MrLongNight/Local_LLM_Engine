@@ -17,7 +17,9 @@ import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -118,6 +120,9 @@ class DocAnizerViewModel(
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
 
+    private var inferenceJob: Job? = null
+    private var generationSequence: Long = 0L
+
     init {
         refreshModelFiles()
     }
@@ -152,7 +157,7 @@ class DocAnizerViewModel(
                 val modelsDir = File(getApplication<Application>().filesDir, "models")
                 if (modelsDir.exists()) {
                     val files = modelsDir.listFiles { f ->
-                        f.isFile && (f.name.endsWith(".gguf", ignoreCase = true) || f.name.endsWith(".bin", ignoreCase = true))
+                        f.isFile && f.name.endsWith(".gguf", ignoreCase = true)
                     }?.sortedByDescending { it.lastModified() } ?: emptyList()
 
                     val entries = files.map { file ->
@@ -248,6 +253,13 @@ class DocAnizerViewModel(
     }
 
     fun restartConversation() {
+        // Invalidate queued events before cancelling the coroutine. A late native
+        // completion from the old conversation must never repopulate the reset chat.
+        generationSequence++
+        engine.cancelInference()
+        inferenceJob?.cancel()
+        inferenceJob = null
+
         _chatMessages.value = listOf(
             ChatMessage.assistant("Gespräch neu gestartet. Wie kann ich dir behilflich sein?")
         )
@@ -283,13 +295,17 @@ class DocAnizerViewModel(
         val request = InferenceRequest(
             messages = messagesWithSystem,
             maxPredictTokens = _engineConfig.value.maxPredictTokens,
-            temperature = _engineConfig.value.temperature
+            temperature = _engineConfig.value.temperature,
+            topP = _engineConfig.value.topP
         )
 
-        viewModelScope.launch {
+        val thisGeneration = ++generationSequence
+        inferenceJob = viewModelScope.launch {
             val streamBuilder = StringBuilder()
-            engine.streamChat(request).collect { event ->
-                when (event) {
+            try {
+                engine.streamChat(request).collect { event ->
+                    if (thisGeneration != generationSequence) return@collect
+                    when (event) {
                     is InferenceEvent.Started -> {
                         Log.d(TAG, "Inference started with ${event.promptMessageCount} messages")
                     }
@@ -319,14 +335,28 @@ class DocAnizerViewModel(
                         _isGenerating.value = false
                     }
                 }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (thisGeneration == generationSequence) {
+                    Log.e(TAG, "Chat inference failed", error)
+                    _errorMessage.value = "Inferenz-Fehler: ${error.message ?: error.javaClass.simpleName}"
+                }
+            } finally {
+                if (thisGeneration == generationSequence) {
+                    _isGenerating.value = false
+                    _currentStreamingText.value = ""
+                    inferenceJob = null
+                }
             }
         }
     }
 
     fun cancelGeneration() {
+        // Keep the UI in its generating state until the native engine confirms cancellation.
         engine.cancelInference()
-        _isGenerating.value = false
-        _statusMessage.value = "Generierung abgebrochen"
+        _statusMessage.value = "Abbruch angefordert..."
     }
 
     fun clearChat() {
