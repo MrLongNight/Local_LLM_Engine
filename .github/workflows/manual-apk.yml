@@ -87,6 +87,18 @@ jobs:
             exit 1
           fi
 
+          # ggml-vulkan calls find_package(SPIRV-Headers CONFIG REQUIRED).
+          # Installing this headers-only CMake project creates the package config;
+          # cloning include/ alone is not sufficient for CMake package discovery.
+          SPIRV_HEADERS_PREFIX="$RUNNER_TEMP/SPIRV-Headers-install"
+          cmake -S "$SPIRV_HEADERS_DIR" -B "$RUNNER_TEMP/SPIRV-Headers-build" -DCMAKE_INSTALL_PREFIX="$SPIRV_HEADERS_PREFIX" -DBUILD_TESTS=OFF
+          cmake --install "$RUNNER_TEMP/SPIRV-Headers-build"
+          SPIRV_HEADERS_INCLUDE_DIR="$SPIRV_HEADERS_PREFIX/include"
+          if [ ! -f "$SPIRV_HEADERS_INCLUDE_DIR/spirv/unified1/spirv.hpp" ]; then
+            echo "::error::Installed SPIR-V unified header is missing"
+            exit 1
+          fi
+
           # Vulkan-Hpp (vulkan.hpp) is not included in the Android NDK headers.
           # Fetch the Khronos headers matching the Vulkan 1.3.275 generation used
           # by the NDK; these are compile-time headers only, not a host loader.
@@ -99,6 +111,7 @@ jobs:
           fi
 
           echo "SPIRV_HEADERS_INCLUDE_DIR=$SPIRV_HEADERS_INCLUDE_DIR" >> "$GITHUB_ENV"
+          echo "SPIRV_HEADERS_CMAKE_PREFIX=$SPIRV_HEADERS_PREFIX" >> "$GITHUB_ENV"
           echo "VULKAN_HEADERS_INCLUDE_DIR=$VULKAN_HEADERS_INCLUDE_DIR" >> "$GITHUB_ENV"
           echo "LOCAL_LLM_REQUIRE_VULKAN=1" >> "$GITHUB_ENV"
           echo "Using SPIRV-Headers include directory: $SPIRV_HEADERS_INCLUDE_DIR"

@@ -17,6 +17,12 @@ endif()
 
 set(LLAMA_SRC ${CMAKE_CURRENT_LIST_DIR}/llama.cpp)
 
+# ggml-vulkan requires the SPIRV-Headers CMake package, not only raw headers.
+# CI installs the pinned headers and exports their package prefix for this configure.
+if(DEFINED ENV{SPIRV_HEADERS_CMAKE_PREFIX} AND NOT "$ENV{SPIRV_HEADERS_CMAKE_PREFIX}" STREQUAL "")
+    list(PREPEND CMAKE_PREFIX_PATH "$ENV{SPIRV_HEADERS_CMAKE_PREFIX}")
+endif()
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "build shared libraries" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "llama: build the unified binary" FORCE)
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "llama: build common utils library" FORCE)

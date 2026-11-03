@@ -40,6 +40,22 @@ App-/Engine-Quellstand für APK Build #30: `aaaef521170cad70ce9c1d36eb8bfd4d6592
 - Die öffentliche Chat-API unterstützt jetzt auch die native Developer-Rolle.
 - Nicht mehr verwendete Dokumenten-Tresor-Resource und Google-Services-Gradle-Altlast entfernt.
 
+## Prozessisolation und IPC – Task-1-Audit
+
+Geprüfter Ausgangsstand: `a754052304db19f8411a3555598016d8758e8943`.
+
+**Status: teilweise umgesetzt, nicht abgeschlossen.**
+
+- Vorhanden: Android-Library-Manifest registriert `InferenceService` mit `android:process=":inference"`, `exported="false"` und `isolatedProcess="false"`. Das ist ein separater Android-Prozess mit derselben App-UID; die gemeinsame UID ist hier für den Zugriff auf app-private Modell-Dateien erforderlich.
+- Vorhanden: AIDL-Service-/Callback-Verträge, Parcelable-Deklarationen, asynchrone Request-Callbacks, eine serielle Worker-Queue im Service und ein IPC-Client-Skelett.
+- Vorhanden: Der Service erstellt seine `LocalLlmEngine`-Instanz innerhalb des Service-Prozesses. Wird der Service tatsächlich gebunden, läuft diese Instanz dort.
+- **Noch nicht produktiv aktiviert:** `LocalLlmEngine.create(context)` verwendet standardmäßig weiterhin `useIpcProcess = false` und erstellt damit `LocalLlmEngineImpl` im aufrufenden Prozess. Die bisherige App-Integration ist daher nicht automatisch prozessisoliert.
+- **Noch nicht real nachgewiesen:** `InferenceIpcTest` verwendet einen Fake-`IInferenceService`. Es gibt hier noch keinen Instrumentationstest, der die echte Service-Bindung, unterschiedliche PID von App und Service sowie den nativen Modellbetrieb im Service-Prozess nachweist.
+- **Lifecycle-Fehler:** `InferenceService.onDestroy()` startet die Engine-Bereinigung über `serviceScope.launch` und ruft unmittelbar danach `serviceScope.cancel()` auf. Die Cleanup-Coroutine kann dadurch abgebrochen werden, bevor `engine.close()` und `workerExecutor.shutdown()` ausgeführt werden.
+- Prozess-Level-Abbruch, Binder-Death-Recovery und Reconnect sind keine nachgewiesenen Eigenschaften dieses Task-1-Stands und bleiben den Folgeaufgaben vorbehalten.
+
+Task 1 darf erst nach Behebung des Service-Lifecycle-Fehlers und einem echten Android-Prozesstest als abgeschlossen gelten. Die Umstellung der produktiven Factory-Aufrufer und der echte Prozessabbruch sind zusätzlich separat zu prüfen.
+
 ## Gerätefehler vom 03.11.2026
 
 - Diagnose vom nubia Z2462N: Qwen3-GGUF mit ca. 2,5 GB lädt über Vulkan; Prompt-Evaluation endet mit Code 0. Der Prozess startet während der nativen Token-Generierung neu. Im exportierten App-Log steht kein regulärer Kotlin-/JNI-Fehler.
@@ -49,6 +65,8 @@ App-/Engine-Quellstand für APK Build #30: `aaaef521170cad70ce9c1d36eb8bfd4d6592
 
 ## CI-Verifikation
 
+- Auf dem Audit-Ausgangscommit `a754052304db19f8411a3555598016d8758e8943` schlugen Unit Tests #66 und APK Build #32 fehl. Unit Tests #66: drei Robolectric-Tests wählten wegen fest verdrahtetem `robolectric.dependency.dir=/home/appuser/.m2/repository` den lokalen Resolver auf dem GitHub-Runner. APK Build #32: `find_package(SPIRV-Headers CONFIG REQUIRED)` fand keine Package-Konfiguration, weil nur das Header-Repository geklont, aber nicht als CMake-Paket installiert wurde.
+- Die beiden Ursachen werden im nachfolgenden Build-Fix-Commit getrennt behoben. Erst die anschließenden Actions-Ergebnisse entscheiden über den tatsächlichen Status.
 - Unit Tests #60 erfolgreich auf `48f8fb8b2d4d11e96eb350cd823712e10a2c0027`: [Run #60](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402289).
 - Android APK Build #28 erfolgreich auf demselben Commit: [Run #28](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41643402174).
 - Unit Tests #63 erfolgreich auf `aaaef521170cad70ce9c1d36eb8bfd4d6592c880`: [Run #63](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/41688075347).

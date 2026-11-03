@@ -67,8 +67,14 @@ android {
       isIncludeAndroidResources = true
       isReturnDefaultValues = true
       all {
-        it.systemProperty("robolectric.offline", "true")
-        it.systemProperty("robolectric.dependency.dir", "/home/appuser/.m2/repository")
+        // Only use Robolectric's local resolver when a caller explicitly supplies
+        // a populated dependency directory. A hard-coded workstation path makes
+        // CI select LocalDependencyResolver and fail before the tests can run.
+        val localDependencyDir = System.getenv("ROBOLECTRIC_DEPENDENCY_DIR")
+        if (!localDependencyDir.isNullOrBlank() && java.io.File(localDependencyDir).isDirectory) {
+          it.systemProperty("robolectric.offline", "true")
+          it.systemProperty("robolectric.dependency.dir", localDependencyDir)
+        }
       }
     }
   }
