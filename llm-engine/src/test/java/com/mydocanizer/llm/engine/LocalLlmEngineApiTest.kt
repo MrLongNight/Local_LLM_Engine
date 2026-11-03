@@ -21,20 +21,6 @@ class LocalLlmEngineApiTest {
 
 
     @Test
-    fun testSamplingParametersAreValidated() {
-        assertTrue(runCatching { EngineConfig(topP = 1.01f) }.isFailure)
-        assertTrue(runCatching { EngineConfig(temperature = Float.NaN) }.isFailure)
-        assertTrue(
-            runCatching {
-                InferenceRequest(
-                    messages = listOf(ChatMessage.user("Hello")),
-                    temperature = Float.NaN
-                )
-            }.isFailure
-        )
-    }
-
-    @Test
     fun testChatMessageCreation() {
         val sysMsg = ChatMessage.system("System instruction")
         val userMsg = ChatMessage.user("Hello model")

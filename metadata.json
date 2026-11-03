@@ -1,0 +1,6 @@
+{
+  "name": "Local LLM Engine",
+  "description": "Local LLM Engine - native on-device LLM inference powered by llama.cpp and reusable :llm-engine library module.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,6 @@
+build/
+.cxx/
+*.apk
+*.aar
+*.aab
+*.dex
