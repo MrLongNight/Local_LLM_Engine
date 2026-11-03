@@ -69,6 +69,9 @@ internal object NativeEngineHandle {
     external fun nativeResetCancellation(handle: Long)
 
     @JvmStatic
+    external fun nativeSetRequestTemperature(handle: Long, temperature: Float): Int
+
+    @JvmStatic
     external fun nativeProcessChat(
         handle: Long,
         roles: Array<String>,

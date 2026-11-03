@@ -212,6 +212,18 @@ internal class LocalLlmEngineImpl(
             val roles = request.messages.map { it.role.roleName }.toTypedArray()
             val contents = request.messages.map { it.content }.toTypedArray()
 
+            // -1 restores the model-load temperature; a non-negative value overrides it
+            // for this request only.
+            val samplingResult = NativeEngineHandle.nativeSetRequestTemperature(
+                handle, request.temperature ?: -1f
+            )
+            if (samplingResult != 0) {
+                emit(InferenceEvent.Error(
+                    IllegalStateException("Native sampling configuration failed with code $samplingResult")
+                ))
+                return@flow
+            }
+
             // Native prompt evaluation must not clear a cancel request arriving after reset.
             val processRes = NativeEngineHandle.nativeProcessChat(
                 handle = handle, roles = roles, contents = contents, maxPredict = request.maxPredictTokens

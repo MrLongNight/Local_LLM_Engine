@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <unistd.h>
 
 #include "llama.h"
@@ -42,6 +43,8 @@ struct EngineInstance {
     llama_context* context = nullptr;
     llama_batch batch;
     common_sampler* sampler = nullptr;
+    float default_temperature = DEFAULT_TEMP;
+    float default_top_p = 0.9f;
     common_chat_templates_ptr chat_templates;
 
     int32_t context_size = 4096;
@@ -344,6 +347,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     common_params_sampling sparams;
     sparams.temp = temperature >= 0.0f ? temperature : DEFAULT_TEMP;
     sparams.top_p = (top_p >= 0.0f && top_p <= 1.0f) ? top_p : 0.9f;
+    engine->default_temperature = sparams.temp;
+    engine->default_top_p = sparams.top_p;
     engine->sampler = common_sampler_init(model, sparams);
 
     engine->reset_short_term();
@@ -401,6 +406,25 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeResetCancellat
         JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
     auto* engine = fromHandle(handle);
     if (engine) engine->cancel_requested.store(false, std::memory_order_release);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetRequestTemperature(
+        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle, jfloat temperature) {
+    auto* engine = fromHandle(handle);
+    if (!engine || !engine->model) return 1;
+    if (!std::isfinite(temperature) || (temperature < 0.0f && temperature != -1.0f)) return 2;
+
+    std::lock_guard<std::mutex> lock(engine->mtx);
+    common_params_sampling sparams;
+    sparams.temp = temperature >= 0.0f ? temperature : engine->default_temperature;
+    sparams.top_p = engine->default_top_p;
+    common_sampler* replacement = common_sampler_init(engine->model, sparams);
+    if (!replacement) return 3;
+
+    if (engine->sampler) common_sampler_free(engine->sampler);
+    engine->sampler = replacement;
+    return 0;
 }
 
 JNIEXPORT jint JNICALL
