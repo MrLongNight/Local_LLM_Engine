@@ -1,6 +1,7 @@
 #include <android/log.h>
 #include <jni.h>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <unistd.h>
 
 #include "llama.h"
@@ -151,58 +153,128 @@ static bool getVulkanBackendDeviceName(std::string& out_device_name) {
     return true;
 }
 
-static bool is_valid_utf8(const char *string) {
-    if (!string) return true;
-    const auto *bytes = reinterpret_cast<const unsigned char*>(string);
-    int num;
-    while (*bytes != 0x00) {
-        if ((*bytes & 0x80) == 0x00) {
-            num = 1;
-        } else if ((*bytes & 0xE0) == 0xC0) {
-            num = 2;
-        } else if ((*bytes & 0xF0) == 0xE0) {
-            num = 3;
-        } else if ((*bytes & 0xF8) == 0xF0) {
-            num = 4;
+static void append_codepoint_utf8(std::string& output, uint32_t codepoint) {
+    if (codepoint <= 0x7F) {
+        output.push_back(static_cast<char>(codepoint));
+    } else if (codepoint <= 0x7FF) {
+        output.push_back(static_cast<char>(0xC0 | (codepoint >> 6)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0xFFFF) {
+        output.push_back(static_cast<char>(0xE0 | (codepoint >> 12)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else {
+        output.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    }
+}
+
+static bool utf8_from_jstring(JNIEnv* env, jstring input, std::string& output) {
+    if (input == nullptr) return false;
+    const jsize length = env->GetStringLength(input);
+    const jchar* chars = env->GetStringChars(input, nullptr);
+    if (chars == nullptr) return false;
+
+    output.clear();
+    output.reserve(static_cast<size_t>(length) * 3);
+    for (jsize i = 0; i < length; ++i) {
+        uint32_t codepoint = chars[i];
+        if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
+            if (i + 1 < length && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) {
+                codepoint = 0x10000 + (((codepoint - 0xD800) << 10) | (chars[++i] - 0xDC00));
+            } else {
+                codepoint = 0xFFFD;
+            }
+        } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
+            codepoint = 0xFFFD;
+        }
+        append_codepoint_utf8(output, codepoint);
+    }
+    env->ReleaseStringChars(input, chars);
+    return true;
+}
+
+static bool is_valid_utf8(const std::string& value) {
+    size_t i = 0;
+    while (i < value.size()) {
+        const uint8_t lead = static_cast<uint8_t>(value[i]);
+        uint32_t codepoint;
+        size_t length;
+        uint32_t minimum;
+        if (lead <= 0x7F) {
+            ++i;
+            continue;
+        } else if (lead >= 0xC2 && lead <= 0xDF) {
+            codepoint = lead & 0x1F;
+            length = 2;
+            minimum = 0x80;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            codepoint = lead & 0x0F;
+            length = 3;
+            minimum = 0x800;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            codepoint = lead & 0x07;
+            length = 4;
+            minimum = 0x10000;
         } else {
             return false;
         }
-        bytes += 1;
-        for (int i = 1; i < num; ++i) {
-            if ((*bytes & 0xC0) != 0x80) {
-                return false;
-            }
-            bytes += 1;
+        if (i + length > value.size()) return false;
+        for (size_t j = 1; j < length; ++j) {
+            const uint8_t next = static_cast<uint8_t>(value[i + j]);
+            if ((next & 0xC0) != 0x80) return false;
+            codepoint = (codepoint << 6) | (next & 0x3F);
         }
+        if (codepoint < minimum || codepoint > 0x10FFFF ||
+            (codepoint >= 0xD800 && codepoint <= 0xDFFF)) return false;
+        i += length;
     }
     return true;
 }
 
-static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, llama_pos start_pos, bool want_last_logit) {
-    if (!engine || !engine->context) return -1;
-    for (int i = 0; i < (int)tokens.size(); i += engine->batch_size) {
-        if (engine->cancel_requested.load()) return -2;
-        const int cur_batch_size = std::min((int)tokens.size() - i, engine->batch_size);
-        common_batch_clear(engine->batch);
+static jstring jstring_from_utf8(JNIEnv* env, const std::string& value) {
+    if (!is_valid_utf8(value)) return nullptr;
+    std::vector<jchar> utf16;
+    utf16.reserve(value.size());
 
-        if (start_pos + i + cur_batch_size >= engine->context_size - OVERFLOW_HEADROOM) {
-            engine->shift_context();
+    size_t i = 0;
+    while (i < value.size()) {
+        const uint8_t lead = static_cast<uint8_t>(value[i]);
+        uint32_t codepoint;
+        size_t length;
+        if (lead <= 0x7F) {
+            codepoint = lead;
+            length = 1;
+        } else if (lead <= 0xDF) {
+            codepoint = lead & 0x1F;
+            length = 2;
+        } else if (lead <= 0xEF) {
+            codepoint = lead & 0x0F;
+            length = 3;
+        } else {
+            codepoint = lead & 0x07;
+            length = 4;
         }
-
-        for (int j = 0; j < cur_batch_size; j++) {
-            const llama_token token_id = tokens[i + j];
-            const llama_pos position = start_pos + i + j;
-            const bool compute_logit = want_last_logit && (i + j == (int)tokens.size() - 1);
-            common_batch_add(engine->batch, token_id, position, {0}, compute_logit);
+        for (size_t j = 1; j < length; ++j) {
+            codepoint = (codepoint << 6) |
+                    (static_cast<uint8_t>(value[i + j]) & 0x3F);
         }
+        i += length;
 
-        const int res = llama_decode(engine->context, engine->batch);
-        if (res != 0) {
-            LOGE("llama_decode failed with code %d", res);
-            return res;
+        if (codepoint <= 0xFFFF) {
+            utf16.push_back(static_cast<jchar>(codepoint));
+        } else {
+            codepoint -= 0x10000;
+            utf16.push_back(static_cast<jchar>(0xD800 + (codepoint >> 10)));
+            utf16.push_back(static_cast<jchar>(0xDC00 + (codepoint & 0x3FF)));
         }
     }
-    return 0;
+
+    if (utf16.empty()) return env->NewStringUTF("");
+    if (utf16.size() > static_cast<size_t>(std::numeric_limits<jsize>::max())) return nullptr;
+    return env->NewString(utf16.data(), static_cast<jsize>(utf16.size()));
 }
 
 extern "C" {
@@ -482,23 +554,20 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             return 3;
         }
 
-        const char* role_str = env->GetStringUTFChars(jrole, nullptr);
-        const char* content_str = env->GetStringUTFChars(jcontent, nullptr);
-        if (role_str == nullptr || content_str == nullptr) {
-            if (role_str) env->ReleaseStringUTFChars(jrole, role_str);
-            if (content_str) env->ReleaseStringUTFChars(jcontent, content_str);
+        std::string role_str;
+        std::string content_str;
+        if (!utf8_from_jstring(env, jrole, role_str) ||
+            !utf8_from_jstring(env, jcontent, content_str)) {
             env->DeleteLocalRef(jrole);
             env->DeleteLocalRef(jcontent);
             return 3;
         }
 
         common_chat_msg message;
-        message.role = role_str;
-        message.content = content_str;
+        message.role = std::move(role_str);
+        message.content = std::move(content_str);
         requested_messages.push_back(std::move(message));
 
-        env->ReleaseStringUTFChars(jrole, role_str);
-        env->ReleaseStringUTFChars(jcontent, content_str);
         env->DeleteLocalRef(jrole);
         env->DeleteLocalRef(jcontent);
     }
@@ -688,8 +757,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     auto token_piece = common_token_to_piece(engine->context, new_token_id);
     engine->cached_token_chars += token_piece;
 
-    if (is_valid_utf8(engine->cached_token_chars.c_str())) {
-        jstring result = env->NewStringUTF(engine->cached_token_chars.c_str());
+    if (is_valid_utf8(engine->cached_token_chars)) {
+        jstring result = jstring_from_utf8(env, engine->cached_token_chars);
+        if (result == nullptr) {
+            engine->last_finish_reason = FINISH_ERROR;
+            return nullptr;
+        }
         engine->assistant_ss << engine->cached_token_chars;
         engine->cached_token_chars.clear();
         return result;
