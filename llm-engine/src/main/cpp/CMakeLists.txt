@@ -31,6 +31,32 @@ set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "ggml: cpu all variants" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "ggml: llamafile" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "ggml: openmp" FORCE)
 
+# Enable the static Vulkan backend only for Android arm64 builds where the
+# target NDK loader and host shader/SPIR-V tools are all available. CPU remains
+# the safe fallback for x86_64 and local development environments without them.
+if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
+    if(DEFINED ENV{SPIRV_HEADERS_CMAKE_DIR})
+        set(SPIRV-Headers_DIR "$ENV{SPIRV_HEADERS_CMAKE_DIR}" CACHE PATH "Host SPIR-V-Headers CMake package")
+    endif()
+
+    find_package(Vulkan COMPONENTS glslc QUIET)
+    find_package(SPIRV-Headers CONFIG QUIET)
+
+    if(Vulkan_FOUND AND Vulkan_GLSLC_EXECUTABLE AND SPIRV-Headers_FOUND)
+        set(GGML_VULKAN ON CACHE BOOL "ggml: Vulkan backend" FORCE)
+        message(STATUS "LocalLLM: enabling GGML_VULKAN for arm64-v8a")
+        message(STATUS "LocalLLM: Vulkan glslc: ${Vulkan_GLSLC_EXECUTABLE}")
+    else()
+        set(GGML_VULKAN OFF CACHE BOOL "ggml: Vulkan backend" FORCE)
+        message(WARNING "LocalLLM: Vulkan build dependencies missing; using CPU backend")
+        message(STATUS "  Vulkan_FOUND=${Vulkan_FOUND}")
+        message(STATUS "  Vulkan_GLSLC_EXECUTABLE=${Vulkan_GLSLC_EXECUTABLE}")
+        message(STATUS "  SPIRV-Headers_FOUND=${SPIRV-Headers_FOUND}")
+    endif()
+else()
+    set(GGML_VULKAN OFF CACHE BOOL "ggml: Vulkan backend" FORCE)
+endif()
+
 add_subdirectory(${LLAMA_SRC} build-llama)
 
 add_library(localllm_engine SHARED
