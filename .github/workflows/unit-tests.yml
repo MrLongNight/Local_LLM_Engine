@@ -31,8 +31,8 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK command-line tools
+        run: echo "$ANDROID_HOME/cmdline-tools/16.0/bin" >> "$GITHUB_PATH"
 
       - name: Install Android SDK packages
         run: |
