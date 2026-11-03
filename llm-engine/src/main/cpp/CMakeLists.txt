@@ -67,6 +67,12 @@ endif()
 add_subdirectory(${LLAMA_SRC} build-llama)
 
 if(TARGET ggml-vulkan)
+    if(LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR)
+        # SPIRV-Headers is fetched as a pinned host-side header source. Pass its
+        # include directory explicitly; merely checking the file at configure
+        # time does not make <spirv/unified1/spirv.hpp> visible to the compiler.
+        target_include_directories(ggml-vulkan SYSTEM PRIVATE "${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR}")
+    endif()
     if(LOCAL_LLM_VULKAN_HEADERS_INCLUDE_DIR)
         # Vulkan-Hpp is not shipped by the Android NDK; use Khronos headers only
         # for compilation while keeping the Vulkan loader from the Android NDK.
