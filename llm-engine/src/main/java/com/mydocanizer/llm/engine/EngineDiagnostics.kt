@@ -112,7 +112,7 @@ object EngineDiagnostics {
             val appContext = context.applicationContext
             val snapshot = synchronized(lock) {
                 val target = ensureDirectoryLocked(appContext)
-                appendLocked("INFO", "diagnostics", "EXPORT_STARTED")
+                appendLocked("INFO", "diagnostics", "EXPORT_STARTED", null)
                 DiagnosticLogSnapshotter.capture(
                     File(target, PREVIOUS_FILE),
                     File(target, CURRENT_FILE)
@@ -212,9 +212,9 @@ internal object DiagnosticLogFormatter {
         .replace(urlPattern, "<url-redacted>")
         .replace(contentUriPattern, "<content-uri-redacted>")
         .replace(localPathPattern, "<local-path-redacted>")
-        .replace('\\t', ' ')
-        .replace('\\r', ' ')
-        .replace('\\n', ' ')
+        .replace('\t', ' ')
+        .replace('\r', ' ')
+        .replace('\n', ' ')
         .take(2500)
 }
 
