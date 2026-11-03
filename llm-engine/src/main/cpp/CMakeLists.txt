@@ -35,9 +35,6 @@ set(GGML_OPENMP OFF CACHE BOOL "ggml: openmp" FORCE)
 # target NDK loader and host shader/SPIR-V tools are all available. CPU remains
 # the safe fallback for x86_64 and local development environments without them.
 if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
-    if(DEFINED ENV{SPIRV_HEADERS_CMAKE_DIR})
-        set(SPIRV-Headers_DIR "$ENV{SPIRV_HEADERS_CMAKE_DIR}" CACHE PATH "Host SPIR-V-Headers CMake package")
-    endif()
     if(DEFINED ENV{SPIRV_HEADERS_INCLUDE_DIR})
         set(LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR "$ENV{SPIRV_HEADERS_INCLUDE_DIR}")
     endif()
@@ -46,21 +43,22 @@ if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
     endif()
 
     find_package(Vulkan COMPONENTS glslc QUIET)
-    find_package(SPIRV-Headers CONFIG QUIET)
 
-    if(Vulkan_FOUND AND Vulkan_GLSLC_EXECUTABLE AND SPIRV-Headers_FOUND)
+    if(Vulkan_FOUND AND Vulkan_GLSLC_EXECUTABLE AND
+       LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR AND
+       EXISTS "${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR}/spirv/unified1/spirv.hpp")
         set(GGML_VULKAN ON CACHE BOOL "ggml: Vulkan backend" FORCE)
         message(STATUS "LocalLLM: enabling GGML_VULKAN for arm64-v8a")
         message(STATUS "LocalLLM: Vulkan glslc: ${Vulkan_GLSLC_EXECUTABLE}")
     else()
         set(GGML_VULKAN OFF CACHE BOOL "ggml: Vulkan backend" FORCE)
         if(DEFINED ENV{LOCAL_LLM_REQUIRE_VULKAN} AND "$ENV{LOCAL_LLM_REQUIRE_VULKAN}" STREQUAL "1")
-            message(FATAL_ERROR "LocalLLM: required arm64 Vulkan dependencies missing (Vulkan_FOUND=${Vulkan_FOUND}, glslc=${Vulkan_GLSLC_EXECUTABLE}, SPIRV-Headers_FOUND=${SPIRV-Headers_FOUND})")
+            message(FATAL_ERROR "LocalLLM: required arm64 Vulkan dependencies missing (Vulkan_FOUND=${Vulkan_FOUND}, glslc=${Vulkan_GLSLC_EXECUTABLE}, SPIR-V headers=${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR})")
         endif()
         message(WARNING "LocalLLM: Vulkan build dependencies missing; using CPU backend")
         message(STATUS "  Vulkan_FOUND=${Vulkan_FOUND}")
         message(STATUS "  Vulkan_GLSLC_EXECUTABLE=${Vulkan_GLSLC_EXECUTABLE}")
-        message(STATUS "  SPIRV-Headers_FOUND=${SPIRV-Headers_FOUND}")
+        message(STATUS "  SPIR-V header directory=${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR}")
     endif()
 else()
     set(GGML_VULKAN OFF CACHE BOOL "ggml: Vulkan backend" FORCE)
@@ -69,9 +67,6 @@ endif()
 add_subdirectory(${LLAMA_SRC} build-llama)
 
 if(TARGET ggml-vulkan)
-    if(LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR)
-        target_include_directories(ggml-vulkan SYSTEM PRIVATE "${LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR}")
-    endif()
     if(LOCAL_LLM_VULKAN_HEADERS_INCLUDE_DIR)
         # Vulkan-Hpp is not shipped by the Android NDK; use Khronos headers only
         # for compilation while keeping the Vulkan loader from the Android NDK.
