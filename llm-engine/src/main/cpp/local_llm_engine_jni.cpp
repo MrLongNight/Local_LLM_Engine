@@ -392,7 +392,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelArchit
     char architecture[128] = {};
     const int32_t result = llama_model_meta_val_str(
             engine->model, "general.architecture", architecture, sizeof(architecture));
-    if (result < 0 || architecture[0] == '\\0') return env->NewStringUTF("unknown");
+    if (result < 0 || architecture[0] == '\0') return env->NewStringUTF("unknown");
     return env->NewStringUTF(architecture);
 }
 
