@@ -2,7 +2,6 @@ package com.example.ui
 
 import android.app.Application
 import android.net.Uri
-import android.provider.OpenableColumns
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,8 +23,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
-import java.security.MessageDigest
 
 enum class AppTab {
     CHAT,
@@ -186,83 +183,35 @@ class DocAnizerViewModel(
      * Calculates SHA-256, optionally copies into the private app storage folder without
      * altering the original file, and loads the model into the native engine.
      */
-    fun importModelFromSaf(uri: Uri, copyToPrivate: Boolean = true) {
+    fun importModelFromSaf(uri: Uri) {
         viewModelScope.launch {
             _isImporting.value = true
             _statusMessage.value = "Importiere Modelldatei über SAF..."
             _errorMessage.value = null
 
-            runCatching {
-                val context = getApplication<Application>()
-                val cr = context.contentResolver
-                val displayName = queryFileName(context, uri) ?: "imported_model.gguf"
+            try {
+                // The engine owns SAF copying, GGUF validation, de-duplication and hashing.
+                // Do not duplicate the selected file in the UI layer.
+                val result = engine.loadModel(
+                    ModelSource.ContentUri(uriString = uri.toString()),
+                    _engineConfig.value
+                )
 
-                val finalFile: File
-                var sha256Hex: String = ""
-
-                if (copyToPrivate) {
-                    val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
-                    val destFile = File(modelsDir, displayName)
-
-                    withContext(Dispatchers.IO) {
-                        val digest = MessageDigest.getInstance("SHA-256")
-                        cr.openInputStream(uri)?.use { input ->
-                            FileOutputStream(destFile).use { output ->
-                                val buffer = ByteArray(65536)
-                                var read: Int
-                                while (input.read(buffer).also { read = it } != -1) {
-                                    output.write(buffer, 0, read)
-                                    digest.update(buffer, 0, read)
-                                }
-                            }
-                        } ?: throw IllegalStateException("Konnte Uri $uri nicht öffnen.")
-                        sha256Hex = digest.digest().joinToString("") { "%02x".format(it) }
-                    }
-                    finalFile = destFile
-                } else {
-                    // Compute SHA256 directly from stream without copying
-                    withContext(Dispatchers.IO) {
-                        val digest = MessageDigest.getInstance("SHA-256")
-                        cr.openInputStream(uri)?.use { input ->
-                            val buffer = ByteArray(65536)
-                            var read: Int
-                            while (input.read(buffer).also { read = it } != -1) {
-                                digest.update(buffer, 0, read)
-                            }
-                        }
-                        sha256Hex = digest.digest().joinToString("") { "%02x".format(it) }
-                    }
-                    // For native loading, local file path is required by llama.cpp
-                    val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
-                    finalFile = File(modelsDir, displayName)
-                    if (!finalFile.exists()) {
-                        withContext(Dispatchers.IO) {
-                            cr.openInputStream(uri)?.use { input ->
-                                FileOutputStream(finalFile).use { output -> input.copyTo(output) }
-                            }
-                        }
-                    }
-                }
-
-                refreshModelFiles()
-                _selectedModelFile.value = finalFile
-
-                // Load the model into the native engine
-                val res = engine.loadModel(ModelSource.FilePath(finalFile.absolutePath), _engineConfig.value)
-                if (res.isSuccess) {
-                    val info = res.getOrThrow()
-                    _statusMessage.value = "Modell '${info.name}' erfolgreich geladen (SHA-256: ${sha256Hex.take(12)}...)"
+                result.onSuccess { info ->
+                    _selectedModelFile.value = File(info.path)
+                    refreshModelFiles()
+                    val hashLabel = info.sha256?.take(12)?.let { " (SHA-256: $it…)" }.orEmpty()
+                    _statusMessage.value = "Modell '${info.name}' erfolgreich geladen$hashLabel"
                     _errorMessage.value = null
-                } else {
-                    val cause = res.exceptionOrNull()?.message ?: "Unbekannter Fehler"
-                    _errorMessage.value = "Modell konnte nicht geladen werden: $cause"
+                }.onFailure { error ->
+                    _errorMessage.value = "Modell konnte nicht geladen werden: ${error.message ?: "Unbekannter Fehler"}"
                 }
-            }.onFailure { e ->
-                Log.e(TAG, "Fehler beim Modellimport", e)
-                _errorMessage.value = "Import fehlgeschlagen: ${e.message}"
+            } catch (error: Exception) {
+                Log.e(TAG, "Fehler beim Modellimport", error)
+                _errorMessage.value = "Import fehlgeschlagen: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                _isImporting.value = false
             }
-
-            _isImporting.value = false
         }
     }
 
@@ -383,21 +332,7 @@ class DocAnizerViewModel(
         restartConversation()
     }
 
-    private fun queryFileName(context: android.content.Context, uri: Uri): String? {
-        if (uri.scheme == "content") {
-            try {
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex != -1) {
-                            return cursor.getString(nameIndex)
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
-        }
-        return uri.lastPathSegment
-    }
+
 
     override fun onCleared() {
         super.onCleared()

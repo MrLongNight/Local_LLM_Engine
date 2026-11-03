@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ElevatedCard
@@ -40,8 +39,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,14 +63,10 @@ fun ModelImportScreen(
     val isImporting: Boolean by viewModel.isImporting.collectAsState()
     val errorMessage: String? by viewModel.errorMessage.collectAsState()
 
-    var copyToPrivate by remember { mutableStateOf(true) }
-
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let {
-            viewModel.importModelFromSaf(it, copyToPrivate = copyToPrivate)
-        }
+        uri?.let { viewModel.importModelFromSaf(it) }
     }
 
     LazyColumn(
@@ -241,27 +234,17 @@ fun ModelImportScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Checkbox(
-                            checked = copyToPrivate,
-                            onCheckedChange = { copyToPrivate = it }
+                    Column {
+                        Text(
+                            text = "Sichere private Modellablage",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Column {
-                            Text(
-                                text = "In privaten App-Modellordner kopieren",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Originaldatei bleibt unverändert erhalten.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = "Die Engine kopiert das Modell beim Import in den privaten App-Speicher, prüft die GGUF-Signatur und vergibt einen eindeutigen SHA-256-Dateinamen. Die Originaldatei bleibt unverändert.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
