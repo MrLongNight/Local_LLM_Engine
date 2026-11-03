@@ -14,6 +14,8 @@ class EngineValidationTest {
         assertTrue(runCatching { EngineConfig(maxPredictTokens = 0) }.isFailure)
         assertTrue(runCatching { EngineConfig(topP = -0.01f) }.isFailure)
         assertTrue(runCatching { EngineConfig(temperature = Float.POSITIVE_INFINITY) }.isFailure)
+        assertTrue(runCatching { EngineConfig(gpuLayers = 0) }.isFailure)
+        assertTrue(runCatching { EngineConfig(gpuLayers = -1) }.isFailure)
     }
 
     @Test
@@ -24,7 +26,8 @@ class EngineValidationTest {
             threads = 1,
             temperature = 0f,
             topP = 0f,
-            maxPredictTokens = 1
+            maxPredictTokens = 1,
+            gpuLayers = 0
         )
         assertEquals(256, config.contextSize)
         assertEquals(64, config.batchSize)

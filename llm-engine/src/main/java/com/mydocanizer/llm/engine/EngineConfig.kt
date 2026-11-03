@@ -60,5 +60,6 @@ data class EngineConfig(
             "topP must be a finite value between 0 and 1"
         }
         require(maxPredictTokens >= 1) { "maxPredictTokens must be at least 1" }
+        require(gpuLayers >= 1) { "gpuLayers must be at least 1; select CPU backend to disable offload" }
     }
 }

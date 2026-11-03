@@ -45,7 +45,7 @@ enum BackendMode {
 struct EngineInstance {
     llama_model* model = nullptr;
     llama_context* context = nullptr;
-    llama_batch batch;
+    llama_batch batch{};
     common_sampler* sampler = nullptr;
     float default_temperature = DEFAULT_TEMP;
     float default_top_p = 0.9f;
@@ -493,6 +493,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     engine->batch = llama_batch_init(b_size, 0, 1);
     engine->is_batch_allocated = true;
+    if (engine->batch.token == nullptr || engine->batch.pos == nullptr ||
+        engine->batch.n_seq_id == nullptr || engine->batch.seq_id == nullptr ||
+        engine->batch.logits == nullptr) {
+        LOGE("Failed to allocate llama_batch buffers for batch size %d", b_size);
+        return restore_previous(5);
+    }
 
     // A malformed or unsupported GGUF Jinja template must not let a C++ exception
     // cross the JNI boundary. Keep the model usable with the plain role/content format.

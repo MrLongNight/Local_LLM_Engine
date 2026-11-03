@@ -1,6 +1,20 @@
-name: Manual Android APK Build
+name: Android APK Build
 
 on:
+  # Native builds are the expensive/critical verification step. Run them only
+  # when app, engine, Gradle/toolchain or this workflow changes on main.
+  push:
+    branches:
+      - main
+    paths:
+      - "app/src/main/**"
+      - "app/build.gradle.kts"
+      - "llm-engine/src/main/**"
+      - "llm-engine/build.gradle.kts"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - ".github/workflows/manual-apk.yml"
   workflow_dispatch:
     inputs:
       build_type:

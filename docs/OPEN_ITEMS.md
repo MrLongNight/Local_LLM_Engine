@@ -13,6 +13,7 @@ Audit-/Fix-Basis: `530d51634e993b5f4b2eb159324bbb0a023aa084`
 - Die maximale Ausgabelänge wird über die tatsächlich generierten Tokens begrenzt, nicht über eine absolute KV-Position. Kontextverschiebungen verändern das Ausgabelimit daher nicht mehr.
 - Der native Context-Shift erhält die tokenisierte führende System-/Developer-Prompt-Präfixlänge und verschiebt nur nachfolgende Tokens.
 - Temperatur und Top-P sind Request-Parameter; Top-P wird nicht mehr unbemerkt auf den Modellladewert zurückgesetzt.
+- Ungültige GPU-Layer-Werte werden bereits in `EngineConfig` abgelehnt; die Einstellungen erklären, welche Werte erst nach Modell-Neuladen gelten.
 - Fehler beim nativen Backend-Start lassen einen erneuten Initialisierungsversuch zu.
 - Chat-Reset invalidiert und beendet die alte Generierung. Verspätete Events einer alten Generierung können den neuen Chat nicht verändern.
 - Chat-Ausnahmen setzen den UI-Generierungsstatus zuverlässig zurück; ein Abbruch wird erst nach Rückmeldung der Engine als abgeschlossen dargestellt.

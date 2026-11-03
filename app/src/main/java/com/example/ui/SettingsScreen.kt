@@ -96,6 +96,12 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Backend, GPU-Layer, Kontext- und Thread-Änderungen werden beim nächsten Modellladen übernommen. Temperatur, Top-P und Ausgabelimit gelten ab der nächsten Anfrage.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     BackendPreference.entries.forEach { pref ->
                         FilterChip(
