@@ -269,7 +269,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     if (backend_mode == BACKEND_VULKAN) {
         if (!has_vulkan) {
-            LOGE("Vulkan backend explicitly requested, but no Vulkan GPU device is available");
+            LOGE("Vulkan backend explicitly requested, but no registered llama.cpp Vulkan backend is available");
             env->ReleaseStringUTFChars(jmodel_path, model_path);
             return 101; // Vulkan init failure error code (no silent fallback!)
         }
@@ -284,7 +284,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         } else {
             model_params.n_gpu_layers = 0;
             engine->active_backend = "CPU (ARM NEON / AVX)";
-            LOGI("AUTO mode transparently fell back to CPU backend (Vulkan unavailable)");
+            LOGI("AUTO mode transparently fell back to CPU backend (no registered llama.cpp GPU backend)");
         }
     } else { // BACKEND_CPU
         model_params.n_gpu_layers = 0;
@@ -397,7 +397,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelArchit
     char architecture[128] = {};
     const int32_t result = llama_model_meta_val_str(
             engine->model, "general.architecture", architecture, sizeof(architecture));
-    if (result < 0 || architecture[0] == '\\0') return env->NewStringUTF("unknown");
+    if (result < 0 || architecture[0] == '\0') return env->NewStringUTF("unknown");
     return env->NewStringUTF(architecture);
 }
 

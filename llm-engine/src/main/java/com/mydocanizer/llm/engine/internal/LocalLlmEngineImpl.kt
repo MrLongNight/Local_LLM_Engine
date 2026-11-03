@@ -138,7 +138,7 @@ internal class LocalLlmEngineImpl(
             when (ret) {
                 0 -> { /* Success */ }
                 101 -> throw IllegalStateException(
-                    "Vulkan backend was explicitly requested, but no Vulkan GPU device is available or initialization failed."
+                    "Vulkan was explicitly requested, but this llama.cpp build has no registered Vulkan backend or usable Vulkan device."
                 )
                 else -> throw IllegalStateException("Native model load failed with error code: $ret")
             }
