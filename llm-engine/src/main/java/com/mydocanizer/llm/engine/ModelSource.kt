@@ -30,7 +30,7 @@ sealed interface ModelSource {
     data class AssetPath(val assetName: String) : ModelSource
 
     /**
-     * Remote URL for downloading a GGUF model into cache.
+     * HTTPS URL for downloading a GGUF model into app-private model storage.
      */
     data class RemoteUrl(
         val url: String,

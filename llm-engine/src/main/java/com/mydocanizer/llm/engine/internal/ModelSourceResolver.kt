@@ -41,29 +41,52 @@ internal object ModelSourceResolver {
     }
 
     private suspend fun downloadRemote(context: Context, source: ModelSource.RemoteUrl): File {
-        val url = URL(source.url)
-        require(url.protocol.equals("https", ignoreCase = true)) { "Remote model URLs must use HTTPS" }
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-            requestMethod = "GET"
-            setRequestProperty("Accept", "application/octet-stream")
-            setRequestProperty("User-Agent", "LocalLlmEngine/1.0")
+        var currentUrl = URL(source.url)
+        require(currentUrl.protocol.equals("https", ignoreCase = true)) {
+            "Remote model URLs must use HTTPS"
         }
-        try {
-            val status = connection.responseCode
-            require(status in 200..299) { "Model download failed with HTTP $status" }
-            require(connection.url.protocol.equals("https", ignoreCase = true)) {
-                "HTTPS model download redirected to an insecure URL"
+
+        var redirects = 0
+        while (true) {
+            // Handle redirects ourselves: HttpURLConnection's automatic redirect handling
+            // must not silently downgrade a model download from HTTPS to HTTP.
+            val connection = (currentUrl.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15_000
+                readTimeout = 60_000
+                instanceFollowRedirects = false
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/octet-stream")
+                setRequestProperty("User-Agent", "LocalLlmEngine/1.0")
             }
-            val name = source.suggestedFileName
-                ?: connection.url.path.substringAfterLast('/').takeIf { it.isNotBlank() }
-                ?: "downloaded_model.gguf"
-            return importStream(context, connection.inputStream, name)
-        } finally {
-            connection.disconnect()
+
+            try {
+                val status = connection.responseCode
+                if (status in 300..399) {
+                    val location = connection.getHeaderField("Location")
+                    require(!location.isNullOrBlank()) {
+                        "Model server returned redirect HTTP $status without a Location header"
+                    }
+                    require(redirects < 5) { "Model download exceeded the maximum of 5 redirects" }
+                    val nextUrl = URL(currentUrl, location)
+                    require(nextUrl.protocol.equals("https", ignoreCase = true)) {
+                        "Model download redirect attempted to leave HTTPS"
+                    }
+                    currentUrl = nextUrl
+                    redirects++
+                    continue
+                }
+
+                require(status in 200..299) { "Model download failed with HTTP $status" }
+                val name = source.suggestedFileName
+                    ?: currentUrl.path.substringAfterLast('/').takeIf { it.isNotBlank() }
+                    ?: "downloaded_model.gguf"
+                return importStream(context, connection.inputStream, name)
+            } finally {
+                connection.disconnect()
+            }
         }
+        @Suppress("UNREACHABLE_CODE")
+        throw IOException("Model download did not complete")
     }
 
     private suspend fun importStream(context: Context, input: java.io.InputStream, displayName: String): File {
