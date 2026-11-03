@@ -25,6 +25,11 @@ static constexpr int OVERFLOW_HEADROOM = 8;
 static constexpr int BATCH_SIZE = 512;
 static constexpr float DEFAULT_TEMP = 0.7f;
 
+static bool abort_decode(void* user_data) {
+    auto* engine = static_cast<EngineInstance*>(user_data);
+    return engine == nullptr || engine->cancel_requested.load(std::memory_order_acquire);
+}
+
 enum BackendMode {
     BACKEND_AUTO = 0,
     BACKEND_VULKAN = 1,
@@ -332,6 +337,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     ctx_params.n_ubatch = b_size;
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = n_threads;
+    ctx_params.abort_callback = abort_decode;
+    ctx_params.abort_callback_data = engine;
 
     llama_context* ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
