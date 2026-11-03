@@ -84,7 +84,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "AUTO nutzt ein tatsächlich eingebautes GPU-Backend, sofern llama.cpp eines registriert hat, sonst CPU. Dieser aktuelle Build enthält kein Vulkan-Backend; VULKAN meldet deshalb einen klaren Fehler statt GPU-Nutzung vorzutäuschen.",
+                        text = "AUTO nutzt ein tatsächlich eingebautes llama.cpp-GPU-Backend, sofern es registriert ist, sonst CPU. Der arm64-APK-Build aktiviert Vulkan nur bei vollständigen NDK-/Shader-/SPIR-V-Build-Abhängigkeiten; VULKAN meldet ohne nutzbares Backend einen klaren Fehler.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -59,7 +59,7 @@ gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 
 ## Current limitations
 
-- The current CMake configuration does not compile GGML_VULKAN. The engine checks llama.cpp's registered backend (not the Android Vulkan loader) and reports CPU execution; an explicit Vulkan request fails instead of claiming GPU acceleration. Enabling Vulkan requires the Vulkan SDK/shader compiler and a separately verified Android cross-build.
+- The arm64-v8a Android build enables GGML_VULKAN when the Android NDK Vulkan loader, host `glslc`, and SPIRV-Headers CMake package are available. The APK workflow installs and requires these build tools. x86_64 and local builds without the tools remain CPU builds. Runtime GPU availability is checked against llama.cpp's backend registry, never inferred from the Android Vulkan loader alone.
 - Unit tests and APK compilation do not replace real-device model loading, generation, cancellation, memory, and performance checks.
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
 - Remote model imports are HTTPS-only and staged in app-private storage under a SHA-256-addressed filename. Downloads are not resumable yet.

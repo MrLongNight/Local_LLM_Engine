@@ -71,6 +71,7 @@ jobs:
             exit 1
           fi
           echo "SPIRV_HEADERS_CMAKE_DIR=$SPIRV_HEADERS_CMAKE_DIR" >> "$GITHUB_ENV"
+          echo "LOCAL_LLM_REQUIRE_VULKAN=1" >> "$GITHUB_ENV"
           echo "Using SPIRV-Headers CMake package: $SPIRV_HEADERS_CMAKE_DIR"
           command -v glslc
 

@@ -229,7 +229,7 @@ Nach einem expliziten Abbruch wird ein `InferenceEvent.Cancelled` mit dem bis da
 ## 11. Fehlerbehandlung
 
 Die Engine unterscheidet strikt zwischen erwartbaren Zuständen und echten Hardware-/Ladefehlern:
-- **`BackendPreference.VULKAN`**: Schlägt mit einem klaren Fehler fehl, falls das llama.cpp-Vulkan-Backend nicht mitgebaut oder kein nutzbares Vulkan-Backend registriert ist. Der aktuelle CMake-Build kompiliert `GGML_VULKAN` nicht.
+- **`BackendPreference.VULKAN`**: Schlägt mit einem klaren Fehler fehl, falls das llama.cpp-Vulkan-Backend nicht mitgebaut oder kein nutzbares Vulkan-Backend registriert ist. Der arm64-v8a-APK-Workflow aktiviert `GGML_VULKAN` und erzwingt das Vorhandensein von NDK-Vulkan-Loader, Host-`glslc` und SPIRV-Headers; x86_64 und lokale Builds ohne diese Werkzeuge bleiben CPU-only.
 - **`BackendPreference.AUTO`**: Verwendet nur ein tatsächlich registriertes llama.cpp-GPU-Backend; andernfalls CPU.
 - **Fehler werden niemals als angebliche Modellantwort formatiert**, sondern immer als `InferenceEvent.Error` bzw. `Result.failure()` geliefert.
 
