@@ -1,9 +1,6 @@
 name: Manual Android APK Build
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       build_type:
