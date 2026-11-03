@@ -166,7 +166,7 @@ object EngineDiagnostics {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            error("diagnostics", "EXPORT_FAILED", error)
+            EngineDiagnostics.error("diagnostics", "EXPORT_FAILED", error)
             Result.failure(error)
         }
     }
