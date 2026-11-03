@@ -67,11 +67,10 @@ android {
       isIncludeAndroidResources = true
       isReturnDefaultValues = true
       all {
-        // Only use Robolectric's local resolver when a caller explicitly supplies
-        // a populated dependency directory. A hard-coded workstation path makes
-        // CI select LocalDependencyResolver and fail before the tests can run.
+        // Use Robolectric's local offline resolver only when its directory is
+        // explicitly configured by the build environment. CI uses normal Maven resolution.
         val localDependencyDir = System.getenv("ROBOLECTRIC_DEPENDENCY_DIR")
-        if (!localDependencyDir.isNullOrBlank() && java.io.File(localDependencyDir).isDirectory) {
+        if (!localDependencyDir.isNullOrBlank()) {
           it.systemProperty("robolectric.offline", "true")
           it.systemProperty("robolectric.dependency.dir", localDependencyDir)
         }
