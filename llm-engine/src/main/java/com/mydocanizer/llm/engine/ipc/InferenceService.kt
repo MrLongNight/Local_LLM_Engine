@@ -17,6 +17,7 @@ import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -140,11 +141,9 @@ class InferenceService : Service() {
                         return@launch
                     }
                     EngineDiagnostics.info("ipc", "LOAD_MODEL_REQUESTED", "path=$modelPath, ctx=${config.contextSize}")
-                    progressJob = serviceScope.launch {
-                        e.modelLoadProgress.collect { percent ->
-                            if (percent != null) {
-                                runCatching { callback?.onModelLoadProgress(percent.coerceIn(0, 99)) }
-                            }
+                    progressJob = serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        e.modelLoadProgressEvents.collect { percent ->
+                            runCatching { callback?.onModelLoadProgress(percent.coerceIn(0, 99)) }
                         }
                     }
                     val result = e.loadModel(ModelSource.FilePath(modelPath), config)

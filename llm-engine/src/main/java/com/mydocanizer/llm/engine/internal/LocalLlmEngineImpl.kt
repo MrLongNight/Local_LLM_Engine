@@ -19,8 +19,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.flow
@@ -54,6 +57,8 @@ internal class LocalLlmEngineImpl(
 
     private val _modelLoadProgress = MutableStateFlow<Int?>(null)
     override val modelLoadProgress: StateFlow<Int?> = _modelLoadProgress.asStateFlow()
+    private val _modelLoadProgressEvents = MutableSharedFlow<Int>(extraBufferCapacity = 128)
+    override val modelLoadProgressEvents: SharedFlow<Int> = _modelLoadProgressEvents.asSharedFlow()
 
     private val engineHandle = AtomicLong(0L)
     private val isCancelled = AtomicBoolean(false)
@@ -114,9 +119,13 @@ internal class LocalLlmEngineImpl(
             _modelLoadProgress.value = 0
             val progressCallback = NativeModelLoadProgressCallback { progress ->
                 // Reserve 100% until all context, sampler, metadata and checksum work is done.
-                _modelLoadProgress.value = (progress.coerceIn(0.0f, 1.0f) * 99.0f)
+                val percent = (progress.coerceIn(0.0f, 1.0f) * 99.0f)
                     .roundToInt()
                     .coerceIn(0, 99)
+                if (_modelLoadProgress.value != percent) {
+                    _modelLoadProgress.value = percent
+                    _modelLoadProgressEvents.tryEmit(percent)
+                }
             }
 
             val ret = NativeEngineHandle.nativeLoadModel(
@@ -163,6 +172,7 @@ internal class LocalLlmEngineImpl(
             )
 
             _modelLoadProgress.value = 100
+            _modelLoadProgressEvents.tryEmit(100)
             _currentModel.value = info
             _state.value = EngineState.ModelLoaded(info)
             Log.i(TAG, "Model loaded successfully: $info")

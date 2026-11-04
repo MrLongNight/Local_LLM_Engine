@@ -14,6 +14,7 @@ import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -232,8 +233,15 @@ class InferenceIpcTest {
             mockService = fakeService
         )
 
+        val progressEvents = mutableListOf<Int>()
+        val progressJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            client.modelLoadProgressEvents.take(4).toList(progressEvents)
+        }
+
         val loadResult = client.loadModel(ModelSource.FilePath(tempFile.absolutePath), EngineConfig())
         assertTrue(loadResult.isSuccess)
+        progressJob.join()
+        assertEquals(listOf(0, 23, 79, 100), progressEvents)
         val modelInfo = loadResult.getOrThrow()
         assertEquals(tempFile.name, modelInfo.name)
         assertEquals("CPU (Fake)", modelInfo.activeBackend)

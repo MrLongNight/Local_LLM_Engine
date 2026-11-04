@@ -33,8 +33,11 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -89,6 +92,8 @@ class InferenceClient(
 
     private val _modelLoadProgress = MutableStateFlow<Int?>(null)
     override val modelLoadProgress: StateFlow<Int?> = _modelLoadProgress.asStateFlow()
+    private val _modelLoadProgressEvents = MutableSharedFlow<Int>(extraBufferCapacity = 128)
+    override val modelLoadProgressEvents: SharedFlow<Int> = _modelLoadProgressEvents.asSharedFlow()
 
     private val _remotePid = MutableStateFlow<Int?>(null)
     val remotePid: StateFlow<Int?> = _remotePid.asStateFlow()
@@ -293,6 +298,7 @@ class InferenceClient(
             _state.value = EngineState.LoadingModel(source)
             val file: File = ModelSourceResolver.resolveToFile(context, source)
             _modelLoadProgress.value = 0
+            _modelLoadProgressEvents.tryEmit(0)
 
             val callback = object : IInferenceCallback.Stub() {
                 override fun onModelLoaded(modelInfo: ModelInfo?) {
@@ -302,6 +308,7 @@ class InferenceClient(
                         lastLoadedSource = source
                         lastLoadedConfig = config
                         _modelLoadProgress.value = 100
+                        _modelLoadProgressEvents.tryEmit(100)
                         _currentModel.value = modelInfo
                         _state.value = EngineState.ModelLoaded(modelInfo)
                         deferred.complete(Result.success(modelInfo))
@@ -322,7 +329,9 @@ class InferenceClient(
                 }
 
                 override fun onModelLoadProgress(progressPercent: Int) {
-                    _modelLoadProgress.value = progressPercent.coerceIn(0, 100)
+                    val percent = progressPercent.coerceIn(0, 99)
+                    _modelLoadProgress.value = percent
+                    _modelLoadProgressEvents.tryEmit(percent)
                 }
 
                 override fun onStarted(requestId: String?, promptMessageCount: Int) {}

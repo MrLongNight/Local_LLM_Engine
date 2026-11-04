@@ -3,6 +3,7 @@ package com.mydocanizer.llm.engine
 import android.content.Context
 import com.mydocanizer.llm.engine.internal.LocalLlmEngineImpl
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -28,8 +29,11 @@ interface LocalLlmEngine : AutoCloseable {
      */
     val backendInfo: StateFlow<BackendInfo>
 
-    /** Real llama.cpp model-weight loading progress (0..100), null outside native loading. */
+    /** Latest native load percentage for UI state. */
     val modelLoadProgress: StateFlow<Int?>
+
+    /** Buffered native progress updates for reliable transfer to the remote inference process. */
+    val modelLoadProgressEvents: SharedFlow<Int>
 
     /**
      * Initializes the native library and backend subsystems.
