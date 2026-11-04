@@ -126,6 +126,7 @@ class InferenceClient(
         override fun onServiceDisconnected(name: ComponentName?) {
             remoteService = null
             _remotePid.value = null
+            _currentModel.value = null
             _state.value = EngineState.Reconnecting
             serviceConnectionDeferred = CompletableDeferred()
             EngineDiagnostics.info("ipc_client", "SERVICE_DISCONNECTED", "Service disconnected, reconnecting")
@@ -137,6 +138,7 @@ class InferenceClient(
         override fun onBindingDied(name: ComponentName?) {
             remoteService = null
             _remotePid.value = null
+            _currentModel.value = null
             _state.value = EngineState.Reconnecting
             serviceConnectionDeferred = CompletableDeferred()
             EngineDiagnostics.error("ipc_client", "BINDING_DIED", IllegalStateException("Inference process died"))
@@ -184,24 +186,35 @@ class InferenceClient(
                     isBound = false
                 }
                 bindToService()
-                withTimeout(effective.reconnectMs) {
-                    val service = getService()
-                    service.initialize()
-                    val lastSource = lastLoadedSource
-                    val lastConfig = lastLoadedConfig
-                    if (lastSource != null && lastConfig != null) {
-                        _state.value = EngineState.LoadingModel(lastSource)
-                        loadModelInternal(service, lastSource, lastConfig)
-                    } else {
-                        _state.value = EngineState.Ready
+
+                // reconnectMs bounds only service reconnection. A model reload is a separate
+                // operation and must use modelLoadMs, not the much shorter reconnect deadline.
+                val service = withTimeout(effective.reconnectMs) {
+                    getService()
+                }
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "SERVICE_RECONNECTED",
+                    "Inference process PID=${service.processId}; starting recovery"
+                )
+                service.initialize()
+
+                val lastSource = lastLoadedSource
+                val lastConfig = lastLoadedConfig
+                if (lastSource != null && lastConfig != null) {
+                    _state.value = EngineState.LoadingModel(lastSource)
+                    val reloadResult = loadModelInternal(service, lastSource, lastConfig)
+                    reloadResult.exceptionOrNull()?.let { error ->
+                        EngineDiagnostics.error("ipc_client", "MODEL_RELOAD_FAILED", error)
                     }
+                } else {
+                    _state.value = EngineState.Ready
                 }
             } catch (tce: TimeoutCancellationException) {
                 val elapsedMs = (System.nanoTime() - startNano) / 1_000_000L
-                Log.e(TAG, "Reconnection timed out after ${elapsedMs}ms", tce)
-                _state.value = EngineState.Error("Reconnection timed out ($elapsedMs ms)")
-                // Ultima ratio process kill
-                cancelInference()
+                Log.e(TAG, "Service reconnection timed out after ${elapsedMs}ms", tce)
+                _state.value = EngineState.Error("Service reconnection timed out ($elapsedMs ms)")
+                // Do not kill an idle service via cancelInference(); no inference request is active.
             } catch (e: Exception) {
                 Log.e(TAG, "Reconnection failed", e)
                 _state.value = EngineState.Error("Failed to reconnect: ${e.message}")
@@ -274,17 +287,21 @@ class InferenceClient(
         try {
             _state.value = EngineState.LoadingModel(source)
             val file: File = ModelSourceResolver.resolveToFile(context, source)
-            lastLoadedSource = source
-            lastLoadedConfig = config
 
             val callback = object : IInferenceCallback.Stub() {
                 override fun onModelLoaded(modelInfo: ModelInfo?) {
                     if (modelInfo != null) {
+                        // Keep only a model confirmed by the service as the automatic
+                        // recovery target after a later process restart.
+                        lastLoadedSource = source
+                        lastLoadedConfig = config
                         _currentModel.value = modelInfo
                         _state.value = EngineState.ModelLoaded(modelInfo)
                         deferred.complete(Result.success(modelInfo))
                     } else {
                         _currentModel.value = null
+                        lastLoadedSource = null
+                        lastLoadedConfig = null
                         _state.value = EngineState.Ready
                         deferred.complete(Result.failure(IllegalStateException("Empty model info returned")))
                     }
