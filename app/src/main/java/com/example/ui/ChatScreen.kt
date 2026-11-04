@@ -86,6 +86,7 @@ fun ChatScreen(
     val selectedModelFile by viewModel.selectedModelFile.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val isImporting by viewModel.isImporting.collectAsState()
+    val modelLoadProgress by viewModel.modelLoadProgress.collectAsState()
 
     var showModelDropdown by remember { mutableStateOf(false) }
 
@@ -255,6 +256,15 @@ fun ChatScreen(
                     }
                 }
 
+                if (engineState is EngineState.LoadingModel) {
+                    ModelLoadProgressIndicator(
+                        progress = modelLoadProgress,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                    )
+                }
+
                 Divider(modifier = Modifier.padding(vertical = 6.dp))
 
                 // Modell-Aktionen: Auswählen, Laden/Entladen, Importieren (SAF)
@@ -330,7 +340,8 @@ fun ChatScreen(
                     } else {
                         Button(
                             onClick = { viewModel.loadSelectedModel() },
-                            enabled = selectedModelFile != null && engineState !is EngineState.LoadingModel,
+                            enabled = selectedModelFile != null &&
+                                engineState !is EngineState.LoadingModel && !isImporting,
                             modifier = Modifier
                                 .height(38.dp)
                                 .testTag("load_button")

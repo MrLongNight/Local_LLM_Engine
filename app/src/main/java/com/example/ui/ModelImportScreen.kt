@@ -28,7 +28,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -252,26 +251,10 @@ fun ModelImportScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (isImporting) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val progress = modelLoadProgress
-                            if (progress == null) {
-                                Text(
-                                    text = "Datei wird vorbereitet / Engine wird initialisiert...",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            } else {
-                                Text(
-                                    text = "GGUF-Modellgewichte laden: $progress %",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                LinearProgressIndicator(
-                                    progress = progress.coerceIn(0, 100) / 100f,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
+                        ModelLoadProgressIndicator(
+                            progress = modelLoadProgress,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 
@@ -401,7 +384,11 @@ fun ModelImportScreen(
                                     }
                                 } else {
                                     Button(
-                                        onClick = { viewModel.loadExistingModel(entry.file) },
+                                        onClick = {
+                                            viewModel.selectModelFile(entry.file)
+                                            viewModel.loadSelectedModel()
+                                        },
+                                        enabled = !isImporting,
                                         modifier = Modifier.padding(start = 4.dp)
                                     ) {
                                         Text("Laden")

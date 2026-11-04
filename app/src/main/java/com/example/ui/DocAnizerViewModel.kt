@@ -190,74 +190,70 @@ class DocAnizerViewModel(
     }
 
     /**
-     * Import a model using Android Storage Access Framework (SAF).
-     * Calculates SHA-256, optionally copies into the private app storage folder without
-     * altering the original file, and loads the model into the native engine.
+     * All model-load entry points share one state/error/progress lifecycle. Only the
+     * source adapter differs between a selected private file and a SAF content URI.
      */
-    fun importModelFromSaf(uri: Uri) {
+    private fun startModelLoad(source: ModelSource, selectedFile: File?, operationLabel: String) {
+        if (_isImporting.value) {
+            EngineDiagnostics.info("ui", "MODEL_LOAD_REQUEST_IGNORED", "A model operation is already active")
+            return
+        }
+
+        _isImporting.value = true
+        _errorMessage.value = null
+        _statusMessage.value = operationLabel
+        selectedFile?.let { _selectedModelFile.value = it }
+
         viewModelScope.launch {
-            _isImporting.value = true
-            _statusMessage.value = "Importiere Modelldatei über SAF..."
-            _errorMessage.value = null
-
             try {
-                // The engine owns SAF copying, GGUF validation, de-duplication and hashing.
-                // Do not duplicate the selected file in the UI layer.
-                val result = engine.loadModel(
-                    ModelSource.ContentUri(uriString = uri.toString()),
-                    _engineConfig.value
-                )
-
+                val result = engine.loadModel(source, _engineConfig.value)
                 result.onSuccess { info ->
                     _selectedModelFile.value = File(info.path)
                     refreshModelFiles()
                     val hashLabel = info.sha256?.take(12)?.let { " (SHA-256: $it…)" }.orEmpty()
-                    _statusMessage.value = "Modell '${info.name}' erfolgreich geladen$hashLabel"
+                    _statusMessage.value = "Modell '${info.name}' bereit (${info.activeBackend})$hashLabel"
                     _errorMessage.value = null
+                    EngineDiagnostics.info(
+                        "ui",
+                        "MODEL_READY",
+                        "name=${info.name}, backend=${info.activeBackend}, sha256Present=${!info.sha256.isNullOrBlank()}"
+                    )
                 }.onFailure { error ->
-                    _errorMessage.value = "Modell konnte nicht geladen werden: ${error.message ?: "Unbekannter Fehler"}"
-                }
-            } catch (cancelled: CancellationException) {
-                // Preserve viewModelScope cancellation; do not turn it into a UI error.
-                throw cancelled
-            } catch (error: Exception) {
-                Log.e(TAG, "Fehler beim Modellimport (${error.javaClass.simpleName})")
-                _errorMessage.value = "Import fehlgeschlagen: ${error.message ?: error.javaClass.simpleName}"
-            } finally {
-                _isImporting.value = false
-            }
-        }
-    }
-
-    fun loadSelectedModel() {
-        val file = _selectedModelFile.value ?: return
-        loadExistingModel(file)
-    }
-
-    fun loadExistingModel(file: File) {
-        viewModelScope.launch {
-            _isImporting.value = true
-            _statusMessage.value = "Lade Modell: ${file.name}..."
-            _errorMessage.value = null
-            _selectedModelFile.value = file
-            try {
-                val res = engine.loadModel(ModelSource.FilePath(file.absolutePath), _engineConfig.value)
-                if (res.isSuccess) {
-                    val info = res.getOrThrow()
-                    _statusMessage.value = "Modell '${info.name}' bereit (${info.activeBackend})"
-                    _errorMessage.value = null
-                } else {
-                    val msg = res.exceptionOrNull()?.message ?: "Unbekannter Fehler"
-                    _errorMessage.value = "Fehler beim Laden von ${file.name}: $msg"
+                    EngineDiagnostics.error("ui", "MODEL_LOAD_UI_FAILURE", error)
+                    _errorMessage.value = "Modell konnte nicht geladen werden: ${error.message ?: error.javaClass.simpleName}"
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                _errorMessage.value = "Fehler beim Laden von ${file.name}: ${error.message ?: error.javaClass.simpleName}"
+                EngineDiagnostics.error("ui", "MODEL_LOAD_UI_EXCEPTION", error)
+                _errorMessage.value = "Modell konnte nicht geladen werden: ${error.message ?: error.javaClass.simpleName}"
             } finally {
                 _isImporting.value = false
             }
         }
+    }
+
+    fun importModelFromSaf(uri: Uri) {
+        startModelLoad(
+            source = ModelSource.ContentUri(uriString = uri.toString()),
+            selectedFile = null,
+            operationLabel = "Importiere und lade GGUF-Modell über SAF..."
+        )
+    }
+
+    fun loadSelectedModel() {
+        val file = _selectedModelFile.value ?: return
+        startModelLoad(
+            source = ModelSource.FilePath(file.absolutePath),
+            selectedFile = file,
+            operationLabel = "Lade Modell: ${file.name}..."
+        )
+    }
+
+    /** Shared by list rows and the Chat model selector. */
+    fun loadExistingModel(file: File) {
+        _selectedModelFile.value = file
+        loadSelectedModel()
     }
 
     fun unloadModel() {

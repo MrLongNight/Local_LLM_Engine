@@ -100,7 +100,10 @@ fun MainScreen(
                         )
                     }
                     IconButton(
-                        onClick = { viewModel.selectTab(AppTab.SETTINGS) },
+                        onClick = {
+                            EngineDiagnostics.info("ui", "SETTINGS_BUTTON_CLICKED", "source=top_app_bar")
+                            viewModel.selectTab(AppTab.SETTINGS)
+                        },
                         modifier = Modifier.testTag("top_app_bar_settings_button")
                     ) {
                         Icon(
@@ -130,7 +133,10 @@ fun MainScreen(
                 )
                 NavigationBarItem(
                     selected = currentTab == AppTab.SETTINGS,
-                    onClick = { viewModel.selectTab(AppTab.SETTINGS) },
+                    onClick = {
+                        EngineDiagnostics.info("ui", "SETTINGS_BUTTON_CLICKED", "source=bottom_navigation")
+                        viewModel.selectTab(AppTab.SETTINGS)
+                    },
                     icon = { Icon(Icons.Default.Tune, contentDescription = "Einstellungen") },
                     label = { Text("Einstellungen") },
                     modifier = Modifier.testTag("nav_settings")
