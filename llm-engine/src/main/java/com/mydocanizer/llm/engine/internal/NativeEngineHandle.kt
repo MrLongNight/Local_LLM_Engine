@@ -3,6 +3,14 @@ package com.mydocanizer.llm.engine.internal
 import android.util.Log
 
 /**
+ * Receives llama.cpp GGUF weight-loading progress (0.0..1.0).
+ * Called synchronously from native model loading.
+ */
+internal fun interface NativeModelLoadProgressCallback {
+    fun onProgress(progress: Float)
+}
+
+/**
  * JNI bridge interfacing with the native C++ llama.cpp wrapper `localllm_engine`.
  */
 internal object NativeEngineHandle {
@@ -50,7 +58,8 @@ internal object NativeEngineHandle {
         temperature: Float,
         topP: Float,
         backendMode: Int,
-        gpuLayers: Int
+        gpuLayers: Int,
+        progressCallback: NativeModelLoadProgressCallback
     ): Int
 
     @JvmStatic

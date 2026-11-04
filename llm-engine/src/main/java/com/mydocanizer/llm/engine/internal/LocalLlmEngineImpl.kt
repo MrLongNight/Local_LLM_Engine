@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,6 +52,9 @@ internal class LocalLlmEngineImpl(
 
     private val _backendInfo = MutableStateFlow(BackendInfo())
     override val backendInfo: StateFlow<BackendInfo> = _backendInfo.asStateFlow()
+
+    private val _modelLoadProgress = MutableStateFlow<Int?>(null)
+    override val modelLoadProgress: StateFlow<Int?> = _modelLoadProgress.asStateFlow()
 
     private val engineHandle = AtomicLong(0L)
     private val isCancelled = AtomicBoolean(false)
@@ -106,6 +110,12 @@ internal class LocalLlmEngineImpl(
 
             val file: File = ModelSourceResolver.resolveToFile(context, source)
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
+            _modelLoadProgress.value = 0
+            val progressCallback = NativeModelLoadProgressCallback { progress ->
+                _modelLoadProgress.value = (progress.coerceIn(0.0f, 1.0f) * 100.0f)
+                    .roundToInt()
+                    .coerceIn(0, 100)
+            }
 
             val ret = NativeEngineHandle.nativeLoadModel(
                 handle = handle,
@@ -116,7 +126,8 @@ internal class LocalLlmEngineImpl(
                 temperature = config.temperature,
                 topP = config.topP,
                 backendMode = config.backendPreference.modeId,
-                gpuLayers = config.gpuLayers
+                gpuLayers = config.gpuLayers,
+                progressCallback = progressCallback
             )
 
             when (ret) {
@@ -149,11 +160,13 @@ internal class LocalLlmEngineImpl(
                 sha256 = sha256
             )
 
+            _modelLoadProgress.value = 100
             _currentModel.value = info
             _state.value = EngineState.ModelLoaded(info)
             Log.i(TAG, "Model loaded successfully: $info")
             info
         }.onFailure { err ->
+            _modelLoadProgress.value = null
             Log.e(TAG, "Model load failed", err)
             _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
         }
@@ -166,6 +179,7 @@ internal class LocalLlmEngineImpl(
                 NativeEngineHandle.nativeUnloadModel(handle)
             }
             _currentModel.value = null
+            _modelLoadProgress.value = null
             _state.value = EngineState.Ready
             Log.i(TAG, "Model unloaded successfully")
             Unit

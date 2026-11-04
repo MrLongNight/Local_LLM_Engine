@@ -12,9 +12,11 @@ import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -64,6 +66,8 @@ class InferenceIpcTest {
         override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
             loadedModel.set(modelPath)
             if (hangModelLoad.get()) return
+            callback?.onModelLoadProgress(23)
+            callback?.onModelLoadProgress(79)
             val info = ModelInfo(
                 name = File(modelPath).name,
                 path = modelPath,
@@ -234,6 +238,7 @@ class InferenceIpcTest {
         assertEquals(tempFile.name, modelInfo.name)
         assertEquals("CPU (Fake)", modelInfo.activeBackend)
         assertEquals(modelInfo, client.currentModel.value)
+        assertEquals(100, client.modelLoadProgress.value)
 
         val request = InferenceRequest.single("Sag Hallo")
         val events = client.streamChat(request).toList()
@@ -276,9 +281,14 @@ class InferenceIpcTest {
         val request = InferenceRequest.single("Long running query")
         // Start collecting undispatched so the fake service has received the request
         // before the explicit cancellation is issued. This test must not depend on scheduler timing.
-        val flowJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+        val flowJob = launch {
             client.streamChat(request).collect {
                 // Ingest events
+            }
+        }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) {
+                delay(5L)
             }
         }
         assertNotNull("The inference request must be active before cancellation", fakeService.lastRequestId.get())

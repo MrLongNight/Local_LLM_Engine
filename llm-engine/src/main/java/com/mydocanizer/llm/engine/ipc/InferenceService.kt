@@ -127,6 +127,7 @@ class InferenceService : Service() {
 
         override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
             serviceScope.launch {
+                var progressJob: Job? = null
                 try {
                     val e = initEngine()
                     val initialization = e.initialize()
@@ -138,9 +139,17 @@ class InferenceService : Service() {
                         return@launch
                     }
                     EngineDiagnostics.info("ipc", "LOAD_MODEL_REQUESTED", "path=$modelPath, ctx=${config.contextSize}")
+                    progressJob = serviceScope.launch {
+                        e.modelLoadProgress.collect { percent ->
+                            if (percent != null) {
+                                runCatching { callback?.onModelLoadProgress(percent) }
+                            }
+                        }
+                    }
                     val result = e.loadModel(ModelSource.FilePath(modelPath), config)
                     result.onSuccess { info ->
                         EngineDiagnostics.info("ipc", "MODEL_LOADED", "model=${info.name}, backend=${info.activeBackend}")
+                        callback?.onModelLoadProgress(100)
                         callback?.onModelLoaded(info)
                     }.onFailure { err ->
                         EngineDiagnostics.error("ipc", "MODEL_LOAD_FAILED", err)
@@ -149,6 +158,8 @@ class InferenceService : Service() {
                 } catch (t: Throwable) {
                     Log.e(TAG, "Unhandled exception in loadModel", t)
                     callback?.onModelLoadFailed(t.message ?: t.javaClass.simpleName)
+                } finally {
+                    progressJob?.cancel()
                 }
             }
         }

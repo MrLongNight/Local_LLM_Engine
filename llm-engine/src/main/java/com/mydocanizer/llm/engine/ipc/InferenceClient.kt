@@ -85,6 +85,9 @@ class InferenceClient(
     private val _backendInfo = MutableStateFlow(BackendInfo())
     override val backendInfo: StateFlow<BackendInfo> = _backendInfo.asStateFlow()
 
+    private val _modelLoadProgress = MutableStateFlow<Int?>(null)
+    override val modelLoadProgress: StateFlow<Int?> = _modelLoadProgress.asStateFlow()
+
     private val _remotePid = MutableStateFlow<Int?>(null)
     val remotePid: StateFlow<Int?> = _remotePid.asStateFlow()
 
@@ -287,6 +290,7 @@ class InferenceClient(
         try {
             _state.value = EngineState.LoadingModel(source)
             val file: File = ModelSourceResolver.resolveToFile(context, source)
+            _modelLoadProgress.value = 0
 
             val callback = object : IInferenceCallback.Stub() {
                 override fun onModelLoaded(modelInfo: ModelInfo?) {
@@ -295,6 +299,7 @@ class InferenceClient(
                         // recovery target after a later process restart.
                         lastLoadedSource = source
                         lastLoadedConfig = config
+                        _modelLoadProgress.value = 100
                         _currentModel.value = modelInfo
                         _state.value = EngineState.ModelLoaded(modelInfo)
                         deferred.complete(Result.success(modelInfo))
@@ -308,9 +313,14 @@ class InferenceClient(
                 }
 
                 override fun onModelLoadFailed(errorMessage: String?) {
+                    _modelLoadProgress.value = null
                     val msg = errorMessage ?: "Model loading failed"
                     _state.value = EngineState.Error(msg)
                     deferred.complete(Result.failure(IllegalStateException(msg)))
+                }
+
+                override fun onModelLoadProgress(progressPercent: Int) {
+                    _modelLoadProgress.value = progressPercent.coerceIn(0, 100)
                 }
 
                 override fun onStarted(requestId: String?, promptMessageCount: Int) {}
@@ -333,6 +343,7 @@ class InferenceClient(
                 // Model loading has no inference request ID. Abort the isolated process
                 // explicitly only after the model-load deadline expires.
                 abortRemoteProcess(requestId = null, reason = "model_load_timeout")
+                _modelLoadProgress.value = null
                 val timeoutEx = InferenceTimeoutException(FinishReason.TIMEOUT_MODEL_LOAD, elapsedMs)
                 _state.value = EngineState.Error(timeoutEx.message ?: "Model load timed out", timeoutEx)
                 Result.failure(timeoutEx)
@@ -358,8 +369,11 @@ class InferenceClient(
                     }
 
                     override fun onModelLoadFailed(errorMessage: String?) {
+                        _modelLoadProgress.value = null
                         deferred.complete(Result.failure(IllegalStateException(errorMessage ?: "Unload failed")))
                     }
+
+                    override fun onModelLoadProgress(progressPercent: Int) {}
 
                     override fun onStarted(requestId: String?, promptMessageCount: Int) {}
                     override fun onToken(requestId: String?, token: String?, tokenIndex: Int) {}
@@ -513,6 +527,7 @@ class InferenceClient(
 
             override fun onModelLoaded(modelInfo: ModelInfo?) {}
             override fun onModelLoadFailed(errorMessage: String?) {}
+            override fun onModelLoadProgress(progressPercent: Int) {}
         }
 
         try {

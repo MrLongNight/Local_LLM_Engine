@@ -28,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -61,6 +62,7 @@ fun ModelImportScreen(
     val selectedModelFile: File? by viewModel.selectedModelFile.collectAsState()
     val backendInfo: BackendInfo by viewModel.backendInfo.collectAsState()
     val isImporting: Boolean by viewModel.isImporting.collectAsState()
+    val modelLoadProgress: Int? by viewModel.modelLoadProgress.collectAsState()
     val errorMessage: String? by viewModel.errorMessage.collectAsState()
 
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -248,6 +250,30 @@ fun ModelImportScreen(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    if (isImporting) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val progress = modelLoadProgress
+                            if (progress == null) {
+                                Text(
+                                    text = "Datei wird vorbereitet / Engine wird initialisiert...",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            } else {
+                                Text(
+                                    text = "GGUF-Modellgewichte laden: $progress %",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                LinearProgressIndicator(
+                                    progress = progress.coerceIn(0, 100) / 100f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
 
                     Button(
                         onClick = { filePickerLauncher.launch(arrayOf("*/*")) },

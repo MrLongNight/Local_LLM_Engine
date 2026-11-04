@@ -28,6 +28,9 @@ interface LocalLlmEngine : AutoCloseable {
      */
     val backendInfo: StateFlow<BackendInfo>
 
+    /** Real llama.cpp model-weight loading progress (0..100), null outside native loading. */
+    val modelLoadProgress: StateFlow<Int?>
+
     /**
      * Initializes the native library and backend subsystems.
      */

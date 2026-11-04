@@ -88,11 +88,10 @@ struct EngineInstance {
         current_position -= n_discard;
     }
 
-    void unload() {
-        std::lock_guard<std::mutex> lock(mtx);
+    // Caller must hold mtx.
+    void unload_unlocked() {
         reset_short_term();
         reset_long_term(false);
-
         if (sampler) {
             common_sampler_free(sampler);
             sampler = nullptr;
@@ -112,10 +111,34 @@ struct EngineInstance {
         }
         active_backend = "None";
     }
+
+    void unload() {
+        std::lock_guard<std::mutex> lock(mtx);
+        unload_unlocked();
+    }
 };
 
 static inline EngineInstance* fromHandle(jlong handle) {
     return reinterpret_cast<EngineInstance*>(handle);
+}
+
+struct ModelLoadProgressContext {
+    JNIEnv* env;
+    jobject listener;
+    jmethodID on_progress;
+};
+
+static bool report_model_load_progress(float progress, void* user_data) {
+    auto* context = static_cast<ModelLoadProgressContext*>(user_data);
+    if (!context || !context->env || !context->listener || !context->on_progress) return true;
+    const float clamped = std::max(0.0f, std::min(1.0f, progress));
+    context->env->CallVoidMethod(
+        context->listener, context->on_progress, static_cast<jfloat>(clamped));
+    if (context->env->ExceptionCheck()) {
+        context->env->ExceptionClear();
+        LOGW("Java model-load progress listener threw; continuing model load");
+    }
+    return true;
 }
 
 static bool probeVulkanDevice(std::string& out_device_name) {
@@ -250,12 +273,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jfloat temperature,
         jfloat top_p,
         jint backend_mode,
-        jint gpu_layers) {
+        jint gpu_layers,
+        jobject progress_listener) {
     auto* engine = fromHandle(handle);
     if (!engine) return 1;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
-    engine->unload();
+    engine->unload_unlocked();
 
     const char* model_path = env->GetStringUTFChars(jmodel_path, nullptr);
     if (!model_path) return 2;
@@ -263,6 +287,22 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     LOGI("Loading GGUF model: %s (mode=%d, gpu_layers=%d)", model_path, backend_mode, gpu_layers);
 
     llama_model_params model_params = llama_model_default_params();
+    ModelLoadProgressContext progress_context{env, progress_listener, nullptr};
+    if (progress_listener != nullptr) {
+        jclass listener_class = env->GetObjectClass(progress_listener);
+        if (listener_class != nullptr) {
+            progress_context.on_progress = env->GetMethodID(listener_class, "onProgress", "(F)V");
+            env->DeleteLocalRef(listener_class);
+        }
+        if (progress_context.on_progress == nullptr) {
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            env->ReleaseStringUTFChars(jmodel_path, model_path);
+            LOGE("Invalid native model-load progress listener");
+            return 5;
+        }
+        model_params.progress_callback = report_model_load_progress;
+        model_params.progress_callback_user_data = &progress_context;
+    }
 
     // GPU / Vulkan offload resolution
     std::string vk_device_name;

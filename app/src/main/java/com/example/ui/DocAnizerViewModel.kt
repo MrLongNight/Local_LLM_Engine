@@ -65,6 +65,7 @@ class DocAnizerViewModel(
     val engineState: StateFlow<EngineState> = engine.state
     val currentModel: StateFlow<ModelInfo?> = engine.currentModel
     val backendInfo: StateFlow<BackendInfo> = engine.backendInfo
+    val modelLoadProgress: StateFlow<Int?> = engine.modelLoadProgress
 
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
         listOf(
@@ -235,18 +236,26 @@ class DocAnizerViewModel(
 
     fun loadExistingModel(file: File) {
         viewModelScope.launch {
+            _isImporting.value = true
             _statusMessage.value = "Lade Modell: ${file.name}..."
             _errorMessage.value = null
             _selectedModelFile.value = file
-
-            val res = engine.loadModel(ModelSource.FilePath(file.absolutePath), _engineConfig.value)
-            if (res.isSuccess) {
-                val info = res.getOrThrow()
-                _statusMessage.value = "Modell '${info.name}' bereit (${info.activeBackend})"
-                _errorMessage.value = null
-            } else {
-                val msg = res.exceptionOrNull()?.message ?: "Unbekannter Fehler"
-                _errorMessage.value = "Fehler beim Laden von ${file.name}: $msg"
+            try {
+                val res = engine.loadModel(ModelSource.FilePath(file.absolutePath), _engineConfig.value)
+                if (res.isSuccess) {
+                    val info = res.getOrThrow()
+                    _statusMessage.value = "Modell '${info.name}' bereit (${info.activeBackend})"
+                    _errorMessage.value = null
+                } else {
+                    val msg = res.exceptionOrNull()?.message ?: "Unbekannter Fehler"
+                    _errorMessage.value = "Fehler beim Laden von ${file.name}: $msg"
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                _errorMessage.value = "Fehler beim Laden von ${file.name}: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                _isImporting.value = false
             }
         }
     }

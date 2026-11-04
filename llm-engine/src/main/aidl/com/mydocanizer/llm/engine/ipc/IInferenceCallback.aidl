@@ -6,6 +6,7 @@ import com.mydocanizer.llm.engine.InferenceResult;
 interface IInferenceCallback {
     void onModelLoaded(in ModelInfo modelInfo);
     void onModelLoadFailed(String errorMessage);
+    void onModelLoadProgress(int progressPercent);
     void onStarted(String requestId, int promptMessageCount);
     void onToken(String requestId, String token, int tokenIndex);
     void onProgress(String requestId, int tokensGenerated, long elapsedMs);
