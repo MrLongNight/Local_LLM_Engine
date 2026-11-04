@@ -24,6 +24,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -59,6 +60,8 @@ class InferenceIpcTest {
         val hangAfterStartedBeforeToken = AtomicBoolean(false)
         val hangAfterFirstToken = AtomicBoolean(false)
         val slowStreaming = AtomicBoolean(false)
+        val delayedPrefillMs = AtomicLong(0L)
+        val delayedFirstTokenMs = AtomicLong(0L)
 
         override fun initialize() {
             initialized.set(true)
@@ -89,6 +92,32 @@ class InferenceIpcTest {
             if (hangBeforeStarted.get()) {
                 return
             }
+
+            val prefillDelay = delayedPrefillMs.get()
+            val firstTokenDelay = delayedFirstTokenMs.get()
+            if (prefillDelay > 0L || firstTokenDelay > 0L) {
+                kotlin.concurrent.thread {
+                    try {
+                        Thread.sleep(prefillDelay)
+                        callback?.onStarted(requestId, request.messages.size)
+                        Thread.sleep(firstTokenDelay)
+                        callback?.onProgress(requestId, 1, prefillDelay + firstTokenDelay)
+                        callback?.onToken(requestId, "Hallo", 0)
+                        callback?.onCompleted(
+                            requestId,
+                            InferenceResult(
+                                text = "Hallo",
+                                tokensGenerated = 1,
+                                durationMs = prefillDelay + firstTokenDelay,
+                                tokensPerSecond = 1000.0 / (prefillDelay + firstTokenDelay).coerceAtLeast(1L),
+                                finishReason = FinishReason.STOP
+                            )
+                        )
+                    } catch (ignored: Exception) {}
+                }
+                return
+            }
+
             callback?.onStarted(requestId, request.messages.size)
             if (shouldHangInference.get() || hangAfterStartedBeforeToken.get()) {
                 return
@@ -363,6 +392,39 @@ class InferenceIpcTest {
         val ex = errorEvent?.throwable as InferenceTimeoutException
         assertEquals(FinishReason.TIMEOUT_PREFILL, ex.reason)
 
+        client.close()
+    }
+
+    @Test
+    fun firstTokenDeadlineStartsAfterPromptPrefillInsteadOfRequestStart() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            delayedPrefillMs.set(80L)
+            delayedFirstTokenMs.set(80L)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 5_000L,
+            prefillMs = 150L,
+            firstTokenMs = 150L,
+            interTokenMs = 150L,
+            totalInferenceMs = 500L,
+            abortGracePeriodMs = 100L,
+            reconnectMs = 1_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+
+        // Total latency is 160 ms (> firstTokenMs 150 ms), but prompt prefill takes
+        // only 80 ms and the first token arrives 80 ms after prefill. It must succeed.
+        val events = client.streamChat(InferenceRequest.single("Delayed prefill")).toList()
+
+        assertTrue("A valid slow prefill must not be killed by the first-token deadline", !fakeService.isKilled.get())
+        assertTrue(events.any { it is InferenceEvent.Started })
+        assertEquals(listOf("Hallo"), events.filterIsInstance<InferenceEvent.Token>().map { it.token })
+        assertTrue(events.any { it is InferenceEvent.Completed })
         client.close()
     }
 
