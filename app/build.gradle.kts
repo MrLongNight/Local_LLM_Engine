@@ -66,10 +66,8 @@ android {
     unitTests {
       isIncludeAndroidResources = true
       isReturnDefaultValues = true
-      all {
-        it.systemProperty("robolectric.offline", "true")
-        it.systemProperty("robolectric.dependency.dir", "/home/appuser/.m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7")
-      }
+      // Robolectric resolves its SDK artifacts from the normal Gradle/Maven cache.
+      // Do not pin a developer-machine path or force offline mode in CI.
     }
   }
   dependenciesInfo {
