@@ -31,27 +31,22 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
-      - name: Locate Android SDK command-line tools
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
         shell: bash
-        run: |
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT/cmdline-tools" ]; then
-            echo "::error::Android SDK command-line tools directory not found (ANDROID_HOME=$SDK_ROOT)"
-            exit 1
-          fi
-          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -u+x -print -quit)"
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager executable not found under $SDK_ROOT/cmdline-tools"
-            find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -print || true
-            exit 1
-          fi
-          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
-          echo "Using Android SDK manager: $SDKMANAGER"
+        run: yes | sdkmanager --licenses
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
-          sdkmanager "platform-tools" "platforms;android-36"
-          yes | sdkmanager --licenses
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
 
       - name: Run unit tests
         run: gradle --no-daemon :app:testDebugUnitTest :llm-engine:testDebugUnitTest
