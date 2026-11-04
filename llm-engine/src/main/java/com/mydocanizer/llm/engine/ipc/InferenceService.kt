@@ -72,7 +72,15 @@ class InferenceService : Service() {
     private fun initEngine(): LocalLlmEngine {
         val current = engine
         if (current != null) return current
-        val newEngine = LocalLlmEngine.create(applicationContext)
+        EngineDiagnostics.info(
+            "ipc",
+            "LOCAL_ENGINE_CREATE",
+            "Creating in-process native engine inside :inference PID=${Process.myPid()}"
+        )
+        val newEngine = LocalLlmEngine.create(
+            applicationContext,
+            useIpcProcess = false
+        )
         engine = newEngine
         return newEngine
     }
@@ -121,6 +129,14 @@ class InferenceService : Service() {
             serviceScope.launch {
                 try {
                     val e = initEngine()
+                    val initialization = e.initialize()
+                    if (initialization.isFailure) {
+                        val error = initialization.exceptionOrNull()
+                            ?: IllegalStateException("Native engine initialization failed")
+                        EngineDiagnostics.error("ipc", "ENGINE_INITIALIZATION_FAILED", error)
+                        callback?.onModelLoadFailed(error.message ?: "Native engine initialization failed")
+                        return@launch
+                    }
                     EngineDiagnostics.info("ipc", "LOAD_MODEL_REQUESTED", "path=$modelPath, ctx=${config.contextSize}")
                     val result = e.loadModel(ModelSource.FilePath(modelPath), config)
                     result.onSuccess { info ->

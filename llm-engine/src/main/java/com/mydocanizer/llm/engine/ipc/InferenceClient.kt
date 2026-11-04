@@ -93,7 +93,6 @@ class InferenceClient(
     private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
 
     private val activeRequestId = AtomicReference<String?>(null)
-    private var lastRequestId: String? = null
     private var lastLoadedSource: ModelSource? = null
     private var lastLoadedConfig: EngineConfig? = null
     private val isClosed = AtomicBoolean(false)
@@ -314,8 +313,9 @@ class InferenceClient(
             } catch (tce: TimeoutCancellationException) {
                 val elapsedMs = (System.nanoTime() - startNano) / 1_000_000L
                 Log.e(TAG, "Model loading timed out after ${elapsedMs}ms ($effectiveTimeout)")
-                // Ultima ratio process kill
-                cancelInference()
+                // Model loading has no inference request ID. Abort the isolated process
+                // explicitly only after the model-load deadline expires.
+                abortRemoteProcess(requestId = null, reason = "model_load_timeout")
                 val timeoutEx = InferenceTimeoutException(FinishReason.TIMEOUT_MODEL_LOAD, elapsedMs)
                 _state.value = EngineState.Error(timeoutEx.message ?: "Model load timed out", timeoutEx)
                 Result.failure(timeoutEx)
@@ -362,7 +362,6 @@ class InferenceClient(
         val currentModelInfo = _currentModel.value
         val requestId = UUID.randomUUID().toString()
         activeRequestId.set(requestId)
-        lastRequestId = requestId
         _state.value = EngineState.Inferring(request)
 
         val effectiveTimeout = request.timeoutConfig
@@ -381,8 +380,9 @@ class InferenceClient(
                 EngineDiagnostics.error("ipc_client", "INFERENCE_TIMEOUT", InferenceTimeoutException(reason, elapsedMs))
                 Log.w(TAG, "Inference timeout ($reason) after ${elapsedMs}ms. Executing process-kill as Ultima Ratio.")
 
-                // Ultima ratio process kill
-                cancelInference()
+                // A timeout is a hard-abort condition. The active ID was cleared above,
+                // so call the process-abort path directly rather than the public cancel API.
+                abortRemoteProcess(requestId = requestId, reason = "inference_timeout_${reason}")
 
                 val partial = streamBuilder.toString()
                 val result = InferenceResult(
@@ -549,27 +549,54 @@ class InferenceClient(
     }
 
     override fun cancelInference() {
+        val requestId = activeRequestId.getAndSet(null)
+        if (requestId == null) {
+            // An idle cancel must not tear down :inference or discard an already loaded model.
+            EngineDiagnostics.info(
+                "ipc_client",
+                "CANCEL_IGNORED_NO_ACTIVE_REQUEST",
+                "No active inference request; remote PID=${_remotePid.value} remains running"
+            )
+            return
+        }
+
+        EngineDiagnostics.info(
+            "ipc_client",
+            "CANCEL_REQUESTED",
+            "Cancelling active request=$requestId, remotePid=${_remotePid.value}"
+        )
+        abortRemoteProcess(requestId = requestId, reason = "inference_cancelled")
+    }
+
+    /**
+     * Terminates the isolated process only after a real abort condition.
+     *
+     * requestId may be null for operations such as model loading, which have no inference
+     * request ID but have independently exceeded their configured timeout.
+     */
+    private fun abortRemoteProcess(requestId: String?, reason: String) {
         val targetPid = _remotePid.value
-        val reqId = activeRequestId.getAndSet(null) ?: lastRequestId
         val service = remoteService
         val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
 
-        EngineDiagnostics.info("ipc_client", "CANCEL_REQUESTED", "Cancelling request=$reqId, remotePid=$targetPid")
+        EngineDiagnostics.info(
+            "ipc_client",
+            "PROCESS_ABORT_REQUESTED",
+            "reason=$reason, request=$requestId, remotePid=$targetPid"
+        )
 
-        // 1. Immediately request service over AIDL to self-terminate (or cancel request)
         if (service != null && targetPid != null) {
             try {
                 service.killProcess()
             } catch (e: Exception) {
-                Log.w(TAG, "Self-kill call to remote service completed or process exited", e)
+                Log.w(TAG, "Remote process termination request completed or process exited", e)
             }
-        } else if (service != null && reqId != null) {
+        } else if (service != null && requestId != null) {
             try {
-                service.cancelInference(reqId)
+                service.cancelInference(requestId)
             } catch (ignored: Exception) {}
         }
 
-        // 2. Launch background watchdog to verify PID liveness and escalate to hard-kill
         if (targetPid != null && targetPid != Process.myPid()) {
             clientScope.launch {
                 var isAlive = isProcessAlive(targetPid)
@@ -581,7 +608,7 @@ class InferenceClient(
                 }
 
                 if (isAlive) {
-                    Log.w(TAG, "Service process PID=$targetPid still alive after timeout. Hard killing process.")
+                    Log.w(TAG, "Service process PID=$targetPid still alive after abort grace period. Hard killing process.")
                     EngineDiagnostics.info("ipc_client", "HARD_KILL", "Hard killing service process PID=$targetPid")
                     try {
                         Process.killProcess(targetPid)
@@ -590,7 +617,7 @@ class InferenceClient(
                     }
                 }
 
-                if (mockService == null) {
+                if (mockService == null && !isClosed.get()) {
                     _state.value = EngineState.Reconnecting
                     triggerReconnect()
                 }

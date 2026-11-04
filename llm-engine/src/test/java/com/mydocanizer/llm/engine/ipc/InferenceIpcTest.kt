@@ -45,6 +45,7 @@ class InferenceIpcTest {
 
         val initialized = AtomicBoolean(false)
         val loadedModel = AtomicReference<String?>(null)
+        val hangModelLoad = AtomicBoolean(false)
         val lastRequestId = AtomicReference<String?>(null)
         val cancelledRequestId = AtomicReference<String?>(null)
         val isShutdown = AtomicBoolean(false)
@@ -62,6 +63,7 @@ class InferenceIpcTest {
 
         override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
             loadedModel.set(modelPath)
+            if (hangModelLoad.get()) return
             val info = ModelInfo(
                 name = File(modelPath).name,
                 path = modelPath,
@@ -144,6 +146,59 @@ class InferenceIpcTest {
         override fun shutdown() {
             isShutdown.set(true)
         }
+    }
+
+    @Test
+    fun cancelWithoutActiveInferenceDoesNotKillRemoteProcess() = runBlocking {
+        val fakeService = FakeInferenceService()
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService
+        )
+
+        client.initialize()
+        assertTrue(fakeService.initialized.get())
+        assertEquals(99999, client.remotePid.value)
+
+        client.cancelInference()
+
+        assertTrue("Idle cancel must preserve the inference process", !fakeService.isKilled.get())
+        assertEquals(99999, client.remotePid.value)
+        client.close()
+    }
+
+    @Test
+    fun modelLoadTimeoutKillsHungInferenceProcessWithoutInferenceRequestId() = runBlocking {
+        val fakeService = FakeInferenceService().apply { hangModelLoad.set(true) }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 50L,
+            prefillMs = 50L,
+            firstTokenMs = 150L,
+            interTokenMs = 50L,
+            totalInferenceMs = 300L,
+            abortGracePeriodMs = 10L,
+            reconnectMs = 1_000L
+        )
+        val modelFile = File.createTempFile("hung_model", ".gguf").apply {
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46))
+            deleteOnExit()
+        }
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+
+        val result = client.loadModel(
+            ModelSource.FilePath(modelFile.absolutePath),
+            EngineConfig(timeoutConfig = timeoutConfig)
+        )
+
+        assertTrue("Stalled model loading must fail by its deadline", result.isFailure)
+        assertTrue(result.exceptionOrNull() is InferenceTimeoutException)
+        assertTrue("A model-load timeout must abort the isolated process", fakeService.isKilled.get())
+        client.close()
     }
 
     @Test
