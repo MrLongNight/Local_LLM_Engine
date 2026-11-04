@@ -67,13 +67,8 @@ android {
       isIncludeAndroidResources = true
       isReturnDefaultValues = true
       all {
-        // Use Robolectric's local offline resolver only when its directory is
-        // explicitly configured by the build environment. CI uses normal Maven resolution.
-        val localDependencyDir = System.getenv("ROBOLECTRIC_DEPENDENCY_DIR")
-        if (!localDependencyDir.isNullOrBlank()) {
-          it.systemProperty("robolectric.offline", "true")
-          it.systemProperty("robolectric.dependency.dir", localDependencyDir)
-        }
+        it.systemProperty("robolectric.offline", "true")
+        it.systemProperty("robolectric.dependency.dir", "/home/appuser/.m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7")
       }
     }
   }
