@@ -52,6 +52,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # sdkmanager closes stdin after accepting the final license. That makes
+          # yes exit with SIGPIPE; keep pipefail off so sdkmanager's status wins.
+          set +o pipefail
           yes | sdkmanager --licenses
 
       - name: Install Android SDK packages
