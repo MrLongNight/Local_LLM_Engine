@@ -60,6 +60,7 @@ class InferenceService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        EngineDiagnostics.initialize(applicationContext)
         val pid = Process.myPid()
         EngineDiagnostics.info("ipc", "SERVICE_CREATED", "InferenceService started in process PID=$pid")
         Log.i(TAG, "InferenceService created in process PID=$pid")
@@ -142,14 +143,13 @@ class InferenceService : Service() {
                     progressJob = serviceScope.launch {
                         e.modelLoadProgress.collect { percent ->
                             if (percent != null) {
-                                runCatching { callback?.onModelLoadProgress(percent) }
+                                runCatching { callback?.onModelLoadProgress(percent.coerceIn(0, 99)) }
                             }
                         }
                     }
                     val result = e.loadModel(ModelSource.FilePath(modelPath), config)
                     result.onSuccess { info ->
                         EngineDiagnostics.info("ipc", "MODEL_LOADED", "model=${info.name}, backend=${info.activeBackend}")
-                        callback?.onModelLoadProgress(100)
                         callback?.onModelLoaded(info)
                     }.onFailure { err ->
                         EngineDiagnostics.error("ipc", "MODEL_LOAD_FAILED", err)

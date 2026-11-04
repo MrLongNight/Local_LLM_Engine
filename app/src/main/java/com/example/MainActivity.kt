@@ -10,6 +10,7 @@ import com.example.ui.theme.MyApplicationTheme
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    com.mydocanizer.llm.engine.EngineDiagnostics.initialize(applicationContext)
     enableEdgeToEdge()
     setContent {
       MyApplicationTheme {
