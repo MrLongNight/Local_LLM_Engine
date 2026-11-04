@@ -274,11 +274,14 @@ class InferenceIpcTest {
 
         // 1. Start blocking inference in background coroutine
         val request = InferenceRequest.single("Long running query")
-        val flowJob = launch {
+        // Start collecting undispatched so the fake service has received the request
+        // before the explicit cancellation is issued. This test must not depend on scheduler timing.
+        val flowJob = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             client.streamChat(request).collect {
                 // Ingest events
             }
         }
+        assertNotNull("The inference request must be active before cancellation", fakeService.lastRequestId.get())
 
         // 2. Trigger process-level cancelInference()
         client.cancelInference()
