@@ -22,11 +22,11 @@ import kotlin.time.Duration.Companion.seconds
  */
 data class TimeoutConfig(
     val serviceBindMs: Long = 10_000L,
-    val modelLoadMs: Long = 60_000L,
-    val prefillMs: Long = 30_000L,
-    val firstTokenMs: Long = 45_000L,
-    val interTokenMs: Long = 15_000L,
-    val totalInferenceMs: Long = 180_000L,
+    val modelLoadMs: Long = 180_000L,
+    val prefillMs: Long = 120_000L,
+    val firstTokenMs: Long = 120_000L,
+    val interTokenMs: Long = 30_000L,
+    val totalInferenceMs: Long = 600_000L,
     val abortGracePeriodMs: Long = 300L,
     val reconnectMs: Long = 15_000L
 ) : Parcelable {
@@ -101,11 +101,11 @@ data class TimeoutConfig(
          */
         fun fromDurations(
             serviceBind: Duration = 10.seconds,
-            modelLoad: Duration = 60.seconds,
-            prefill: Duration = 30.seconds,
-            firstToken: Duration = 45.seconds,
-            interToken: Duration = 15.seconds,
-            totalInference: Duration = 180.seconds,
+            modelLoad: Duration = 180.seconds,
+            prefill: Duration = 120.seconds,
+            firstToken: Duration = 120.seconds,
+            interToken: Duration = 30.seconds,
+            totalInference: Duration = 600.seconds,
             abortGracePeriod: Duration = 300.milliseconds,
             reconnect: Duration = 15.seconds
         ): TimeoutConfig = TimeoutConfig(

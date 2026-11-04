@@ -45,6 +45,8 @@ import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.CoroutineContext
 
@@ -400,10 +402,11 @@ class InferenceClient(
             ?: timeoutConfig
 
         val startNano = System.nanoTime()
-        var lastTokenNano = startNano
-        var receivedFirstToken = false
-        var receivedStarted = false
-        var tokenCount = 0
+        val prefillCompletedNano = AtomicLong(0L)
+        val lastTokenNano = AtomicLong(startNano)
+        val receivedFirstToken = AtomicBoolean(false)
+        val receivedStarted = AtomicBoolean(false)
+        val tokenCount = AtomicInteger(0)
         val streamBuilder = StringBuilder()
 
         fun triggerTimeout(reason: FinishReason, elapsedMs: Long) {
@@ -415,12 +418,13 @@ class InferenceClient(
                 // so call the process-abort path directly rather than the public cancel API.
                 abortRemoteProcess(requestId = requestId, reason = "inference_timeout_${reason}")
 
-                val partial = streamBuilder.toString()
+                val partial = synchronized(streamBuilder) { streamBuilder.toString() }
+                val generatedTokens = tokenCount.get()
                 val result = InferenceResult(
                     text = partial,
-                    tokensGenerated = tokenCount,
+                    tokensGenerated = generatedTokens,
                     durationMs = elapsedMs,
-                    tokensPerSecond = if (elapsedMs > 0) (tokenCount.toDouble() * 1000.0) / elapsedMs else 0.0,
+                    tokensPerSecond = if (elapsedMs > 0) (generatedTokens.toDouble() * 1000.0) / elapsedMs else 0.0,
                     finishReason = reason
                 )
                 trySend(InferenceEvent.Completed(result))
@@ -442,25 +446,25 @@ class InferenceClient(
                     break
                 }
 
-                // 2. Prefill timeout check (before started event or first token)
-                if (!receivedStarted && !receivedFirstToken) {
+                // Prefill ends only when the native service reports successful prompt evaluation.
+                if (!receivedStarted.get()) {
                     val elapsedPrefillMs = (now - startNano) / 1_000_000L
                     if (elapsedPrefillMs > effectiveTimeout.prefillMs) {
                         triggerTimeout(FinishReason.TIMEOUT_PREFILL, elapsedPrefillMs)
                         break
                     }
-                }
-
-                // 3. First token timeout check
-                if (!receivedFirstToken) {
-                    val elapsedFirstTokenMs = (now - startNano) / 1_000_000L
+                } else if (!receivedFirstToken.get()) {
+                    // First-token latency is measured from the end of prefill.
+                    val phaseStart = prefillCompletedNano.get()
+                    val elapsedFirstTokenMs = if (phaseStart > 0L) {
+                        (now - phaseStart) / 1_000_000L
+                    } else 0L
                     if (elapsedFirstTokenMs > effectiveTimeout.firstTokenMs) {
                         triggerTimeout(FinishReason.TIMEOUT_FIRST_TOKEN, elapsedFirstTokenMs)
                         break
                     }
                 } else {
-                    // 4. Inter-token timeout check
-                    val elapsedInterTokenMs = (now - lastTokenNano) / 1_000_000L
+                    val elapsedInterTokenMs = (now - lastTokenNano.get()) / 1_000_000L
                     if (elapsedInterTokenMs > effectiveTimeout.interTokenMs) {
                         triggerTimeout(FinishReason.TIMEOUT_INTER_TOKEN, elapsedInterTokenMs)
                         break
@@ -471,18 +475,34 @@ class InferenceClient(
 
         val callback = object : IInferenceCallback.Stub() {
             override fun onStarted(reqId: String?, promptMessageCount: Int) {
-                if (reqId == activeRequestId.get()) {
-                    receivedStarted = true
+                if (reqId == activeRequestId.get() && receivedStarted.compareAndSet(false, true)) {
+                    val completedAt = System.nanoTime()
+                    prefillCompletedNano.set(completedAt)
+                    val elapsedMs = (completedAt - startNano) / 1_000_000L
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "PREFILL_COMPLETED",
+                        "request=$reqId, messages=$promptMessageCount, elapsedMs=$elapsedMs"
+                    )
                     trySend(InferenceEvent.Started(promptMessageCount))
                 }
             }
 
             override fun onToken(reqId: String?, token: String?, tokenIndex: Int) {
-                if (reqId == activeRequestId.get() && token != null) {
-                    receivedFirstToken = true
-                    lastTokenNano = System.nanoTime()
-                    tokenCount++
-                    streamBuilder.append(token)
+                if (reqId == activeRequestId.get() && !token.isNullOrEmpty()) {
+                    val receivedAt = System.nanoTime()
+                    lastTokenNano.set(receivedAt)
+                    val isFirstToken = receivedFirstToken.compareAndSet(false, true)
+                    tokenCount.incrementAndGet()
+                    synchronized(streamBuilder) { streamBuilder.append(token) }
+                    if (isFirstToken) {
+                        val elapsedMs = (receivedAt - prefillCompletedNano.get()) / 1_000_000L
+                        EngineDiagnostics.info(
+                            "ipc_client",
+                            "FIRST_TOKEN_RECEIVED",
+                            "request=$reqId, latencyAfterPrefillMs=$elapsedMs"
+                        )
+                    }
                     trySend(InferenceEvent.Token(token, tokenIndex))
                 }
             }
@@ -514,12 +534,9 @@ class InferenceClient(
             override fun onError(reqId: String?, errorMessage: String?, partialText: String?) {
                 if (reqId == activeRequestId.get()) {
                     watchdogJob.cancel()
-                    trySend(
-                        InferenceEvent.Error(
-                            IllegalStateException(errorMessage ?: "Unknown inference error"),
-                            partialText ?: ""
-                        )
-                    )
+                    val error = IllegalStateException(errorMessage ?: "Unknown inference error")
+                    EngineDiagnostics.error("ipc_client", "REMOTE_INFERENCE_ERROR", error)
+                    trySend(InferenceEvent.Error(error, partialText ?: ""))
                     activeRequestId.compareAndSet(reqId, null)
                     channel.close()
                 }

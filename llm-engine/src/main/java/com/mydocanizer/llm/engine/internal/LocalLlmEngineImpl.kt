@@ -5,6 +5,7 @@ import android.util.Log
 import com.mydocanizer.llm.engine.BackendInfo
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.FinishReason
 import com.mydocanizer.llm.engine.InferenceEvent
@@ -14,19 +15,17 @@ import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.flow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -42,7 +41,7 @@ internal class LocalLlmEngineImpl(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
-    private val scope = CoroutineScope(llamaDispatcher + SupervisorJob())
+    private val initializationMutex = Mutex()
 
     private val _state = MutableStateFlow<EngineState>(EngineState.Uninitialized)
     override val state: StateFlow<EngineState> = _state.asStateFlow()
@@ -59,18 +58,14 @@ internal class LocalLlmEngineImpl(
     private val engineHandle = AtomicLong(0L)
     private val isCancelled = AtomicBoolean(false)
 
-    init {
-        scope.launch {
-            initialize()
-        }
-    }
-
-    override suspend fun initialize(): Result<Unit> = withContext(llamaDispatcher) {
-        runCatching {
-            if (_state.value is EngineState.Ready || _state.value is EngineState.ModelLoaded) {
-                return@runCatching
-            }
-            _state.value = EngineState.Initializing
+    override suspend fun initialize(): Result<Unit> = initializationMutex.withLock {
+        withContext(llamaDispatcher) {
+            runCatching {
+                if (engineHandle.get() != 0L) {
+                    if (_state.value !is EngineState.ModelLoaded) _state.value = EngineState.Ready
+                    return@runCatching
+                }
+                _state.value = EngineState.Initializing
 
             val loaded = NativeEngineHandle.ensureLoaded()
             if (!loaded) {
@@ -94,27 +89,34 @@ internal class LocalLlmEngineImpl(
 
             _state.value = EngineState.Ready
             Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
-        }.onFailure { err ->
-            Log.e(TAG, "Initialization failed", err)
-            _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
+            }.onFailure { err ->
+                EngineDiagnostics.error("engine", "INITIALIZATION_FAILED", err)
+                Log.e(TAG, "Initialization failed", err)
+                _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
+            }
         }
     }
 
     override suspend fun loadModel(
         source: ModelSource,
         config: EngineConfig
-    ): Result<ModelInfo> = withContext(llamaDispatcher) {
-        runCatching {
-            val handle = getValidHandle()
+    ): Result<ModelInfo> {
+        val initializationError = initialize().exceptionOrNull()
+        if (initializationError != null) return Result.failure(initializationError)
+
+        return withContext(llamaDispatcher) {
+            runCatching {
+                val handle = getValidHandle()
             _state.value = EngineState.LoadingModel(source)
 
             val file: File = ModelSourceResolver.resolveToFile(context, source)
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
             _modelLoadProgress.value = 0
             val progressCallback = NativeModelLoadProgressCallback { progress ->
-                _modelLoadProgress.value = (progress.coerceIn(0.0f, 1.0f) * 100.0f)
+                // Reserve 100% until all context, sampler, metadata and checksum work is done.
+                _modelLoadProgress.value = (progress.coerceIn(0.0f, 1.0f) * 99.0f)
                     .roundToInt()
-                    .coerceIn(0, 100)
+                    .coerceIn(0, 99)
             }
 
             val ret = NativeEngineHandle.nativeLoadModel(
@@ -165,10 +167,12 @@ internal class LocalLlmEngineImpl(
             _state.value = EngineState.ModelLoaded(info)
             Log.i(TAG, "Model loaded successfully: $info")
             info
-        }.onFailure { err ->
-            _modelLoadProgress.value = null
-            Log.e(TAG, "Model load failed", err)
-            _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
+            }.onFailure { err ->
+                _modelLoadProgress.value = null
+                EngineDiagnostics.error("engine", "MODEL_LOAD_FAILED", err)
+                Log.e(TAG, "Model load failed", err)
+                _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
+            }
         }
     }
 
@@ -194,8 +198,6 @@ internal class LocalLlmEngineImpl(
         _state.value = EngineState.Inferring(request)
         isCancelled.set(false)
 
-        emit(InferenceEvent.Started(request.messages.size))
-
         val roles = request.messages.map { it.role.roleName }.toTypedArray()
         val contents = request.messages.map { it.content }.toTypedArray()
 
@@ -207,11 +209,24 @@ internal class LocalLlmEngineImpl(
         )
 
         if (processRes != 0) {
-            val err = IllegalStateException("Native prompt evaluation failed with code $processRes")
+            val message = when (processRes) {
+                1 -> "Native prompt evaluation has no valid model/context handle"
+                2 -> "The native prompt message list is invalid"
+                3 -> "The chat template produced no prompt tokens"
+                4 -> "llama.cpp failed while decoding the prompt"
+                5 -> "The model chat template could not be formatted"
+                else -> "Native prompt evaluation failed with code $processRes"
+            }
+            val err = IllegalStateException(message)
+            EngineDiagnostics.error("native", "PROMPT_EVALUATION_FAILED", err)
             emit(InferenceEvent.Error(err))
             _state.value = EngineState.ModelLoaded(modelInfo)
             return@flow
         }
+
+        // Only now has llama.cpp completed prompt evaluation and prefill.
+        emit(InferenceEvent.Started(request.messages.size))
+        EngineDiagnostics.info("inference", "PREFILL_COMPLETED", "messages=${request.messages.size}")
 
         val outputBuilder = StringBuilder()
         var tokenCount = 0
@@ -238,7 +253,7 @@ internal class LocalLlmEngineImpl(
                 rawReason == 0 -> FinishReason.STOP
                 rawReason == 1 -> FinishReason.MAX_TOKENS
                 rawReason == 2 -> FinishReason.CANCELLED
-                else -> FinishReason.STOP
+                else -> FinishReason.ERROR
             }
 
             val durationUs = NativeEngineHandle.nativeGetInferenceDurationUs(handle)
@@ -247,17 +262,25 @@ internal class LocalLlmEngineImpl(
             val tokensPerSec = (actualTokens * 1000.0) / durationMs
             val fullText = outputBuilder.toString()
 
-            if (finishReason == FinishReason.CANCELLED) {
-                emit(InferenceEvent.Cancelled(fullText, actualTokens))
-            } else {
-                val result = InferenceResult(
-                    text = fullText,
-                    tokensGenerated = actualTokens,
-                    durationMs = durationMs,
-                    tokensPerSecond = tokensPerSec,
-                    finishReason = finishReason
-                )
-                emit(InferenceEvent.Completed(result))
+            when (finishReason) {
+                FinishReason.CANCELLED -> emit(InferenceEvent.Cancelled(fullText, actualTokens))
+                FinishReason.ERROR -> {
+                    val error = IllegalStateException(
+                        "Native token generation failed (llama.cpp finish reason=$rawReason)"
+                    )
+                    EngineDiagnostics.error("native", "TOKEN_GENERATION_FAILED", error)
+                    emit(InferenceEvent.Error(error, fullText))
+                }
+                else -> {
+                    val result = InferenceResult(
+                        text = fullText,
+                        tokensGenerated = actualTokens,
+                        durationMs = durationMs,
+                        tokensPerSecond = tokensPerSec,
+                        finishReason = finishReason
+                    )
+                    emit(InferenceEvent.Completed(result))
+                }
             }
         } catch (e: CancellationException) {
             Log.i(TAG, "streamChat coroutine cancelled, notifying native engine")
@@ -315,7 +338,6 @@ internal class LocalLlmEngineImpl(
             NativeEngineHandle.nativeDestroyEngine(handle)
         }
         _state.value = EngineState.Closed
-        scope.cancel()
         Log.i(TAG, "LocalLlmEngine closed")
     }
 

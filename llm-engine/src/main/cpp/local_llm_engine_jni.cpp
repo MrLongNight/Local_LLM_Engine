@@ -448,34 +448,34 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
 
     const bool has_chat_template = common_chat_templates_was_explicit(engine->chat_templates.get());
-    std::string full_prompt;
+    std::vector<common_chat_msg> messages;
+    messages.reserve(static_cast<size_t>(count));
 
     for (jsize i = 0; i < count; i++) {
-        auto jrole = (jstring)env->GetObjectArrayElement(jroles, i);
-        auto jcontent = (jstring)env->GetObjectArrayElement(jcontents, i);
+        auto jrole = static_cast<jstring>(env->GetObjectArrayElement(jroles, i));
+        auto jcontent = static_cast<jstring>(env->GetObjectArrayElement(jcontents, i));
+        if (jrole == nullptr || jcontent == nullptr) {
+            if (jrole != nullptr) env->DeleteLocalRef(jrole);
+            if (jcontent != nullptr) env->DeleteLocalRef(jcontent);
+            LOGE("Prompt message %d contains a null role or content", i);
+            return 2;
+        }
+
         const char* role_str = env->GetStringUTFChars(jrole, nullptr);
         const char* content_str = env->GetStringUTFChars(jcontent, nullptr);
+        if (role_str == nullptr || content_str == nullptr) {
+            if (role_str != nullptr) env->ReleaseStringUTFChars(jrole, role_str);
+            if (content_str != nullptr) env->ReleaseStringUTFChars(jcontent, content_str);
+            env->DeleteLocalRef(jrole);
+            env->DeleteLocalRef(jcontent);
+            LOGE("Could not read prompt message %d from JNI", i);
+            return 2;
+        }
 
         common_chat_msg msg;
-        msg.role = role_str ? role_str : "user";
-        msg.content = content_str ? content_str : "";
-
-        if (has_chat_template) {
-            bool is_last_user = (i == count - 1 && msg.role == "user");
-            std::string formatted = common_chat_format_single(
-                    engine->chat_templates.get(),
-                    engine->chat_msgs,
-                    msg,
-                    is_last_user,
-                    /* use_jinja */ false);
-            full_prompt += formatted;
-        } else {
-            full_prompt += msg.role + ": " + msg.content + "\n";
-            if (i == count - 1) {
-                full_prompt += "assistant: ";
-            }
-        }
-        engine->chat_msgs.push_back(msg);
+        msg.role = role_str;
+        msg.content = content_str;
+        messages.push_back(std::move(msg));
 
         env->ReleaseStringUTFChars(jrole, role_str);
         env->ReleaseStringUTFChars(jcontent, content_str);
@@ -483,7 +483,44 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         env->DeleteLocalRef(jcontent);
     }
 
-    auto tokens = common_tokenize(engine->context, full_prompt, has_chat_template, has_chat_template);
+    std::string full_prompt;
+    bool used_chat_template = false;
+    try {
+        common_chat_templates_inputs inputs;
+        inputs.messages = messages;
+        inputs.add_generation_prompt = true;
+        inputs.use_jinja = true;
+        full_prompt = common_chat_templates_apply(engine->chat_templates.get(), inputs).prompt;
+        used_chat_template = true;
+        LOGI("Formatted prompt with llama.cpp Jinja template (%zu messages)", messages.size());
+    } catch (const std::exception& jinja_error) {
+        LOGW("Jinja chat-template rendering failed: %s", jinja_error.what());
+        try {
+            common_chat_templates_inputs inputs;
+            inputs.messages = messages;
+            inputs.add_generation_prompt = true;
+            inputs.use_jinja = false;
+            full_prompt = common_chat_templates_apply(engine->chat_templates.get(), inputs).prompt;
+            used_chat_template = true;
+            LOGI("Formatted prompt with llama.cpp legacy renderer");
+        } catch (const std::exception& legacy_error) {
+            LOGE("Legacy chat-template rendering failed: %s", legacy_error.what());
+            if (has_chat_template) return 5;
+        }
+    }
+
+    if (!used_chat_template) {
+        for (const auto& message : messages) {
+            full_prompt += message.role + ": " + message.content + "\n";
+        }
+        full_prompt += "assistant: ";
+        LOGW("No usable model chat template; using role/content fallback");
+    }
+    engine->chat_msgs = messages;
+
+    LOGI("Prompt prepared: messages=%zu, template=%s, characters=%zu",
+         messages.size(), used_chat_template ? "llama.cpp" : "fallback", full_prompt.size());
+    auto tokens = common_tokenize(engine->context, full_prompt, used_chat_template, used_chat_template);
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
         return 3;
@@ -533,6 +570,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     if (engine->current_position >= engine->stop_generation_position) {
         LOGI("Reached stop generation token count");
         engine->last_finish_reason = 1; // MAX_TOKENS
+        return nullptr;
+    }
+
+    if (engine->sampler == nullptr) {
+        LOGE("Token generation requested without an initialized sampler");
+        engine->last_finish_reason = 3; // ERROR
         return nullptr;
     }
 

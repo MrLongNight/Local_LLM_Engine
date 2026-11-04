@@ -15,11 +15,11 @@ class TimeoutConfigTest {
     fun testDefaultTimeoutConfigIsValid() {
         val config = TimeoutConfig()
         assertEquals(10_000L, config.serviceBindMs)
-        assertEquals(60_000L, config.modelLoadMs)
-        assertEquals(30_000L, config.prefillMs)
-        assertEquals(45_000L, config.firstTokenMs)
-        assertEquals(15_000L, config.interTokenMs)
-        assertEquals(180_000L, config.totalInferenceMs)
+        assertEquals(180_000L, config.modelLoadMs)
+        assertEquals(120_000L, config.prefillMs)
+        assertEquals(120_000L, config.firstTokenMs)
+        assertEquals(30_000L, config.interTokenMs)
+        assertEquals(600_000L, config.totalInferenceMs)
         assertEquals(300L, config.abortGracePeriodMs)
         assertEquals(15_000L, config.reconnectMs)
 
@@ -29,11 +29,11 @@ class TimeoutConfigTest {
         assertTrue(config.abortGracePeriodMs < config.reconnectMs)
 
         assertEquals(10.seconds, config.serviceBind)
-        assertEquals(60.seconds, config.modelLoad)
-        assertEquals(30.seconds, config.prefill)
-        assertEquals(45.seconds, config.firstToken)
-        assertEquals(15.seconds, config.interToken)
-        assertEquals(180.seconds, config.totalInference)
+        assertEquals(180.seconds, config.modelLoad)
+        assertEquals(120.seconds, config.prefill)
+        assertEquals(120.seconds, config.firstToken)
+        assertEquals(30.seconds, config.interToken)
+        assertEquals(600.seconds, config.totalInference)
         assertEquals(300.milliseconds, config.abortGracePeriod)
         assertEquals(15.seconds, config.reconnect)
     }
