@@ -82,14 +82,24 @@ interface LocalLlmEngine : AutoCloseable {
         /**
          * Creates a new instance of [LocalLlmEngine].
          *
-         * @param context Android Application Context used for resolving ContentUris and cache storage.
-         * @param useIpcProcess If true, delegates execution to the dedicated :inference process via AIDL IPC.
+         * By default delegates execution to the dedicated :inference process via [com.mydocanizer.llm.engine.ipc.InferenceClient].
+         *
+         * @param context Android Application Context.
+         * @param useIpcProcess If true (default), delegates execution to the isolated :inference process via AIDL IPC.
          */
-        fun create(context: Context, useIpcProcess: Boolean = false): LocalLlmEngine {
+        fun create(
+            context: Context,
+            useIpcProcess: Boolean = true,
+            timeoutConfig: TimeoutConfig = TimeoutConfig()
+        ): LocalLlmEngine {
+            val appContext = runCatching { context.applicationContext }.getOrNull() ?: context
             return if (useIpcProcess) {
-                com.mydocanizer.llm.engine.ipc.InferenceServiceClient(context.applicationContext)
+                com.mydocanizer.llm.engine.ipc.InferenceClient(
+                    context = appContext,
+                    timeoutConfig = timeoutConfig
+                )
             } else {
-                LocalLlmEngineImpl(context.applicationContext)
+                LocalLlmEngineImpl(appContext)
             }
         }
 
@@ -98,9 +108,15 @@ interface LocalLlmEngine : AutoCloseable {
          */
         fun createIpcClient(
             context: Context,
-            mockService: com.mydocanizer.llm.engine.ipc.IInferenceService? = null
-        ): com.mydocanizer.llm.engine.ipc.InferenceServiceClient {
-            return com.mydocanizer.llm.engine.ipc.InferenceServiceClient(context.applicationContext, mockService)
+            mockService: com.mydocanizer.llm.engine.ipc.IInferenceService? = null,
+            timeoutConfig: TimeoutConfig = TimeoutConfig()
+        ): com.mydocanizer.llm.engine.ipc.InferenceClient {
+            val appContext = runCatching { context.applicationContext }.getOrNull() ?: context
+            return com.mydocanizer.llm.engine.ipc.InferenceClient(
+                context = appContext,
+                mockService = mockService,
+                timeoutConfig = timeoutConfig
+            )
         }
     }
 }

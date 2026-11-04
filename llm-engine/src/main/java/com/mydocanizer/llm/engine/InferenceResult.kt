@@ -14,7 +14,32 @@ enum class FinishReason {
     /** User cancelled inference */
     CANCELLED,
     /** Terminated due to error */
-    ERROR
+    ERROR,
+    /** Timeout during service binding */
+    TIMEOUT_SERVICE_BIND,
+    /** Timeout while loading model into memory */
+    TIMEOUT_MODEL_LOAD,
+    /** Timeout during prompt prefill */
+    TIMEOUT_PREFILL,
+    /** Timeout waiting for first token */
+    TIMEOUT_FIRST_TOKEN,
+    /** Timeout between consecutive tokens */
+    TIMEOUT_INTER_TOKEN,
+    /** Total inference duration exceeded */
+    TIMEOUT_TOTAL_INFERENCE,
+    /** Timeout during service reconnection */
+    TIMEOUT_RECONNECT;
+
+    val isTimeout: Boolean
+        get() = this in setOf(
+            TIMEOUT_SERVICE_BIND,
+            TIMEOUT_MODEL_LOAD,
+            TIMEOUT_PREFILL,
+            TIMEOUT_FIRST_TOKEN,
+            TIMEOUT_INTER_TOKEN,
+            TIMEOUT_TOTAL_INFERENCE,
+            TIMEOUT_RECONNECT
+        )
 }
 
 /**

@@ -225,6 +225,17 @@ class InferenceService : Service() {
             }
         }
 
+        override fun killProcess() {
+            EngineDiagnostics.info("ipc", "SELF_KILL_REQUESTED", "InferenceService self-kill initiated (PID=${Process.myPid()})")
+            Log.w(TAG, "Self-kill initiated for process PID=${Process.myPid()}")
+            try {
+                activeInferenceJob?.cancel()
+                engine?.close()
+            } catch (ignored: Exception) {}
+            Process.killProcess(Process.myPid())
+            System.exit(0)
+        }
+
         override fun getStatus(): String {
             return engine?.state?.value?.let { state ->
                 when (state) {
@@ -234,6 +245,7 @@ class InferenceService : Service() {
                     is EngineState.LoadingModel -> "LOADING_MODEL"
                     is EngineState.ModelLoaded -> "MODEL_LOADED"
                     is EngineState.Inferring -> "INFERRING"
+                    is EngineState.Reconnecting -> "RECONNECTING"
                     is EngineState.Error -> "ERROR: ${state.message}"
                     is EngineState.Closed -> "CLOSED"
                 }

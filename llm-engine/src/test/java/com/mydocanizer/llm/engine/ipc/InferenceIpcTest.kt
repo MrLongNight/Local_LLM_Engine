@@ -8,8 +8,10 @@ import com.mydocanizer.llm.engine.FinishReason
 import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceResult
+import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.TimeoutConfig
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -47,6 +49,13 @@ class InferenceIpcTest {
         val cancelledRequestId = AtomicReference<String?>(null)
         val isShutdown = AtomicBoolean(false)
 
+        val isKilled = AtomicBoolean(false)
+        val shouldHangInference = AtomicBoolean(false)
+        val hangBeforeStarted = AtomicBoolean(false)
+        val hangAfterStartedBeforeToken = AtomicBoolean(false)
+        val hangAfterFirstToken = AtomicBoolean(false)
+        val slowStreaming = AtomicBoolean(false)
+
         override fun initialize() {
             initialized.set(true)
         }
@@ -70,9 +79,37 @@ class InferenceIpcTest {
 
         override fun streamChat(requestId: String, request: InferenceRequest, callback: IInferenceCallback?) {
             lastRequestId.set(requestId)
+            if (hangBeforeStarted.get()) {
+                return
+            }
             callback?.onStarted(requestId, request.messages.size)
+            if (shouldHangInference.get() || hangAfterStartedBeforeToken.get()) {
+                return
+            }
             callback?.onProgress(requestId, 1, 10L)
             callback?.onToken(requestId, "Hallo", 0)
+            if (hangAfterFirstToken.get()) {
+                return
+            }
+            if (slowStreaming.get()) {
+                kotlin.concurrent.thread {
+                    try {
+                        Thread.sleep(30L)
+                        callback?.onToken(requestId, " Welt", 1)
+                        Thread.sleep(100L)
+                        val result = InferenceResult(
+                            text = "Hallo Welt",
+                            tokensGenerated = 2,
+                            durationMs = 130L,
+                            tokensPerSecond = 15.0,
+                            finishReason = FinishReason.STOP
+                        )
+                        callback?.onCompleted(requestId, result)
+                    } catch (ignored: Exception) {}
+                }
+                return
+            }
+
             callback?.onToken(requestId, " Welt", 1)
 
             val result = InferenceResult(
@@ -89,6 +126,10 @@ class InferenceIpcTest {
             cancelledRequestId.set(requestId)
         }
 
+        override fun killProcess() {
+            isKilled.set(true)
+        }
+
         override fun getStatus(): String = if (loadedModel.get() != null) "MODEL_LOADED" else "READY"
 
         override fun getBackendInfo(): BackendInfo = BackendInfo(
@@ -98,7 +139,7 @@ class InferenceIpcTest {
             recommendedThreads = 4
         )
 
-        override fun getProcessId(): Int = 99999
+        override fun getProcessId(): Int = if (isKilled.get()) 0 else 99999
 
         override fun shutdown() {
             isShutdown.set(true)
@@ -108,7 +149,6 @@ class InferenceIpcTest {
     @Test
     fun testMockIpcClientInitializationAndQueries() = runBlocking {
         val fakeService = FakeInferenceService()
-        // Using null Context because mockService bypasses bindService
         val client = InferenceServiceClient(
             context = object : android.content.ContextWrapper(null) {},
             mockService = fakeService
@@ -155,10 +195,215 @@ class InferenceIpcTest {
 
         assertNotNull(fakeService.lastRequestId.get())
 
-        client.cancelInference()
-        assertNotNull(fakeService.cancelledRequestId.get())
-
         client.close()
         assertTrue(fakeService.isShutdown.get())
+    }
+
+    @Test
+    fun testBlockingInferenceProcessKillAndRecovery() = runBlocking {
+        val fakeService = FakeInferenceService()
+        fakeService.shouldHangInference.set(true)
+
+        val initialServicePid = 99999
+        val fakePidState = AtomicBoolean(true) // true = alive, false = dead
+
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            processLivenessCheck = { pid ->
+                if (pid == initialServicePid) fakePidState.get() else false
+            }
+        )
+
+        val appPid = android.os.Process.myPid()
+
+        // 1. Start blocking inference in background coroutine
+        val request = InferenceRequest.single("Long running query")
+        val flowJob = launch {
+            client.streamChat(request).collect {
+                // Ingest events
+            }
+        }
+
+        // 2. Trigger process-level cancelInference()
+        client.cancelInference()
+
+        // 3. Verify service was commanded to kill its process
+        assertTrue(fakeService.isKilled.get())
+
+        // 4. Verify PID of service process is no longer alive
+        fakePidState.set(false)
+        org.junit.Assert.assertFalse(client.isProcessAlive(initialServicePid))
+
+        // 5. Verify App Process PID is intact and unaffected
+        assertEquals(appPid, android.os.Process.myPid())
+
+        // 6. Resume service with new PID and perform new inference successfully
+        fakeService.isKilled.set(false)
+        fakeService.shouldHangInference.set(false)
+
+        val recoveryResult = client.generateChat(InferenceRequest.single("Neue Inferenz nach Kill"))
+        assertTrue(recoveryResult.isSuccess)
+        assertEquals("Hallo Welt", recoveryResult.getOrThrow().text)
+
+        flowJob.cancel()
+        client.close()
+    }
+
+    @Test
+    fun testPrefillTimeoutTriggersProcessKillAndReportsFinishReason() = runBlocking {
+        val fakeService = FakeInferenceService()
+        fakeService.hangBeforeStarted.set(true)
+
+        val timeoutConfig = TimeoutConfig.fast(
+            prefillMs = 50L,
+            firstTokenMs = 150L,
+            interTokenMs = 150L,
+            totalInferenceMs = 300L
+        )
+
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+
+        val request = InferenceRequest.single("Prefill test")
+        val events = client.streamChat(request).toList()
+
+        // 1. Ultima ratio process kill was invoked
+        assertTrue(fakeService.isKilled.get())
+
+        // 2. Specific FinishReason TIMEOUT_PREFILL reported
+        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
+        assertNotNull(completed)
+        assertEquals(FinishReason.TIMEOUT_PREFILL, completed?.result?.finishReason)
+        assertTrue(completed?.result?.finishReason?.isTimeout == true)
+
+        // 3. Error event contains InferenceTimeoutException
+        val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
+        assertNotNull(errorEvent)
+        assertTrue(errorEvent?.throwable is InferenceTimeoutException)
+        val ex = errorEvent?.throwable as InferenceTimeoutException
+        assertEquals(FinishReason.TIMEOUT_PREFILL, ex.reason)
+
+        client.close()
+    }
+
+    @Test
+    fun testFirstTokenTimeoutTriggersProcessKillAndReportsFinishReason() = runBlocking {
+        val fakeService = FakeInferenceService()
+        fakeService.hangAfterStartedBeforeToken.set(true)
+
+        val timeoutConfig = TimeoutConfig.fast(
+            prefillMs = 40L,
+            firstTokenMs = 50L,
+            interTokenMs = 150L,
+            totalInferenceMs = 300L
+        )
+
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+
+        val request = InferenceRequest.single("First token test")
+        val events = client.streamChat(request).toList()
+
+        // 1. Ultima ratio process kill was invoked
+        assertTrue(fakeService.isKilled.get())
+
+        // 2. Started event was received before timeout
+        assertTrue(events.any { it is InferenceEvent.Started })
+
+        // 3. Specific FinishReason TIMEOUT_FIRST_TOKEN reported
+        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
+        assertNotNull(completed)
+        assertEquals(FinishReason.TIMEOUT_FIRST_TOKEN, completed?.result?.finishReason)
+
+        val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
+        assertNotNull(errorEvent)
+        assertEquals(FinishReason.TIMEOUT_FIRST_TOKEN, (errorEvent?.throwable as? InferenceTimeoutException)?.reason)
+
+        client.close()
+    }
+
+    @Test
+    fun testInterTokenTimeoutTriggersProcessKillAndReportsFinishReason() = runBlocking {
+        val fakeService = FakeInferenceService()
+        fakeService.hangAfterFirstToken.set(true)
+
+        val timeoutConfig = TimeoutConfig.fast(
+            prefillMs = 150L,
+            firstTokenMs = 150L,
+            interTokenMs = 50L,
+            totalInferenceMs = 300L
+        )
+
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+
+        val request = InferenceRequest.single("Inter token test")
+        val events = client.streamChat(request).toList()
+
+        // 1. First token was received
+        val tokens = events.filterIsInstance<InferenceEvent.Token>().map { it.token }
+        assertEquals(listOf("Hallo"), tokens)
+
+        // 2. Ultima ratio process kill was invoked
+        assertTrue(fakeService.isKilled.get())
+
+        // 3. Specific FinishReason TIMEOUT_INTER_TOKEN reported
+        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
+        assertNotNull(completed)
+        assertEquals(FinishReason.TIMEOUT_INTER_TOKEN, completed?.result?.finishReason)
+        assertEquals("Hallo", completed?.result?.text)
+
+        val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
+        assertNotNull(errorEvent)
+        assertEquals(FinishReason.TIMEOUT_INTER_TOKEN, (errorEvent?.throwable as? InferenceTimeoutException)?.reason)
+        assertEquals("Hallo", errorEvent?.partialText)
+
+        client.close()
+    }
+
+    @Test
+    fun testTotalInferenceTimeoutTriggersProcessKillAndReportsFinishReason() = runBlocking {
+        val fakeService = FakeInferenceService()
+        fakeService.slowStreaming.set(true)
+
+        val timeoutConfig = TimeoutConfig.fast(
+            prefillMs = 50L,
+            firstTokenMs = 50L,
+            interTokenMs = 60L,
+            totalInferenceMs = 70L
+        )
+
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+
+        val request = InferenceRequest.single("Total inference test")
+        val events = client.streamChat(request).toList()
+
+        // 1. Ultima ratio process kill was invoked
+        assertTrue(fakeService.isKilled.get())
+
+        // 2. Specific FinishReason TIMEOUT_TOTAL_INFERENCE reported
+        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
+        assertNotNull(completed)
+        assertEquals(FinishReason.TIMEOUT_TOTAL_INFERENCE, completed?.result?.finishReason)
+
+        val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
+        assertNotNull(errorEvent)
+        assertEquals(FinishReason.TIMEOUT_TOTAL_INFERENCE, (errorEvent?.throwable as? InferenceTimeoutException)?.reason)
+
+        client.close()
     }
 }

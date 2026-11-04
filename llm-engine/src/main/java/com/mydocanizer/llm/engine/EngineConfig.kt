@@ -43,27 +43,22 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property gpuLayers Number of layers offloaded to GPU VRAM (e.g. 99 for full offload).
  */
 data class EngineConfig(
-    val contextSize: Int = 2048,
-    val batchSize: Int = 128,
+    val contextSize: Int = 4096,
+    val batchSize: Int = 512,
     val threads: Int = 4,
     val temperature: Float = 0.7f,
     val topP: Float = 0.9f,
-    val maxPredictTokens: Int = 512,
-    val backendPreference: BackendPreference = BackendPreference.CPU,
-    val gpuLayers: Int = 16
+    val maxPredictTokens: Int = 1024,
+    val backendPreference: BackendPreference = BackendPreference.AUTO,
+    val gpuLayers: Int = 99,
+    val timeoutConfig: TimeoutConfig = TimeoutConfig()
 ) : Parcelable {
     init {
         require(contextSize >= 256) { "contextSize must be at least 256" }
         require(batchSize >= 64) { "batchSize must be at least 64" }
         require(threads >= 1) { "threads must be at least 1" }
-        require(temperature.isFinite() && temperature >= 0f) {
-            "temperature must be a finite, non-negative value"
-        }
-        require(topP.isFinite() && topP in 0f..1f) {
-            "topP must be a finite value between 0 and 1"
-        }
+        require(temperature >= 0f) { "temperature must be non-negative" }
         require(maxPredictTokens >= 1) { "maxPredictTokens must be at least 1" }
-        require(gpuLayers >= 1) { "gpuLayers must be at least 1; select CPU backend to disable offload" }
     }
 
     constructor(parcel: Parcel) : this(
@@ -74,7 +69,8 @@ data class EngineConfig(
         topP = parcel.readFloat(),
         maxPredictTokens = parcel.readInt(),
         backendPreference = BackendPreference.valueOf(parcel.readString() ?: BackendPreference.AUTO.name),
-        gpuLayers = parcel.readInt()
+        gpuLayers = parcel.readInt(),
+        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader) ?: TimeoutConfig()
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -86,6 +82,7 @@ data class EngineConfig(
         parcel.writeInt(maxPredictTokens)
         parcel.writeString(backendPreference.name)
         parcel.writeInt(gpuLayers)
+        parcel.writeParcelable(timeoutConfig, flags)
     }
 
     override fun describeContents(): Int = 0

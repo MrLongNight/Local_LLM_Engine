@@ -13,26 +13,22 @@ import android.os.Parcelable
  */
 data class InferenceRequest(
     val messages: List<ChatMessage>,
-    val maxPredictTokens: Int = 512,
+    val maxPredictTokens: Int = 1024,
     val temperature: Float? = null,
-    val topP: Float? = null
+    val topP: Float? = null,
+    val timeoutConfig: TimeoutConfig? = null
 ) : Parcelable {
     init {
         require(messages.isNotEmpty()) { "InferenceRequest messages must not be empty" }
         require(maxPredictTokens > 0) { "maxPredictTokens must be greater than zero" }
-        require(temperature == null || (temperature.isFinite() && temperature >= 0f)) {
-            "temperature override must be finite and non-negative"
-        }
-        require(topP == null || (topP.isFinite() && topP in 0f..1f)) {
-            "topP override must be finite and between 0 and 1"
-        }
     }
 
     constructor(parcel: Parcel) : this(
         messages = parcel.createTypedArrayList(ChatMessage.CREATOR) ?: emptyList(),
         maxPredictTokens = parcel.readInt(),
         temperature = if (parcel.readByte() != 0.toByte()) parcel.readFloat() else null,
-        topP = if (parcel.readByte() != 0.toByte()) parcel.readFloat() else null
+        topP = if (parcel.readByte() != 0.toByte()) parcel.readFloat() else null,
+        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader)
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -50,6 +46,7 @@ data class InferenceRequest(
         } else {
             parcel.writeByte(0)
         }
+        parcel.writeParcelable(timeoutConfig, flags)
     }
 
     override fun describeContents(): Int = 0
@@ -61,7 +58,7 @@ data class InferenceRequest(
             override fun newArray(size: Int): Array<InferenceRequest?> = arrayOfNulls(size)
         }
 
-        fun single(userPrompt: String, systemPrompt: String? = null, maxPredictTokens: Int = 512): InferenceRequest {
+        fun single(userPrompt: String, systemPrompt: String? = null, maxPredictTokens: Int = 1024): InferenceRequest {
             val list = mutableListOf<ChatMessage>()
             if (!systemPrompt.isNullOrBlank()) {
                 list.add(ChatMessage.system(systemPrompt))

@@ -22,6 +22,9 @@ sealed interface EngineState {
     /** Prompt evaluation or token generation is in progress */
     data class Inferring(val request: InferenceRequest) : EngineState
 
+    /** Connection to isolated :inference process was lost and is actively reconnecting */
+    data object Reconnecting : EngineState
+
     /** Engine encountered an unrecoverable failure */
     data class Error(val message: String, val cause: Throwable? = null) : EngineState
 
@@ -35,4 +38,5 @@ val EngineState.isModelReady: Boolean
 val EngineState.isBusy: Boolean
     get() = this is EngineState.Initializing ||
             this is EngineState.LoadingModel ||
-            this is EngineState.Inferring
+            this is EngineState.Inferring ||
+            this is EngineState.Reconnecting
