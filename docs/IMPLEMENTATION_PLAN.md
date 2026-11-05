@@ -41,6 +41,8 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 
 **Status:** CMake-Aktivierung umgesetzt und im ARM64-APK #65 durch vorhandene KleidiAI-Kernel-/Selector-Symbole im nativen ELF bestätigt. Das belegt die Kompilierung, nicht die tatsächliche Auswahl auf dem Gerät.
 
+**Zusätzlicher Build-Befund vom 05.11.2026:** Die APK-Buildlogs #65 und #66 zeigen für beide ABI-Konfigurationen `CMAKE_BUILD_TYPE=Debug`, aber nur `-fno-limit-debug-info` in `CMAKE_C_FLAGS_DEBUG` und `CMAKE_CXX_FLAGS_DEBUG`; das im vorherigen CMake-Code erwartete `-O2` fehlte. Ursache war, dass der Android-NDK diese Flags als normale Variablen setzt und die bisherige CACHE-only-Zuweisung die normalen Variablen nicht überschrieben hat. Die korrigierte CMake-Logik ergänzt deshalb die normale Variable, spiegelt den Wert anschließend in den Cache und bricht die Konfiguration ab, falls `-O2` für C oder C++ fehlt. Abnahme: Der nächste APK-Build muss beide Debug-Flag-Zeilen mit `-O2` ausgeben.
+
 **Quantisierungsgrenze:** Die KleidiAI-Integration in dieser llama.cpp-Version stellt explizite Q4_0- und Q8_0-Microkernelpfade (sowie F16-Pfade) bereit. Ihre `supports_op()`-Freigabe für quantisierte Matrixoperationen ist auf Q4_0/Q8_0 begrenzt. Ein Q4_K_M-GGUF darf daher nicht als automatisch von diesen KleidiAI-Kerneln beschleunigt betrachtet werden. Für dieses Modell muss die tatsächliche Tensor-/Kernel-Auswahl gemessen werden.
 
 ## Phase 2 – Backend-Erkennung und Performance-Messung
