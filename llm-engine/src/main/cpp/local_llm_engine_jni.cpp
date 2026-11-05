@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
 #include <unistd.h>
 
 #include "llama.h"
@@ -20,6 +23,60 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+
+// Native llama.cpp/ggml diagnostics are persisted separately from Kotlin events.
+// The filename uses the same engine-*.log pattern consumed by EngineDiagnostics export.
+static std::mutex g_native_log_file_mutex;
+static FILE* g_native_log_file = nullptr;
+
+static void local_llm_native_log_callback(enum ggml_log_level level, const char* text, void* /*user_data*/) {
+    if (text == nullptr || level < GGML_LOG_LEVEL_INFO) return;
+
+    int android_priority = ANDROID_LOG_INFO;
+    switch (level) {
+        case GGML_LOG_LEVEL_WARN: android_priority = ANDROID_LOG_WARN; break;
+        case GGML_LOG_LEVEL_ERROR: android_priority = ANDROID_LOG_ERROR; break;
+        case GGML_LOG_LEVEL_DEBUG: return;
+        default: android_priority = ANDROID_LOG_INFO; break;
+    }
+    __android_log_write(android_priority, TAG, text);
+
+    std::lock_guard<std::mutex> lock(g_native_log_file_mutex);
+    if (g_native_log_file == nullptr) return;
+
+    const auto now = std::chrono::system_clock::now();
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()).count() % 1000;
+    const std::time_t epoch = std::chrono::system_clock::to_time_t(now);
+    std::tm local_time{};
+    localtime_r(&epoch, &local_time);
+    char timestamp[40];
+    std::snprintf(
+        timestamp, sizeof(timestamp), "%04d-%02d-%02d %02d:%02d:%02d.%03lld",
+        local_time.tm_year + 1900, local_time.tm_mon + 1, local_time.tm_mday,
+        local_time.tm_hour, local_time.tm_min, local_time.tm_sec,
+        static_cast<long long>(millis)
+    );
+
+    // Prefix every native log line with a sortable timestamp; flush immediately so
+    // useful diagnostics survive a driver abort or process-level crash.
+    const char* cursor = text;
+    while (*cursor != '\0') {
+        const char* line_end = std::strchr(cursor, '\n');
+        const size_t line_length = line_end
+            ? static_cast<size_t>(line_end - cursor)
+            : std::strlen(cursor);
+        if (line_length > 0) {
+            std::fprintf(
+                g_native_log_file, "%s [NATIVE] %.*s\n",
+                timestamp, static_cast<int>(line_length), cursor
+            );
+        }
+        if (line_end == nullptr) break;
+        cursor = line_end + 1;
+    }
+    std::fflush(g_native_log_file);
+}
 
 static constexpr int OVERFLOW_HEADROOM = 8;
 static constexpr int BATCH_SIZE = 512;
@@ -326,6 +383,35 @@ static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, lla
 }
 
 extern "C" {
+
+
+JNIEXPORT void JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetDiagnosticsLogFile(
+        JNIEnv* env, jclass /*clazz*/, jstring jpath) {
+    if (jpath == nullptr) return;
+    const char* path = env->GetStringUTFChars(jpath, nullptr);
+    if (path == nullptr) return;
+
+    FILE* new_file = std::fopen(path, "a");
+    env->ReleaseStringUTFChars(jpath, path);
+
+    {
+        std::lock_guard<std::mutex> lock(g_native_log_file_mutex);
+        if (g_native_log_file != nullptr) {
+            std::fclose(g_native_log_file);
+        }
+        g_native_log_file = new_file;
+    }
+
+    // llama_log_set also forwards ggml backend/driver diagnostics to this callback.
+    // Install before llama_backend_init so Vulkan device discovery is captured too.
+    llama_log_set(local_llm_native_log_callback, nullptr);
+    if (new_file != nullptr) {
+        LOGI("Native llama.cpp/ggml diagnostics file configured");
+    } else {
+        LOGE("Could not open native diagnostics file; native messages remain available in logcat");
+    }
+}
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(JNIEnv* /*env*/, jclass /*clazz*/) {

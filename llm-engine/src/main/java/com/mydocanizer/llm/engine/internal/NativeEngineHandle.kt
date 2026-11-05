@@ -1,6 +1,7 @@
 package com.mydocanizer.llm.engine.internal
 
 import android.util.Log
+import java.io.File
 
 /**
  * Receives llama.cpp GGUF weight-loading progress (0.0..1.0).
@@ -26,12 +27,13 @@ internal object NativeEngineHandle {
     private var isLoaded = false
 
     @Synchronized
-    fun ensureLoaded(): Boolean {
+    fun ensureLoaded(diagnosticsLogFile: File): Boolean {
         if (!isLoaded) {
             try {
                 System.loadLibrary(LIB_NAME)
-                isLoaded = true
+                nativeSetDiagnosticsLogFile(diagnosticsLogFile.absolutePath)
                 nativeInitBackend()
+                isLoaded = true
                 Log.i(TAG, "Native library $LIB_NAME successfully loaded and backend initialized")
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to load native library $LIB_NAME: ${t.message}", t)
@@ -40,6 +42,9 @@ internal object NativeEngineHandle {
         }
         return isLoaded
     }
+
+    @JvmStatic
+    external fun nativeSetDiagnosticsLogFile(path: String)
 
     @JvmStatic
     external fun nativeInitBackend()

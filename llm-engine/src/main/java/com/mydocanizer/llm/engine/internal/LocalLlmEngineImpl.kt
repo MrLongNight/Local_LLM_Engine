@@ -72,11 +72,24 @@ internal class LocalLlmEngineImpl(
                 }
                 _state.value = EngineState.Initializing
 
-            val loaded = NativeEngineHandle.ensureLoaded()
+            val diagnosticsDirectory = File(context.filesDir, "diagnostics")
+            if (!diagnosticsDirectory.exists() && !diagnosticsDirectory.mkdirs()) {
+                throw IllegalStateException("Could not create native diagnostics directory")
+            }
+            val nativeDiagnosticsFile = File(
+                diagnosticsDirectory,
+                "engine-native-${android.os.Process.myPid()}.log"
+            )
+            val loaded = NativeEngineHandle.ensureLoaded(nativeDiagnosticsFile)
             if (!loaded) {
                 throw IllegalStateException("Failed to load native library localllm_engine")
             }
 
+            EngineDiagnostics.info(
+                "engine",
+                "NATIVE_LOGGER_READY",
+                "nativeLogFile=${nativeDiagnosticsFile.name}; minimumLevel=INFO; promptAndResponseContentNotRecorded"
+            )
             val handle = NativeEngineHandle.nativeCreateEngine()
             if (handle == 0L) {
                 throw IllegalStateException("Failed to allocate native EngineInstance")
