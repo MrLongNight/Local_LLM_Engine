@@ -7,6 +7,7 @@ import android.os.Process
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.ModelInfo
+import com.mydocanizer.llm.engine.internal.NativeEngineHandle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,7 +36,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         val batchSize: Int,
         val threads: Int,
         val gpuLayers: Int,
-        val backend: String
+        val backendPreference: String,
+        val activeBackend: String
     )
 
     companion object {
@@ -51,6 +53,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
     private val phase = AtomicReference("SERVICE_STARTING")
     private val model = AtomicReference<ModelSnapshot?>(null)
     private val sampleErrorLogged = AtomicBoolean(false)
+    private val nativeBackendReady = AtomicBoolean(false)
     private var samplingJob: Job? = null
 
     @Synchronized
@@ -74,7 +77,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 batchSize = config.batchSize,
                 threads = config.threads,
                 gpuLayers = config.gpuLayers,
-                backend = config.backendPreference.name
+                backendPreference = config.backendPreference.name,
+                activeBackend = "loading"
             )
         )
         phase.set("MODEL_LOADING")
@@ -90,11 +94,21 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 batchSize = config.batchSize,
                 threads = config.threads,
                 gpuLayers = config.gpuLayers,
-                backend = config.backendPreference.name
+                backendPreference = config.backendPreference.name,
+                activeBackend = info.activeBackend
             )
         )
         phase.set("MODEL_LOADED_IDLE")
         logPhase("MODEL_LOADED_IDLE")
+    }
+
+    fun nativeBackendReady() {
+        nativeBackendReady.set(true)
+    }
+
+    fun modelUnloading() {
+        phase.set("MODEL_UNLOADING")
+        logPhase("MODEL_UNLOADING")
     }
 
     fun modelLoadFailed() {
@@ -134,6 +148,10 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
             val javaUsedBytes = runtime.totalMemory() - runtime.freeMemory()
             val snapshot = model.get()
 
+            val nativeBackendMemory = if (nativeBackendReady.get()) {
+                runCatching { NativeEngineHandle.nativeGetBackendDiagnostics() }.getOrNull()
+            } else null
+
             val graphicsPssKb = runCatching {
                 processMemory.getMemoryStats()["summary.graphics"]?.toLongOrNull()
             }.getOrNull()
@@ -156,6 +174,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                     append(",systemLowMemoryThresholdMb=${mb(systemMemory.threshold)}")
                     append(",systemLowMemory=${systemMemory.lowMemory}")
                 }
+                nativeBackendMemory?.let { append(",backendMemory={$it}") }
                 if (snapshot != null) {
                     append(",model=${snapshot.name}")
                     append(",modelFileMb=${mb(snapshot.fileBytes)}")
@@ -163,7 +182,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                     append(",batchSize=${snapshot.batchSize}")
                     append(",threads=${snapshot.threads}")
                     append(",gpuLayersRequested=${snapshot.gpuLayers}")
-                    append(",backendRequested=${snapshot.backend}")
+                    append(",backendPreference=${snapshot.backendPreference}")
+                    append(",backendActive=${snapshot.activeBackend}")
                 }
             }
 
