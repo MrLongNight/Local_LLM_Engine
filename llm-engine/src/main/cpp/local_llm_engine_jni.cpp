@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <unistd.h>
 
 #include "llama.h"
@@ -227,6 +228,45 @@ static ggml_backend_dev_t findRegisteredCpuDevice() {
     return device;
 }
 
+// Exportable runtime evidence for the exact backend registry used by llama.cpp.
+// Memory values come from ggml's own device API, not Android's generic RAM estimate.
+static std::string collectBackendDiagnostics() {
+    std::ostringstream ss;
+    const size_t registry_count = ggml_backend_reg_count();
+    ss << "registryCount=" << registry_count;
+    bool vulkan_registered = false;
+
+    for (size_t r = 0; r < registry_count; ++r) {
+        ggml_backend_reg_t registry = ggml_backend_reg_get(r);
+        if (registry == nullptr) continue;
+        const char* raw_name = ggml_backend_reg_name(registry);
+        const std::string backend_name = raw_name ? raw_name : "unknown";
+        ss << ";backend[" << r << "]=" << backend_name;
+        if (backend_name == "Vulkan") vulkan_registered = true;
+
+        const size_t device_count = ggml_backend_reg_dev_count(registry);
+        for (size_t d = 0; d < device_count; ++d) {
+            ggml_backend_dev_t device = ggml_backend_reg_dev_get(registry, d);
+            if (device == nullptr) continue;
+
+            size_t memory_free = 0;
+            size_t memory_total = 0;
+            ggml_backend_dev_memory(device, &memory_free, &memory_total);
+            const char* raw_device_name = ggml_backend_dev_name(device);
+            const char* raw_description = ggml_backend_dev_description(device);
+            ss << ";device[" << r << "," << d << "]="
+               << (raw_device_name ? raw_device_name : "unknown")
+               << ";description=" << (raw_description ? raw_description : "")
+               << ";type=" << static_cast<int>(ggml_backend_dev_type(device))
+               << ";freeBytes=" << memory_free
+               << ";totalBytes=" << memory_total;
+        }
+    }
+
+    ss << ";vulkanRegistered=" << (vulkan_registered ? "true" : "false");
+    return ss.str();
+}
+
 static bool is_valid_utf8(const char *string) {
     if (!string) return true;
     const auto *bytes = reinterpret_cast<const unsigned char*>(string);
@@ -303,6 +343,20 @@ JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetSystemInfo(JNIEnv* env, jclass /*clazz*/) {
     const char* sys_info = llama_print_system_info();
     return env->NewStringUTF(sys_info ? sys_info : "N/A");
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetBackendDiagnostics(
+        JNIEnv* env, jclass /*clazz*/) {
+    try {
+        const std::string diagnostics = collectBackendDiagnostics();
+        return env->NewStringUTF(diagnostics.c_str());
+    } catch (const std::exception& error) {
+        const std::string message = std::string("backendDiagnosticsException=") + error.what();
+        return env->NewStringUTF(message.c_str());
+    } catch (...) {
+        return env->NewStringUTF("backendDiagnosticsException=unknown");
+    }
 }
 
 JNIEXPORT jlong JNICALL
@@ -396,7 +450,21 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
          use_vulkan ? vulkan_device.device_name.c_str() : "CPU",
          model_params.n_gpu_layers);
 
-    llama_model* model = llama_model_load_from_file(model_path, model_params);
+    // Persist a stage marker before entering the native tensor-weight loader.
+    report_model_load_stage(&progress_context, 0.01f);
+
+    llama_model* model = nullptr;
+    try {
+        model = llama_model_load_from_file(model_path, model_params);
+    } catch (const std::exception& error) {
+        LOGE("llama_model_load_from_file threw a C++ exception: %s", error.what());
+        env->ReleaseStringUTFChars(jmodel_path, model_path);
+        return 103;
+    } catch (...) {
+        LOGE("llama_model_load_from_file threw an unknown C++ exception");
+        env->ReleaseStringUTFChars(jmodel_path, model_path);
+        return 103;
+    }
 
     // AUTO is a policy, not merely a device-presence check: if registered
     // Vulkan cannot load this model, retry with an explicitly CPU-only device list.
@@ -463,7 +531,22 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = n_threads;
 
-    llama_context* ctx = llama_init_from_model(model, ctx_params);
+    llama_context* ctx = nullptr;
+    try {
+        ctx = llama_init_from_model(model, ctx_params);
+    } catch (const std::exception& error) {
+        LOGE("llama_init_from_model threw a C++ exception: %s", error.what());
+        llama_model_free(model);
+        engine->model = nullptr;
+        engine->active_backend = "None";
+        return 104;
+    } catch (...) {
+        LOGE("llama_init_from_model threw an unknown C++ exception");
+        llama_model_free(model);
+        engine->model = nullptr;
+        engine->active_backend = "None";
+        return 104;
+    }
     if (!ctx) {
         LOGE("Failed to create llama_context with dynamic n_ctx=%d", ctx_size);
         llama_model_free(model);
@@ -477,12 +560,22 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     report_model_load_stage(&progress_context, 0.81f); // template and sampler setup begins
     engine->is_batch_allocated = true;
 
-    engine->chat_templates = common_chat_templates_init(model, "");
+    try {
+        engine->chat_templates = common_chat_templates_init(model, "");
 
-    common_params_sampling sparams;
-    sparams.temp = temperature >= 0.0f ? temperature : DEFAULT_TEMP;
-    sparams.top_p = (top_p >= 0.0f && top_p <= 1.0f) ? top_p : 0.9f;
-    engine->sampler = common_sampler_init(model, sparams);
+        common_params_sampling sparams;
+        sparams.temp = temperature >= 0.0f ? temperature : DEFAULT_TEMP;
+        sparams.top_p = (top_p >= 0.0f && top_p <= 1.0f) ? top_p : 0.9f;
+        engine->sampler = common_sampler_init(model, sparams);
+    } catch (const std::exception& error) {
+        LOGE("Native chat-template/sampler setup threw a C++ exception: %s", error.what());
+        engine->unload_unlocked();
+        return 105;
+    } catch (...) {
+        LOGE("Native chat-template/sampler setup threw an unknown C++ exception");
+        engine->unload_unlocked();
+        return 105;
+    }
     report_model_load_stage(&progress_context, 0.86f); // native runtime ready
 
     engine->reset_short_term();

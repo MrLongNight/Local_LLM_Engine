@@ -50,6 +50,10 @@ internal object NativeEngineHandle {
     @JvmStatic
     external fun nativeGetSystemInfo(): String
 
+    /** Exact llama.cpp backend registry and device memory snapshot. */
+    @JvmStatic
+    external fun nativeGetBackendDiagnostics(): String
+
     @JvmStatic
     external fun nativeCreateEngine(): Long
 

@@ -166,6 +166,18 @@ jobs:
               if not selected:
                   raise SystemExit(f"No JNI compile entry found for ABI {abi}")
 
+              if abi == "arm64-v8a":
+                  vulkan_sources = [
+                      e for e in entries
+                      if os.path.basename(e.get("file", "")) == "ggml-vulkan.cpp"
+                  ]
+                  if not vulkan_sources:
+                      raise SystemExit(
+                          "arm64-v8a: ggml-vulkan.cpp is missing from compile_commands.json; "
+                          "the APK would not contain the Vulkan backend"
+                      )
+                  print("arm64-v8a: verified ggml-vulkan.cpp is part of the native build.")
+
               for entry in selected:
                   command = entry.get("command")
                   args = shlex.split(command) if command else entry.get("arguments", [])

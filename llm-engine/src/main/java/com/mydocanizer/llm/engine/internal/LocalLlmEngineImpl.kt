@@ -127,12 +127,34 @@ internal class LocalLlmEngineImpl(
                 "fileBytes=${file.length()}, backendPreference=${config.backendPreference}, " +
                     "threads=${config.threads}, batch=${config.batchSize}, context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
             )
+            val backendPreflight = runCatching {
+                NativeEngineHandle.nativeGetBackendDiagnostics()
+            }.getOrElse { error ->
+                "backendDiagnosticsQueryFailed=${error.javaClass.simpleName}:${error.message}"
+            }
+            EngineDiagnostics.info(
+                "engine",
+                "NATIVE_BACKEND_PREFLIGHT",
+                backendPreflight.take(1800)
+            )
+
             updateModelLoadProgress(0)
             val nativeLoadStartNano = System.nanoTime()
+            var lastProgressBucket = -1
             val progressCallback = NativeModelLoadProgressCallback { progress ->
-                updateModelLoadProgress(
-                    (progress.coerceIn(0.0f, 1.0f) * 100.0f).roundToInt().coerceIn(0, 99)
-                )
+                val percent = (progress.coerceIn(0.0f, 1.0f) * 100.0f)
+                    .roundToInt().coerceIn(0, 99)
+                updateModelLoadProgress(percent)
+                val bucket = percent / 5
+                if (bucket > lastProgressBucket) {
+                    lastProgressBucket = bucket
+                    EngineDiagnostics.info(
+                        "engine",
+                        "MODEL_LOAD_PROGRESS",
+                        "percent=$percent, backendPreference=${config.backendPreference}, " +
+                            "gpuLayers=${config.gpuLayers}, fileBytes=${file.length()}"
+                    )
+                }
             }
 
             val ret = NativeEngineHandle.nativeLoadModel(
@@ -150,6 +172,15 @@ internal class LocalLlmEngineImpl(
 
             when (ret) {
                 0 -> { /* Success */ }
+                103 -> throw IllegalStateException(
+                    "Native model loader raised a C++ exception. See preceding native load diagnostics."
+                )
+                104 -> throw IllegalStateException(
+                    "Native context creation raised a C++ exception."
+                )
+                105 -> throw IllegalStateException(
+                    "Native chat-template or sampler setup raised a C++ exception."
+                )
                 101 -> throw IllegalStateException(
                     "Vulkan backend was explicitly requested, but no Vulkan GPU device is available or initialization failed."
                 )
