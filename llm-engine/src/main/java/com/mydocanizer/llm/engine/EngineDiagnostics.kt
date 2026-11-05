@@ -114,10 +114,10 @@ object EngineDiagnostics {
         val availableRamMb: Double?
     )
 
-    private const val MAX_EXPORT_BYTES = 48 * 1024
-    private const val MAX_EVENT_LINES = 70
-    private const val MAX_NATIVE_LINES = 40
-    private const val MAX_MEMORY_TIMELINE_LINES = 24
+    private const val MAX_EXPORT_BYTES = 16 * 1024
+    private const val MAX_EVENT_LINES = 24
+    private const val MAX_NATIVE_LINES = 14
+    private const val MAX_MEMORY_TIMELINE_LINES = 8
 
     private fun field(line: String, key: String): String? {
         val marker = "$key="
@@ -157,7 +157,7 @@ object EngineDiagnostics {
         ).any(upper::contains)
     }
 
-    private fun compactLine(line: String, maxChars: Int = 420): String =
+    private fun compactLine(line: String, maxChars: Int = 300): String =
         if (line.length <= maxChars) line else line.take(maxChars - 18) + " …[gekürzt]"
 
     private fun buildCompactReport(lines: List<String>): String {
@@ -183,7 +183,7 @@ object EngineDiagnostics {
         }
         val nativeSelected = (
             relevantNative.take(12) + relevantNative.takeLast(MAX_NATIVE_LINES - 12)
-        ).distinct().map { compactLine(it, 520) }
+        ).distinct().map { compactLine(it, 360) }
 
         val memorySummaries = samples
             .groupBy { "${it.pid}/${it.phase}" }
@@ -234,7 +234,7 @@ object EngineDiagnostics {
                     field(sample.line, "backendActive")?.let { "backend=$it" }
                 ).filterNotNull().joinToString(" ")
                 val backend = if (sample.line.contains("backendMemory=")) {
-                    " " + sample.line.substringAfter("backendMemory=").take(360)
+                    " " + sample.line.substringAfter("backendMemory=").take(200)
                 } else ""
                 "${sample.timestamp} pid=${sample.pid} ${sample.phase} $values$backend"
             }
@@ -261,7 +261,7 @@ object EngineDiagnostics {
             nativeSelected.forEach(::appendLine)
             appendLine()
             appendLine("Hinweis: Chat-Prompts und Modellantworten werden nicht exportiert. " +
-                "Der Bericht ist auf maximal 48 KiB begrenzt; häufige RAM-Samples wurden zusammengefasst.")
+                "Der Bericht ist auf maximal 16 KiB begrenzt; häufige RAM-Samples wurden zusammengefasst.")
         }.let { limitUtf8(it, MAX_EXPORT_BYTES) }
     }
 
