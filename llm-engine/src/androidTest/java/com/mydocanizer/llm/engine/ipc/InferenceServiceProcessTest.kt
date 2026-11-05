@@ -5,10 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.os.Parcel
 import android.os.Process
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,6 +19,11 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import com.mydocanizer.llm.engine.EngineState
+import com.mydocanizer.llm.engine.InferenceRequest
 
 @RunWith(AndroidJUnit4::class)
 class InferenceServiceProcessTest {
@@ -27,6 +34,70 @@ class InferenceServiceProcessTest {
         val pid: Int,
         val disconnected: CountDownLatch
     )
+
+    @Test
+    fun inferenceRequestParcelablePreservesThinkingModeAcrossIpc() {
+        val original = InferenceRequest.single(
+            userPrompt = "Test request",
+            enableThinking = true
+        )
+        val parcel = Parcel.obtain()
+        try {
+            original.writeToParcel(parcel, 0)
+            parcel.setDataPosition(0)
+            val restored = InferenceRequest.CREATOR.createFromParcel(parcel)
+
+            assertEquals(true, restored.enableThinking)
+            assertEquals(original.messages, restored.messages)
+        } finally {
+            parcel.recycle()
+        }
+    }
+
+    @Test
+    fun inferenceClientReconnectsAfterRemoteInferenceProcessDies() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val client = InferenceClient(context)
+        var directBinding: BoundInferenceService? = null
+        try {
+            val initialization = client.initialize()
+            assertTrue("InferenceClient must bind and initialize", initialization.isSuccess)
+            val originalPid = client.remotePid.value
+                ?: throw AssertionError("InferenceClient did not publish its service PID")
+            assertNotEquals("Inference service must use a dedicated process", Process.myPid(), originalPid)
+
+            directBinding = bindInferenceService(context)
+            assertEquals("Both connections must refer to the same inference service", originalPid, directBinding.pid)
+
+            directBinding.service.killProcess()
+            assertTrue(
+                "Direct Binder must observe the killed service",
+                directBinding.disconnected.await(PROCESS_EXIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            )
+            assertTrue("Old inference PID must exit", awaitProcessExit(originalPid, PROCESS_EXIT_TIMEOUT_MS))
+
+            val recoveredPid = withTimeout(SERVICE_RECOVERY_TIMEOUT_MS) {
+                while (true) {
+                    val pid = client.remotePid.value
+                    if (pid != null && pid > 0 && client.state.value == EngineState.Ready) {
+                        return@withTimeout pid
+                    }
+                    delay(PROCESS_POLL_INTERVAL_MS)
+                }
+                @Suppress("UNREACHABLE_CODE")
+                -1
+            }
+            // The old PID is already confirmed absent. Linux may reuse numeric PIDs,
+            // so recovery is identified by Ready state and a live, non-app PID.
+            assertNotEquals("Recovered inference process must remain separate from the app", Process.myPid(), recoveredPid)
+            assertTrue("Recovered inference PID must exist", File("/proc/$recoveredPid").exists())
+        } finally {
+            client.close()
+            directBinding?.let { binding ->
+                runCatching { context.unbindService(binding.connection) }
+            }
+        }
+    }
 
     @Test
     fun serviceRunsInDedicatedProcessCanBeKilledAndBoundAgain() {
