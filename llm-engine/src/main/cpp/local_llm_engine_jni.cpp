@@ -495,6 +495,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         model_params.progress_callback_user_data = &progress_context;
     }
 
+    // Progress stages below intentionally map llama.cpp's loader callback to
+    // coarse UI milestones. Revalidate this mapping whenever the pinned llama.cpp
+    // revision changes; callback semantics are vendor-version dependent.
     // Select devices from llama.cpp's own backend registry. A Vulkan loader
     // or physical device visible to Android is not proof that ggml-vulkan was
     // compiled, registered, or made available to llama.cpp.
@@ -560,7 +563,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         model_params.devices = selected_devices.data();
         model_params.n_gpu_layers = 0;
         use_vulkan = false;
-        model = llama_model_load_from_file(model_path, model_params);
+        try {
+            model = llama_model_load_from_file(model_path, model_params);
+        } catch (const std::exception& error) {
+            LOGE("AUTO CPU fallback llama_model_load_from_file threw a C++ exception: %s", error.what());
+            env->ReleaseStringUTFChars(jmodel_path, model_path);
+            return 104;
+        } catch (...) {
+            LOGE("AUTO CPU fallback llama_model_load_from_file threw an unknown C++ exception");
+            env->ReleaseStringUTFChars(jmodel_path, model_path);
+            return 104;
+        }
     }
 
     env->ReleaseStringUTFChars(jmodel_path, model_path);
