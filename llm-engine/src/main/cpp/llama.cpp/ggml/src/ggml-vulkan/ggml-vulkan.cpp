@@ -6224,6 +6224,18 @@ static vk_device ggml_vk_get_device(size_t idx) {
         device->buffer_device_address = vk12_features.bufferDeviceAddress;
         device->vulkan_memory_model = vk12_features.vulkanMemoryModel;
 
+        // Some Android Mali drivers expose Vulkan 1.2 feature bits while the
+        // physical device reports API < 1.2. On those devices the promoted
+        // functions still need their KHR extensions enabled for device proc lookup.
+        if (device->buffer_device_address &&
+            device->properties.apiVersion < VK_API_VERSION_1_2) {
+            device_extensions.push_back("VK_KHR_buffer_device_address");
+        }
+        if (vk12_features.timelineSemaphore &&
+            device->properties.apiVersion < VK_API_VERSION_1_2) {
+            device_extensions.push_back("VK_KHR_timeline_semaphore");
+        }
+
         if (device->subgroup_size_control) {
             device->subgroup_min_size = subgroup_size_control_props.minSubgroupSize;
             device->subgroup_max_size = subgroup_size_control_props.maxSubgroupSize;
@@ -6349,7 +6361,11 @@ static vk_device ggml_vk_get_device(size_t idx) {
             throw std::runtime_error("Unsupported device");
         }
 
-        device_extensions.push_back("VK_KHR_16bit_storage");
+        // Core since Vulkan 1.1. Request the extension name only on older
+        // physical devices; some 1.1+ Android drivers no longer enumerate it.
+        if (device->properties.apiVersion < VK_API_VERSION_1_1) {
+            device_extensions.push_back("VK_KHR_16bit_storage");
+        }
 
 #ifdef GGML_VULKAN_VALIDATE
         device_extensions.push_back("VK_KHR_shader_non_semantic_info");
@@ -6479,6 +6495,11 @@ static vk_device ggml_vk_get_device(size_t idx) {
             .setPEnabledExtensionNames(device_extensions);
         device_create_info.setPNext(&device_features2);
         device->device = device->physical_device.createDevice(device_create_info);
+
+        // Resolve device-level Vulkan-Hpp entry points against the created
+        // VkDevice. Instance-only dispatch can leave extension functions null
+        // on some Android ICDs even after enabling the corresponding extension.
+        VULKAN_HPP_DEFAULT_DISPATCHER.init(device->device);
 
         // Queues
         ggml_vk_create_queue(device, device->compute_queue, compute_queue_family_index, 0, { vk::PipelineStageFlagBits::eComputeShader | vk::PipelineStageFlagBits::eTransfer }, false);

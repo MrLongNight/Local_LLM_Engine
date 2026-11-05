@@ -151,6 +151,26 @@ jobs:
           if not databases:
               raise SystemExit("No compile_commands.json found; cannot verify native optimization flags")
 
+          vulkan_source_path = (
+              "llm-engine/src/main/cpp/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
+          )
+          with open(vulkan_source_path, encoding="utf-8") as stream:
+              vulkan_source = stream.read()
+          required_vulkan_fixes = {
+              "pre-1.2 buffer device address extension":
+                  'device_extensions.push_back("VK_KHR_buffer_device_address")',
+              "pre-1.2 timeline semaphore extension":
+                  'device_extensions.push_back("VK_KHR_timeline_semaphore")',
+              "Vulkan 1.1 core 16-bit storage guard":
+                  "device->properties.apiVersion < VK_API_VERSION_1_1",
+              "device-level Vulkan-Hpp dispatcher initialization":
+                  "VULKAN_HPP_DEFAULT_DISPATCHER.init(device->device)",
+          }
+          for description, marker in required_vulkan_fixes.items():
+              if marker not in vulkan_source:
+                  raise SystemExit(f"Missing vendored Vulkan compatibility fix: {description}")
+              print(f"Verified vendored Vulkan fix: {description}")
+
           for abi in ("arm64-v8a", "x86_64"):
               db = next((p for p in databases if f"/{abi}/" in p.replace("\\\\", "/")), None)
               if db is None:
