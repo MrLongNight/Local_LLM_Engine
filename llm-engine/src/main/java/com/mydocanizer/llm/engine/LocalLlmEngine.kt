@@ -32,7 +32,7 @@ interface LocalLlmEngine : AutoCloseable {
     /** Latest native load percentage for UI state. */
     val modelLoadProgress: StateFlow<Int?>
 
-    /** Buffered native progress updates for reliable transfer to the remote inference process. */
+    /** Buffered progress updates emitted by the client-side IPC facade after receiving remote callbacks. */
     val modelLoadProgressEvents: SharedFlow<Int>
 
     /**
@@ -60,7 +60,8 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Streams token generation as an asynchronous [Flow] of [InferenceEvent].
      *
-     * Supports cooperative cancellation via coroutine cancellation or by calling [cancelInference].
+     * Supports cooperative cancellation via coroutine cancellation or [cancelInference].
+     * A process-level abort is used only as a fallback if native cancellation stalls.
      *
      * @param request Multi-message chat request.
      * @return Flow emitting [InferenceEvent.Started], [InferenceEvent.Token], and completion/cancellation events.
@@ -76,7 +77,9 @@ interface LocalLlmEngine : AutoCloseable {
     suspend fun generateChat(request: InferenceRequest): Result<InferenceResult>
 
     /**
-     * Requests immediate cooperative cancellation of any ongoing token generation.
+     * Requests cooperative cancellation of the active generation. The engine escalates
+     * to terminating the original inference process only if native cancellation does not
+     * complete within the configured abort grace period.
      */
     fun cancelInference()
 
