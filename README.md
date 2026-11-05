@@ -2,7 +2,7 @@
 
 A standalone Android application and reusable Android library for running local GGUF language models with llama.cpp.
 
-> **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. The arm64 Vulkan backend is configured as an optional native build path; it still requires a successful Vulkan APK build and real-device verification. Successful Kotlin unit tests alone do not prove native Android inference or performance.
+> **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. Successful Kotlin unit tests and APK compilation do not prove real-device model loading, inference, cancellation, hardware offload or performance.
 
 ## Project layout
 
@@ -42,7 +42,14 @@ Workflow: `.github/workflows/manual-apk.yml`
 
 The workflow runs automatically on pushes to `main` when Android app/engine source, Gradle/toolchain configuration, or the workflow changes. It can also be started manually through **Actions → Android APK Build → Run workflow** (Debug only).
 
-The workflow builds `:app:assembleDebug`, including the native C++/Vulkan build, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
+The workflow builds `:app:assembleDebug`, including the native C++ build and the configured ARM64 Vulkan path, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
+
+## Native Android backends
+
+- ARM64 builds configure the CPU backend with `GGML_CPU_KLEIDIAI=ON`, matching the official llama.cpp Android reference. llama.cpp fetches the pinned KleidiAI v1.24.0 source at CMake configure time and includes applicable Arm kernels. This does not imply every kernel is used on every Arm CPU; runtime CPU features and supported operations determine applicability.
+- OpenMP remains disabled pending an Android-device comparison. The upstream Android sample enables it, while the general upstream Android build instructions describe Android limitations. We will decide based on a controlled benchmark, not an assumption.
+- The ARM64 Vulkan backend is built when the Android NDK Vulkan loader, host `glslc`, SPIR-V headers and Vulkan-Hpp headers are available. The APK workflow installs and requires these build tools. x86_64 remains CPU-only.
+- Vulkan driver/device detection is not by itself proof that llama.cpp offloaded model layers. The implementation-plan tracks the required registry/offload verification separately.
 
 ## Local commands
 
@@ -55,12 +62,14 @@ gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 
 ## Current limitations
 
-- The arm64-v8a Android build enables GGML_VULKAN when the Android NDK Vulkan loader, host `glslc`, and SPIRV-Headers CMake package are available. The APK workflow installs and requires these build tools. x86_64 and local builds without the tools remain CPU builds. Runtime GPU availability is checked against llama.cpp's backend registry, never inferred from the Android Vulkan loader alone.
-- Unit tests and APK compilation do not replace real-device model loading, generation, cancellation, memory, and performance checks.
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
 - Remote model imports are HTTPS-only and staged in app-private storage under a SHA-256-addressed filename. Downloads are not resumable yet.
-- Coroutine and explicit cancellation are propagated to llama.cpp's native abort callback; real-device latency and cancellation behaviour still require device verification.
-- The API and integration document may evolve while the engine implementation is stabilized.
+- Coroutine/native cancellation and the dedicated inference process are implemented, but hard-abort, PID-death confirmation, Binder recovery and real-device cancellation still require instrumentation/device verification.
+- No real-device performance result is implied by CI success.
+
+## Implementation plan
+
+The single active implementation backlog and acceptance criteria are in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
 
 ## Integration direction
 

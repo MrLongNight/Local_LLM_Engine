@@ -18,8 +18,13 @@ if(DEFINED ANDROID_ABI)
     message(STATUS "LocalLLM detected Android ABI: ${ANDROID_ABI}")
     if(ANDROID_ABI STREQUAL "arm64-v8a")
         set(GGML_SYSTEM_ARCH "ARM")
+        # Match the official llama.cpp Android reference app. KleidiAI adds
+        # Arm-optimized kernels where the runtime CPU feature set supports them.
+        set(GGML_CPU_KLEIDIAI ON CACHE BOOL "ggml: use KleidiAI optimized kernels if applicable" FORCE)
+        message(STATUS "LocalLLM: enabling GGML_CPU_KLEIDIAI for arm64-v8a")
     elseif(ANDROID_ABI STREQUAL "x86_64")
         set(GGML_SYSTEM_ARCH "x86")
+        set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "ggml: use KleidiAI optimized kernels if applicable" FORCE)
     endif()
 endif()
 
@@ -35,9 +40,9 @@ set(LLAMA_BUILD_SERVER OFF CACHE BOOL "llama: build server example" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "llama: use openssl" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "ggml: native" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "ggml: backend dl" FORCE)
-set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "ggml: cpu all variants" FORCE)
+set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "ggml: build all variants of the CPU backend" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "ggml: llamafile" FORCE)
-set(GGML_OPENMP OFF CACHE BOOL "ggml: openmp" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "ggml: use OpenMP" FORCE)
 
 # Enable the static Vulkan backend only for Android arm64 builds where the
 # target NDK loader and host shader/SPIR-V tools are all available. CPU remains
