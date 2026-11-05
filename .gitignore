@@ -29,3 +29,7 @@ captures/
 *.iws
 *.ipr
 .DS_Store
+
+# Google AI Studio temporary project artifacts (not part of the app)
+.aistudio/
+/public/assets/aistudio/

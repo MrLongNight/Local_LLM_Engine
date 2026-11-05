@@ -1,8 +1,8 @@
 # Offene Punkte – Local LLM Engine
 
-Stand: 03.11.2026
+Stand: 05.11.2026
 Branch: `main`
-App-/Engine-Quellstand für APK Build #30: `aaaef521170cad70ce9c1d36eb8bfd4d6592c880`.
+Ausgangsstand vor dieser Bereinigungsrunde: `d6ffe05fe055dfff48054e66b896d1ed8bc49d03`.
 
 ## In den Korrekturläufen umgesetzt
 
@@ -40,6 +40,13 @@ App-/Engine-Quellstand für APK Build #30: `aaaef521170cad70ce9c1d36eb8bfd4d6592
 - Die öffentliche Chat-API unterstützt jetzt auch die native Developer-Rolle.
 - Nicht mehr verwendete Dokumenten-Tresor-Resource und Google-Services-Gradle-Altlast entfernt.
 
+- Die Demo-App hat jetzt genau einen Ort für Modellimport, Modellauswahl sowie Laden/Entladen: den Bereich „Modell-Import“. Doppelte Modellaktionen im Chat wurden entfernt.
+- Der Chat bietet nur noch den Engine-Status und einen direkten Wechsel zur Modellverwaltung; der doppelte Gesprächs-Reset wurde entfernt.
+- Der Diagnose-Export ist nur noch einmal vorhanden und bleibt über die obere App-Leiste von jedem Bereich aus erreichbar.
+- Doppelte bzw. ungenutzte ViewModel-Zustände und Wrapper (importedModelFiles, selectedModelFile, loadSelectedModel, loadExistingModel, clearChat) wurden entfernt; Modelllisten und Ladevorgänge verwenden jeweils einen eindeutigen Zustand bzw. Einstiegspunkt.
+- DMS-spezifische Demo-Benennung und der Dokumentenmanagement-Systemprompt wurden neutralisiert (EngineViewModel). Der Namespace der wiederverwendbaren Library bleibt bewusst com.mydocanizer.llm.engine, da er für die geplante Integration vorgesehen ist.
+- Nicht referenzierte AI-Studio-/Gemini-Scaffold-Dateien sowie zwei byte-identische temporäre Screenshots entfernt; die verbliebenen Beispiel-Tests ohne fachlichen Prüfwert entfernt, die App-/Engine-Testsuite bleibt bestehen.
+
 ## Prozessisolation und IPC – Task-1-Audit
 
 Geprüfter Ausgangsstand: `a754052304db19f8411a3555598016d8758e8943`.
@@ -71,7 +78,7 @@ Geprüfter Implementierungscommit: `a754052304db19f8411a3555598016d8758e8943`.
 
 **Task 1 bleibt teilweise umgesetzt.**
 
-- Die App-Integration in `DocAnizerViewModel` verwendet weiterhin `LocalLlmEngine.create(application)`. Da der Factory-Parameter `useIpcProcess` standardmäßig `false` ist, läuft die produktive App-Engine noch im Hauptprozess. Die Factory-API wurde zudem um `useIpcProcess` und `createIpcClient` erweitert und `InferenceServiceClient` ist öffentlich; das widerspricht der Vorgabe, die öffentliche `LocalLlmEngine`-API stabil zu halten. Vor produktiver Aktivierung ist diese API-Ausweitung zurückzunehmen bzw. intern zu kapseln.
+- Die App-Integration in `EngineViewModel` verwendet weiterhin `LocalLlmEngine.create(application)`. Da der Factory-Parameter `useIpcProcess` standardmäßig `false` ist, läuft die produktive App-Engine noch im Hauptprozess. Die Factory-API wurde zudem um `useIpcProcess` und `createIpcClient` erweitert und `InferenceServiceClient` ist öffentlich; das widerspricht der Vorgabe, die öffentliche `LocalLlmEngine`-API stabil zu halten. Vor produktiver Aktivierung ist diese API-Ausweitung zurückzunehmen bzw. intern zu kapseln.
 - `InferenceServiceClient` verwendet ein einmalig angelegtes `CompletableDeferred`. `onServiceDisconnected` und `onBindingDied` setzen nur einen Fehlerzustand; sie erzeugen keine neue Verbindung/Deferred und starten keinen Reconnect. Nach Prozess-Tod kann `getService()` daher an einer veralteten bzw. unerfüllbaren Verbindung hängen.
 - `InferenceService.onDestroy()` startet Cleanup in `serviceScope` und cancelt denselben Scope sofort. `engine.close()` und `workerExecutor.shutdown()` sind damit nicht zuverlässig abgeschlossen.
 - Der neue IPC-Unit-Test nutzt einen Fake-Service mit künstlicher PID `99999`. Es gibt keinen Android-Instrumentationstest, der Service-Binding, getrennte App-/Service-PIDs oder native Inferenz im `:inference`-Prozess nachweist.
@@ -135,7 +142,7 @@ Geprüfter Implementierungscommit: `a754052304db19f8411a3555598016d8758e8943`.
 12. Tool-/Function-Rollen und einen definierten Tool-Call-Vertrag ergänzen.
 13. JSON-Schema-/Grammar-Constrained Output und weitere Samplingparameter (z. B. Seed) ergänzen.
 14. Native/JNI-/Gerätetests aufbauen; JVM-Tests allein verifizieren weder C++-Linking noch tatsächliche Inferenz oder Vulkan.
-15. Nicht verwendete UI-/Demo-Funktionen und verbliebene Artefakte weiter bereinigen.
+15. Weitere nicht verwendete UI-/Demo-Funktionen und verbliebene Artefakte prüfen; die erste Bereinigungsrunde vom 05.11.2026 hat die dokumentierten Duplikate und AI-Studio-Scaffold-Dateien entfernt.
 16. ABI-getrennte APKs sowie Release-Minifizierung messen.
 17. `INTEGRATION_MYDOCANIZER.md` gegen das reale Zielprojekt und dessen Gradle-/Kotlin-Versionen erneut verifizieren.
 

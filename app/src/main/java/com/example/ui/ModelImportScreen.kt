@@ -39,7 +39,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -47,19 +46,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mydocanizer.llm.engine.BackendInfo
 import com.mydocanizer.llm.engine.ModelInfo
-import java.io.File
 
 @Composable
 fun ModelImportScreen(
-    viewModel: DocAnizerViewModel,
+    viewModel: EngineViewModel,
     modifier: Modifier = Modifier
 ) {
     val currentModel: ModelInfo? by viewModel.currentModel.collectAsState()
     val modelEntries: List<ImportedModelEntry> by viewModel.importedModelEntries.collectAsState()
-    val selectedModelFile: File? by viewModel.selectedModelFile.collectAsState()
-    val backendInfo: BackendInfo by viewModel.backendInfo.collectAsState()
     val isImporting: Boolean by viewModel.isImporting.collectAsState()
     val modelLoadProgress: Int? by viewModel.modelLoadProgress.collectAsState()
     val errorMessage: String? by viewModel.errorMessage.collectAsState()
@@ -334,13 +329,11 @@ fun ModelImportScreen(
         } else {
             items(modelEntries) { entry ->
                 val isCurrentlyLoaded = currentModel?.path == entry.file.absolutePath
-                val isSelected = selectedModelFile?.absolutePath == entry.file.absolutePath
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
                         containerColor = if (isCurrentlyLoaded) MaterialTheme.colorScheme.secondaryContainer
-                        else if (isSelected) MaterialTheme.colorScheme.surfaceVariant
                         else MaterialTheme.colorScheme.surface
                     )
                 ) {
@@ -385,8 +378,7 @@ fun ModelImportScreen(
                                 } else {
                                     Button(
                                         onClick = {
-                                            viewModel.selectModelFile(entry.file)
-                                            viewModel.loadSelectedModel()
+                                            viewModel.loadModelFile(entry.file)
                                         },
                                         enabled = !isImporting,
                                         modifier = Modifier.padding(start = 4.dp)

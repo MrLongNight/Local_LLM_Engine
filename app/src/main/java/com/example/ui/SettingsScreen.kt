@@ -1,7 +1,5 @@
 package com.example.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
@@ -35,7 +32,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
-    viewModel: DocAnizerViewModel,
+    viewModel: EngineViewModel,
     modifier: Modifier = Modifier
 ) {
     val config: EngineConfig by viewModel.engineConfig.collectAsState()
@@ -44,11 +41,6 @@ fun SettingsScreen(
     LaunchedEffect(Unit) {
         EngineDiagnostics.info("ui", "SETTINGS_SCREEN_VISIBLE")
     }
-    val exportLogLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/plain"),
-        onResult = { uri -> if (uri != null) viewModel.exportDiagnostics(uri) }
-    )
-
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -145,34 +137,6 @@ fun SettingsScreen(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
-                    }
-                }
-            }
-        }
-
-        // Exportable diagnostics log
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Diagnoseprotokoll",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Protokolliert Engine-Start, Modellimport und -laden, Backend, Prompt-Auswertung, Inferenzmetriken sowie Fehler und Abbrüche. Chat-Eingaben und Modellantworten werden nicht gespeichert.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = { exportLogLauncher.launch("local-llm-engine-diagnostics.log") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("export_diagnostics_button")
-                    ) {
-                        Text("Diagnoseprotokoll exportieren")
                     }
                 }
             }

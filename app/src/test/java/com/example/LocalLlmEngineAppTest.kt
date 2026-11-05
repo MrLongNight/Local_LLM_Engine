@@ -3,7 +3,7 @@ package com.example
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.AppTab
-import com.example.ui.DocAnizerViewModel
+import com.example.ui.EngineViewModel
 import com.mydocanizer.llm.engine.ChatRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -16,7 +16,7 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
-class ExampleRobolectricTest {
+class LocalLlmEngineAppTest {
 
     @Test
     fun `1 - validate app resources and strings`() {
@@ -30,9 +30,9 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `2 - validate docanizer viewmodel initialization and stateflows`() {
+    fun `2 - validate engine viewmodel initialization and stateflows`() {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = DocAnizerViewModel(application)
+        val viewModel = EngineViewModel(application)
 
         assertNotNull(viewModel.engineState)
         assertNotNull(viewModel.currentModel)
@@ -43,7 +43,7 @@ class ExampleRobolectricTest {
         assertNotNull(viewModel.currentStreamingText)
         assertNotNull(viewModel.engineConfig)
         assertNotNull(viewModel.systemPrompt)
-        assertNotNull(viewModel.importedModelFiles)
+        assertNotNull(viewModel.importedModelEntries)
 
 
         assertEquals(AppTab.CHAT, viewModel.currentTab.value)

@@ -40,7 +40,7 @@ import com.mydocanizer.llm.engine.EngineDiagnostics
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    viewModel: DocAnizerViewModel = viewModel()
+    viewModel: EngineViewModel = viewModel()
 ) {
     val currentTab: AppTab by viewModel.currentTab.collectAsState()
     val statusMessage: String? by viewModel.statusMessage.collectAsState()

@@ -36,14 +36,13 @@ enum class AppTab {
 data class ImportedModelEntry(
     val file: File,
     val name: String,
-    val sizeBytes: Long,
-    val sha256: String? = null
+    val sizeBytes: Long
 ) {
     val sizeMb: Double
         get() = sizeBytes / (1024.0 * 1024.0)
 }
 
-class DocAnizerViewModel(
+class EngineViewModel(
     application: Application,
     val engine: LocalLlmEngine
 ) : AndroidViewModel(application) {
@@ -54,9 +53,9 @@ class DocAnizerViewModel(
     )
 
     companion object {
-        private const val TAG = "DocAnizerViewModel"
+        private const val TAG = "EngineViewModel"
         const val DEFAULT_SYSTEM_PROMPT =
-            "Du bist ein hilfsbereiter, präziser KI-Assistent für das Dokumentenmanagement und die Textanalyse."
+            "Du bist ein hilfreicher, präziser KI-Assistent."
     }
 
     private val _currentTab = MutableStateFlow(AppTab.CHAT)
@@ -107,13 +106,6 @@ class DocAnizerViewModel(
 
     private val _importedModelEntries = MutableStateFlow<List<ImportedModelEntry>>(emptyList())
     val importedModelEntries: StateFlow<List<ImportedModelEntry>> = _importedModelEntries.asStateFlow()
-
-    // Backwards-compatible files list
-    private val _importedModelFiles = MutableStateFlow<List<File>>(emptyList())
-    val importedModelFiles: StateFlow<List<File>> = _importedModelFiles.asStateFlow()
-
-    private val _selectedModelFile = MutableStateFlow<File?>(null)
-    val selectedModelFile: StateFlow<File?> = _selectedModelFile.asStateFlow()
 
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
@@ -172,28 +164,19 @@ class DocAnizerViewModel(
                             sizeBytes = file.length()
                         )
                     }
-                    _importedModelFiles.value = files
                     _importedModelEntries.value = entries
-                    if (_selectedModelFile.value == null && files.isNotEmpty()) {
-                        _selectedModelFile.value = files.first()
-                    }
                 } else {
-                    _importedModelFiles.value = emptyList()
                     _importedModelEntries.value = emptyList()
                 }
             }
         }
     }
 
-    fun selectModelFile(file: File) {
-        _selectedModelFile.value = file
-    }
-
     /**
      * All model-load entry points share one state/error/progress lifecycle. Only the
      * source adapter differs between a selected private file and a SAF content URI.
      */
-    private fun startModelLoad(source: ModelSource, selectedFile: File?, operationLabel: String) {
+    private fun startModelLoad(source: ModelSource, operationLabel: String) {
         if (_isImporting.value) {
             EngineDiagnostics.info("ui", "MODEL_LOAD_REQUEST_IGNORED", "A model operation is already active")
             return
@@ -202,13 +185,11 @@ class DocAnizerViewModel(
         _isImporting.value = true
         _errorMessage.value = null
         _statusMessage.value = operationLabel
-        selectedFile?.let { _selectedModelFile.value = it }
 
         viewModelScope.launch {
             try {
                 val result = engine.loadModel(source, _engineConfig.value)
                 result.onSuccess { info ->
-                    _selectedModelFile.value = File(info.path)
                     refreshModelFiles()
                     val hashLabel = info.sha256?.take(12)?.let { " (SHA-256: $it…)" }.orEmpty()
                     _statusMessage.value = "Modell '${info.name}' bereit (${info.activeBackend})$hashLabel"
@@ -236,24 +217,15 @@ class DocAnizerViewModel(
     fun importModelFromSaf(uri: Uri) {
         startModelLoad(
             source = ModelSource.ContentUri(uriString = uri.toString()),
-            selectedFile = null,
             operationLabel = "Importiere und lade GGUF-Modell über SAF..."
         )
     }
 
-    fun loadSelectedModel() {
-        val file = _selectedModelFile.value ?: return
+    fun loadModelFile(file: File) {
         startModelLoad(
             source = ModelSource.FilePath(file.absolutePath),
-            selectedFile = file,
             operationLabel = "Lade Modell: ${file.name}..."
         )
-    }
-
-    /** Shared by list rows and the Chat model selector. */
-    fun loadExistingModel(file: File) {
-        _selectedModelFile.value = file
-        loadSelectedModel()
     }
 
     fun unloadModel() {
@@ -395,10 +367,6 @@ class DocAnizerViewModel(
         // Keep the UI in its generating state until the native engine confirms cancellation.
         engine.cancelInference()
         _statusMessage.value = "Abbruch angefordert..."
-    }
-
-    fun clearChat() {
-        restartConversation()
     }
 
     fun exportDiagnostics(destination: Uri) {
