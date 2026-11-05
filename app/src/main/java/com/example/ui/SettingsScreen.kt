@@ -255,7 +255,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Vergleicht dasselbe geladene Modell mit der Testfrage „Wer ist Ricardo Villalobos?“. " +
+                        text = "Vergleicht dasselbe geladene Modell mit der Testfrage „wer ist Ricardo Villalobos“. " +
                             "Kontext, Batch, Threads, GPU-Layer, Temperatur, Top-P und Ausgabelimit bleiben identisch. " +
                             "Das Modell wird pro Backend neu geladen; anschließend wird deine ursprüngliche Backend-Einstellung wiederhergestellt.",
                         style = MaterialTheme.typography.bodySmall,

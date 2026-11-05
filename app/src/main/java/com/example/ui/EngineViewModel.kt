@@ -135,10 +135,12 @@ class EngineViewModel(
     }
 
     fun updateSystemPrompt(prompt: String) {
+        if (_isBenchmarking.value) return
         _systemPrompt.value = prompt
     }
 
     fun updateConfig(config: EngineConfig) {
+        if (_isBenchmarking.value) return
         _engineConfig.value = config
     }
 
@@ -179,6 +181,10 @@ class EngineViewModel(
      * source adapter differs between a selected private file and a SAF content URI.
      */
     private fun startModelLoad(source: ModelSource, operationLabel: String) {
+        if (_isBenchmarking.value) {
+            _errorMessage.value = "Während des Benchmarks sind Modellwechsel gesperrt."
+            return
+        }
         if (_isImporting.value) {
             EngineDiagnostics.info("ui", "MODEL_LOAD_REQUEST_IGNORED", "A model operation is already active")
             return
@@ -231,6 +237,10 @@ class EngineViewModel(
     }
 
     fun unloadModel() {
+        if (_isBenchmarking.value) {
+            _errorMessage.value = "Während des Benchmarks kann das Modell nicht entladen werden."
+            return
+        }
         viewModelScope.launch {
             engine.unloadModel()
                 .onSuccess {
@@ -267,7 +277,7 @@ class EngineViewModel(
         val originalConfig = _engineConfig.value
         val systemPromptSnapshot = _systemPrompt.value
         val source = ModelSource.FilePath(model.path)
-        val benchmarkPrompt = "Wer ist Ricardo Villalobos?"
+        val benchmarkPrompt = "wer ist Ricardo Villalobos"
         val benchmarkConfig = originalConfig.copy()
         val backends = listOf(BackendPreference.CPU, BackendPreference.VULKAN)
 
@@ -388,7 +398,7 @@ class EngineViewModel(
                 }
 
                 _benchmarkReport.value = buildString {
-                    appendLine("Frage: Wer ist Ricardo Villalobos?")
+                    appendLine("Frage: wer ist Ricardo Villalobos")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB)")
                     appendLine(
                         "Fixe Parameter: Kontext ${benchmarkConfig.contextSize}, Batch ${benchmarkConfig.batchSize}, " +
@@ -421,6 +431,10 @@ class EngineViewModel(
     }
 
     fun sendMessage() {
+        if (_isBenchmarking.value) {
+            _errorMessage.value = "Bitte den laufenden Benchmark erst abschließen."
+            return
+        }
         val prompt = _inputText.value.trim()
         if (prompt.isEmpty() || _isGenerating.value) return
 
