@@ -19,9 +19,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.InferenceRequest
 
@@ -76,17 +74,17 @@ class InferenceServiceProcessTest {
             )
             assertTrue("Old inference PID must exit", awaitProcessExit(originalPid, PROCESS_EXIT_TIMEOUT_MS))
 
-            val recoveredPid = withTimeout(SERVICE_RECOVERY_TIMEOUT_MS) {
-                while (true) {
-                    val pid = client.remotePid.value
-                    if (pid != null && pid > 0 && client.state.value == EngineState.Ready) {
-                        return@withTimeout pid
-                    }
-                    delay(PROCESS_POLL_INTERVAL_MS)
+            val recoveryDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
+            var recoveredPid = 0
+            while (SystemClock.elapsedRealtime() < recoveryDeadline) {
+                val pid = client.remotePid.value
+                if (pid != null && pid > 0 && client.state.value == EngineState.Ready) {
+                    recoveredPid = pid
+                    break
                 }
-                @Suppress("UNREACHABLE_CODE")
-                -1
+                SystemClock.sleep(PROCESS_POLL_INTERVAL_MS)
             }
+            assertTrue("InferenceClient must reconnect and return to Ready", recoveredPid > 0)
             // The old PID is already confirmed absent. Linux may reuse numeric PIDs,
             // so recovery is identified by Ready state and a live, non-app PID.
             assertNotEquals("Recovered inference process must remain separate from the app", Process.myPid(), recoveredPid)
@@ -197,6 +195,7 @@ class InferenceServiceProcessTest {
     private companion object {
         const val SERVICE_BIND_TIMEOUT_MS = 15_000L
         const val PROCESS_EXIT_TIMEOUT_MS = 10_000L
+        const val SERVICE_RECOVERY_TIMEOUT_MS = 30_000L
         const val PROCESS_POLL_INTERVAL_MS = 25L
     }
 }
