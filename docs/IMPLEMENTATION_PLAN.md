@@ -74,6 +74,8 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 - Der Reconnect verwirft den alten Binder, PID-, Modell- und Fortschrittsstatus sowie das alte `CompletableDeferred`, bevor er neu bindet. Parallele Reconnect-Callbacks werden über einen Guard zusammengeführt.
 - Der Test-Fake leitet Prozesslebendigkeit nun aus dem tatsächlichen Kill-Zustand ab, nicht aus einer manuell nachträglich umgeschalteten PID-Variable.
 
+**Geräte-Instrumentationstest ergänzt:** `InferenceServiceProcessTest` bindet den echten AIDL-Service, bestätigt eine von der App-PID getrennte Service-PID, löst den einseitigen Prozess-Kill aus, wartet auf den Binder-Disconnect sowie das Verschwinden von `/proc/<pid>` und bindet den Dienst erneut. CI kompiliert und veröffentlicht dafür ein separates Instrumentation-APK; die Ausführung muss auf einem echten Android-Gerät erfolgen. Der Test lädt bewusst kein GGUF-Modell und belegt daher noch keinen Kill während einer blockierten nativen Inferenz.
+
 **Noch ausstehend:**
 - Echter Android-Instrumentationstest mit zwei unterschiedlichen PIDs und realem Service-Kill/Rebind.
 - CPU-Inferenzabbruch über den offiziellen llama.cpp-Context-Abort-Callback. Die öffentliche Header-Dokumentation weist darauf hin, dass dieser Callback derzeit nur für CPU-Ausführung wirkt.
