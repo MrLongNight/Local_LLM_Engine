@@ -6,13 +6,13 @@ set(CMAKE_C_STANDARD_REQUIRED true)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED true)
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O2" CACHE STRING "Optimized native Debug C flags" FORCE)
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2" CACHE STRING "Optimized native Debug C++ flags" FORCE)
-    message(STATUS "LocalLLM: native Debug keeps symbols and enables -O2")
-    message(STATUS "LocalLLM: native Debug C flags: ${CMAKE_C_FLAGS_DEBUG}")
-    message(STATUS "LocalLLM: native Debug CXX flags: ${CMAKE_CXX_FLAGS_DEBUG}")
-endif()
+# This CMake project is only built by the Android NDK. Keep the Android Debug
+# variant debuggable, but never run llama.cpp/GGML at the compiler's -O0 default.
+# These variables are consumed only for CMAKE_BUILD_TYPE=Debug; Release flags remain unchanged.
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O2" CACHE STRING "Optimized native Debug C flags" FORCE)
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2" CACHE STRING "Optimized native Debug C++ flags" FORCE)
+message("LocalLLM native Debug C flags: ${CMAKE_C_FLAGS_DEBUG}")
+message("LocalLLM native Debug CXX flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
 if(DEFINED ANDROID_ABI)
     message(STATUS "LocalLLM detected Android ABI: ${ANDROID_ABI}")
