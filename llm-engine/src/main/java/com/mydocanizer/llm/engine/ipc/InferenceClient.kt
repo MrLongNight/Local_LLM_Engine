@@ -808,7 +808,7 @@ internal class InferenceClient(
     }
 
     override fun cancelInference() {
-        val requestId = activeRequestId.getAndSet(null)
+        val requestId = activeRequestId.get()
         if (requestId == null) {
             // An idle cancel must not tear down :inference or discard an already loaded model.
             EngineDiagnostics.info(
@@ -819,12 +819,38 @@ internal class InferenceClient(
             return
         }
 
+        val targetPid = _remotePid.value
         EngineDiagnostics.info(
             "ipc_client",
             "CANCEL_REQUESTED",
-            "Cancelling active request=$requestId, remotePid=${_remotePid.value}"
+            "Cooperative cancellation requested for request=$requestId, remotePid=$targetPid"
         )
-        abortRemoteProcess(requestId = requestId, reason = "inference_cancelled")
+        val service = remoteService
+        val matchingService = service != null &&
+            (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
+        if (matchingService) {
+            runCatching { service?.cancelInference(requestId) }
+                .onFailure { EngineDiagnostics.error("ipc_client", "COOPERATIVE_CANCEL_FAILED", it) }
+        }
+
+        // Give JNI/native cancellation a chance to finish cleanly. Kill only the
+        // original process if it has not acknowledged cancellation by the deadline.
+        val graceMs = (lastLoadedConfig?.timeoutConfig ?: timeoutConfig).abortGracePeriodMs
+        clientScope.launch {
+            delay(graceMs)
+            if (activeRequestId.compareAndSet(requestId, null)) {
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "COOPERATIVE_CANCEL_ESCALATED",
+                    "request=$requestId did not finish within ${graceMs}ms; aborting original PID=$targetPid"
+                )
+                abortRemoteProcess(
+                    requestId = requestId,
+                    reason = "cooperative_cancel_timeout",
+                    targetPidOverride = targetPid
+                )
+            }
+        }
     }
 
     /**
