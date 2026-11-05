@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
@@ -38,6 +39,10 @@ fun SettingsScreen(
     val config: EngineConfig by viewModel.engineConfig.collectAsState()
     val systemPrompt: String by viewModel.systemPrompt.collectAsState()
     val currentModel: ModelInfo? by viewModel.currentModel.collectAsState()
+    val isBenchmarking: Boolean by viewModel.isBenchmarking.collectAsState()
+    val benchmarkReport: String? by viewModel.benchmarkReport.collectAsState()
+    val isGenerating: Boolean by viewModel.isGenerating.collectAsState()
+    val isImporting: Boolean by viewModel.isImporting.collectAsState()
     LaunchedEffect(Unit) {
         EngineDiagnostics.info("ui", "SETTINGS_SCREEN_VISIBLE")
     }
@@ -233,6 +238,50 @@ fun SettingsScreen(
                         valueRange = 128f..4096f,
                         steps = 30,
                         modifier = Modifier.testTag("max_tokens_slider")
+                    )
+                }
+            }
+        }
+
+        // Reproducible device benchmark: same model, question, system prompt and
+        // inference settings; only the selected compute backend changes.
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "CPU- / Vulkan-Benchmark",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Vergleicht dasselbe geladene Modell mit der Testfrage „Wer ist Ricardo Villalobos?“. " +
+                            "Kontext, Batch, Threads, GPU-Layer, Temperatur, Top-P und Ausgabelimit bleiben identisch. " +
+                            "Das Modell wird pro Backend neu geladen; anschließend wird deine ursprüngliche Backend-Einstellung wiederhergestellt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = { viewModel.runDefaultBackendBenchmark() },
+                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                        modifier = Modifier.fillMaxWidth().testTag("backend_benchmark_button")
+                    ) {
+                        Text(if (isBenchmarking) "Benchmark läuft…" else "CPU vs. Vulkan testen")
+                    }
+                    benchmarkReport?.let { report ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = report,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "RAM-Verlauf und native Vulkan-Meldungen werden automatisch im Diagnoseprotokoll erfasst. " +
+                            "Die Ausgabe des Modells selbst wird nicht protokolliert.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
