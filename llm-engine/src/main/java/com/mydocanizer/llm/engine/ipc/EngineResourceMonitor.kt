@@ -56,6 +56,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
     private val model = AtomicReference<ModelSnapshot?>(null)
     private val sampleErrorLogged = AtomicBoolean(false)
     private val nativeBackendReady = AtomicBoolean(false)
+    private val nativeMemoryLock = Any()
     private val lastNativeBackendMemorySampleNs = AtomicLong(0L)
     private var samplingJob: Job? = null
 
@@ -84,7 +85,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 activeBackend = "loading"
             )
         )
-        phase.set("MODEL_LOADING")
+        synchronized(nativeMemoryLock) { phase.set("MODEL_LOADING") }
         logPhase("MODEL_LOADING")
     }
 
@@ -101,37 +102,39 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 activeBackend = info.activeBackend
             )
         )
-        phase.set("MODEL_LOADED_IDLE")
+        synchronized(nativeMemoryLock) { phase.set("MODEL_LOADED_IDLE") }
         logPhase("MODEL_LOADED_IDLE")
     }
 
     fun nativeBackendReady() {
-        nativeBackendReady.set(true)
+        synchronized(nativeMemoryLock) { nativeBackendReady.set(true) }
     }
 
     fun modelUnloading() {
-        phase.set("MODEL_UNLOADING")
+        synchronized(nativeMemoryLock) { phase.set("MODEL_UNLOADING") }
         logPhase("MODEL_UNLOADING")
     }
 
     fun modelLoadFailed() {
-        phase.set("MODEL_LOAD_FAILED")
+        synchronized(nativeMemoryLock) { phase.set("MODEL_LOAD_FAILED") }
         logPhase("MODEL_LOAD_FAILED")
     }
 
     fun inferenceStarted() {
-        phase.set("INFERENCE")
+        synchronized(nativeMemoryLock) { phase.set("INFERENCE") }
         logPhase("INFERENCE")
     }
 
     fun inferenceFinished() {
-        phase.set(if (model.get() == null) "SERVICE_IDLE" else "MODEL_LOADED_IDLE")
+        synchronized(nativeMemoryLock) {
+            phase.set(if (model.get() == null) "SERVICE_IDLE" else "MODEL_LOADED_IDLE")
+        }
         logPhase(phase.get())
     }
 
     fun modelUnloaded() {
         model.set(null)
-        phase.set("MODEL_UNLOADED")
+        synchronized(nativeMemoryLock) { phase.set("MODEL_UNLOADED") }
         logPhase("MODEL_UNLOADED")
     }
 
@@ -151,16 +154,19 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
             val javaUsedBytes = runtime.totalMemory() - runtime.freeMemory()
             val snapshot = model.get()
 
-            val nowNs = System.nanoTime()
-            val lastNativeSampleNs = lastNativeBackendMemorySampleNs.get()
-            val shouldSampleNativeBackend = nativeBackendReady.get() &&
-                nowNs - lastNativeSampleNs >= NATIVE_BACKEND_MEMORY_INTERVAL_NS &&
-                lastNativeBackendMemorySampleNs.compareAndSet(lastNativeSampleNs, nowNs)
-            // Vulkan memory-budget queries enumerate physical-device memory heaps. Keep these
-            // less frequent than the cheap Android PSS/heap samples to limit benchmark impact.
-            val nativeBackendMemory = if (shouldSampleNativeBackend) {
-                runCatching { NativeEngineHandle.nativeGetBackendDiagnostics() }.getOrNull()
-            } else null
+            val nativeBackendMemory = synchronized(nativeMemoryLock) {
+                val currentPhase = phase.get()
+                val nowNs = System.nanoTime()
+                val lastNativeSampleNs = lastNativeBackendMemorySampleNs.get()
+                val shouldSample = nativeBackendReady.get() && currentPhase !in ACTIVE_PHASES &&
+                    nowNs - lastNativeSampleNs >= NATIVE_BACKEND_MEMORY_INTERVAL_NS &&
+                    lastNativeBackendMemorySampleNs.compareAndSet(lastNativeSampleNs, nowNs)
+                // Vulkan memory-budget queries enumerate physical-device memory heaps. Keep these
+                // out of inference/load and less frequent than Android PSS/heap samples.
+                if (shouldSample) {
+                    runCatching { NativeEngineHandle.nativeGetBackendDiagnostics() }.getOrNull()
+                } else null
+            }
 
             val graphicsPssKb = runCatching {
                 processMemory.getMemoryStats()["summary.graphics"]?.toLongOrNull()
@@ -211,6 +217,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
 
     @Synchronized
     override fun close() {
+        synchronized(nativeMemoryLock) { nativeBackendReady.set(false) }
         samplingJob?.cancel()
         samplingJob = null
         scope.cancel()
