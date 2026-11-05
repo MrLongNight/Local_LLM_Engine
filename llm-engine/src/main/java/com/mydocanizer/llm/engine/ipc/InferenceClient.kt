@@ -678,7 +678,6 @@ internal class InferenceClient(
             override fun onModelLoaded(modelInfo: ModelInfo?) {}
             override fun onModelLoadFailed(errorMessage: String?) {}
             override fun onModelLoadProgress(progressPercent: Int) {}
-            override fun onPromptProgress(requestId: String?, tokensProcessed: Int, totalPromptTokens: Int, elapsedMs: Long) {}
         }
 
         try {
