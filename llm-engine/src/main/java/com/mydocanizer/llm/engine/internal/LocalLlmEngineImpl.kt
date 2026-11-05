@@ -91,6 +91,11 @@ internal class LocalLlmEngineImpl(
                 isAvailable = true,
                 recommendedThreads = recThreads
             )
+            EngineDiagnostics.info(
+                "engine",
+                "NATIVE_SYSTEM_INFO",
+                sysInfo.replace('\n', ' ').take(1200)
+            )
 
             _state.value = EngineState.Ready
             Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
@@ -290,6 +295,12 @@ internal class LocalLlmEngineImpl(
         }
 
         val prefillDurationMs = (System.nanoTime() - requestStartNano) / 1_000_000L
+        val promptMetrics = NativeEngineHandle.nativeGetLastPromptMetrics(handle)
+        EngineDiagnostics.info(
+            "inference",
+            "PROMPT_STAGE_METRICS",
+            promptMetrics
+        )
         EngineDiagnostics.info(
             "inference",
             "PREFILL_COMPLETED",

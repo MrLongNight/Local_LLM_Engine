@@ -421,6 +421,7 @@ internal class InferenceClient(
         val tokenCount = AtomicInteger(0)
         val promptTokensProcessed = AtomicInteger(0)
         val promptTokensTotal = AtomicInteger(0)
+        val promptDecodeStartNano = AtomicLong(0L)
         val lastUiProgressNano = AtomicLong(startNano)
         val streamBuilder = StringBuilder()
 
@@ -604,16 +605,21 @@ internal class InferenceClient(
                 if (reqId == activeRequestId.get()) {
                     val processed = tokensProcessed.coerceAtLeast(0)
                     val total = totalPromptTokens.coerceAtLeast(0)
+                    if (processed == 0) promptDecodeStartNano.set(System.nanoTime())
                     promptTokensProcessed.set(processed)
                     promptTokensTotal.set(total)
-                    val speed = if (elapsedMs > 0L) processed * 1000.0 / elapsedMs else 0.0
+                    val decodeStart = promptDecodeStartNano.get()
+                    val measuredElapsedMs = if (decodeStart > 0L) {
+                        ((System.nanoTime() - decodeStart) / 1_000_000L).coerceAtLeast(1L)
+                    } else elapsedMs.coerceAtLeast(1L)
+                    val speed = processed * 1000.0 / measuredElapsedMs
                     val eta = if (speed > 0.0 && total > processed) {
                         (((total - processed) * 1000.0) / speed).toLong()
                     } else null
                     trySend(
                         InferenceEvent.Progress(
                             tokensGenerated = 0,
-                            elapsedMs = elapsedMs.coerceAtLeast(0L),
+                            elapsedMs = measuredElapsedMs,
                             phase = ProgressPhase.PROMPT_EVALUATION,
                             promptTokensProcessed = processed,
                             promptTokensTotal = total,

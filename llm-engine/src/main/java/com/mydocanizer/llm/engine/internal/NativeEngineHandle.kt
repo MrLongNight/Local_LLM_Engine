@@ -68,6 +68,9 @@ internal object NativeEngineHandle {
     ): Int
 
     @JvmStatic
+    external fun nativeGetLastPromptMetrics(handle: Long): String
+
+    @JvmStatic
     external fun nativeGetActiveBackend(handle: Long): String
 
     @JvmStatic

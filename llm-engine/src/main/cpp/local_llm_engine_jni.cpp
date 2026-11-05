@@ -59,6 +59,15 @@ struct EngineInstance {
     int64_t inference_start_us = 0;
     int32_t tokens_generated = 0;
 
+    // Last prompt-stage timings are kept on the existing EngineInstance so Kotlin can
+    // persist them to the normal exportable diagnostics log without parsing logcat.
+    int64_t last_prompt_template_us = 0;
+    int64_t last_prompt_tokenization_us = 0;
+    int64_t last_prompt_decode_us = 0;
+    int32_t last_prompt_tokens = 0;
+    int32_t last_prompt_batch_size = 0;
+    int32_t last_prompt_threads = 0;
+
     void reset_short_term() {
         stop_generation_position = 0;
         cached_token_chars.clear();
@@ -435,6 +444,24 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 }
 
 JNIEXPORT jstring JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptMetrics(
+        JNIEnv* env,
+        jclass /*clazz*/,
+        jlong handle) {
+    auto* engine = fromHandle(handle);
+    if (!engine) return env->NewStringUTF("");
+    std::ostringstream ss;
+    ss << "templateUs=" << engine->last_prompt_template_us
+       << ";tokenizationUs=" << engine->last_prompt_tokenization_us
+       << ";decodeUs=" << engine->last_prompt_decode_us
+       << ";promptTokens=" << engine->last_prompt_tokens
+       << ";batchSize=" << engine->last_prompt_batch_size
+       << ";threads=" << engine->last_prompt_threads
+       << ";backend=" << engine->active_backend;
+    return env->NewStringUTF(ss.str().c_str());
+}
+
+JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetActiveBackend(
         JNIEnv* env,
         jclass /*clazz*/,
@@ -485,6 +512,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         return 2;
     }
 
+    engine->last_prompt_template_us = 0;
+    engine->last_prompt_tokenization_us = 0;
+    engine->last_prompt_decode_us = 0;
+    engine->last_prompt_tokens = 0;
+    engine->last_prompt_batch_size = engine->batch_size;
+    engine->last_prompt_threads = engine->n_threads;
     const int64_t prompt_prepare_start_us = llama_time_us();
     const bool has_chat_template = common_chat_templates_was_explicit(engine->chat_templates.get());
     std::vector<common_chat_msg> messages;
@@ -557,6 +590,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
     engine->chat_msgs = messages;
     const int64_t template_duration_ms = (llama_time_us() - prompt_prepare_start_us) / 1000;
+    engine->last_prompt_template_us = template_duration_ms * 1000;
 
     LOGI("Prompt prepared: messages=%zu, template=%s, characters=%zu, template_ms=%lld",
          messages.size(), used_chat_template ? "llama.cpp" : "fallback", full_prompt.size(),
@@ -564,6 +598,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     const int64_t tokenization_start_us = llama_time_us();
     auto tokens = common_tokenize(engine->context, full_prompt, used_chat_template, used_chat_template);
     const int64_t tokenization_duration_ms = (llama_time_us() - tokenization_start_us) / 1000;
+    engine->last_prompt_tokenization_us = tokenization_duration_ms * 1000;
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
         return 3;
@@ -595,6 +630,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     int dec_res = decode_tokens(
         engine, tokens, engine->current_position, true, &progress_context);
     const int64_t prompt_duration_ms = (llama_time_us() - prompt_start_us) / 1000;
+    engine->last_prompt_decode_us = prompt_duration_ms * 1000;
+    engine->last_prompt_tokens = prompt_size;
     if (dec_res != 0) {
         LOGE("Prompt decoding failed with code %d", dec_res);
         return 4;
