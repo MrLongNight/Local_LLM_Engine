@@ -28,6 +28,7 @@
 // The filename uses the same engine-*.log pattern consumed by EngineDiagnostics export.
 static std::mutex g_native_log_file_mutex;
 static FILE* g_native_log_file = nullptr;
+static constexpr long MAX_NATIVE_LOG_FILE_BYTES = 512L * 1024L;
 
 static void local_llm_native_log_callback(enum ggml_log_level level, const char* text, void* /*user_data*/) {
     if (text == nullptr || level < GGML_LOG_LEVEL_INFO) return;
@@ -67,9 +68,21 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
             ? static_cast<size_t>(line_end - cursor)
             : std::strlen(cursor);
         if (line_length > 0) {
+            const long current_size = std::ftell(g_native_log_file);
+            const long incoming_size = static_cast<long>(line_length) + 64L;
+            if (current_size >= 0 && current_size + incoming_size > MAX_NATIVE_LOG_FILE_BYTES) {
+                std::fflush(g_native_log_file);
+                if (ftruncate(fileno(g_native_log_file), 0) == 0) {
+                    std::fseek(g_native_log_file, 0, SEEK_END);
+                    std::fprintf(g_native_log_file,
+                        "%s [NATIVE] Native diagnostics rotated at 512 KiB; older native lines omitted\n",
+                        timestamp);
+                }
+            }
+            const size_t safe_length = std::min(line_length, static_cast<size_t>(4096));
             std::fprintf(
                 g_native_log_file, "%s [NATIVE] %.*s\n",
-                timestamp, static_cast<int>(line_length), cursor
+                timestamp, static_cast<int>(safe_length), cursor
             );
         }
         if (line_end == nullptr) break;
