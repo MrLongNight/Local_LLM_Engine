@@ -73,6 +73,11 @@ internal class InferenceClient(
     private val processLivenessCheck: ((pid: Int) -> Boolean)? = null
 ) : LocalLlmEngine {
 
+    private data class PendingModelLoad(
+        val processId: Int?,
+        val deferred: CompletableDeferred<Result<ModelInfo>>
+    )
+
     companion object {
         private const val TAG = "InferenceClient"
         private const val WATCHDOG_CHECK_INTERVAL_MS = 25L
@@ -104,6 +109,7 @@ internal class InferenceClient(
     private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
 
     private val activeRequestId = AtomicReference<String?>(null)
+    private val pendingModelLoad = AtomicReference<PendingModelLoad?>(null)
     private val reconnectInProgress = AtomicBoolean(false)
     private var lastLoadedSource: ModelSource? = null
     private var lastLoadedConfig: EngineConfig? = null
@@ -136,6 +142,8 @@ internal class InferenceClient(
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            val disconnectedPid = _remotePid.value
+            failPendingModelLoad(disconnectedPid, "SERVICE_DISCONNECTED")
             remoteService = null
             _remotePid.value = null
             _currentModel.value = null
@@ -148,6 +156,8 @@ internal class InferenceClient(
         }
 
         override fun onBindingDied(name: ComponentName?) {
+            val disconnectedPid = _remotePid.value
+            failPendingModelLoad(disconnectedPid, "BINDING_DIED")
             remoteService = null
             _remotePid.value = null
             _currentModel.value = null
@@ -172,6 +182,30 @@ internal class InferenceClient(
         } else {
             bindToService()
         }
+    }
+
+    /**
+     * Fail only a model load owned by the process that actually disconnected.
+     * This releases the original caller immediately instead of letting its 180s
+     * timeout act on a replacement service process.
+     */
+    private fun failPendingModelLoad(disconnectedPid: Int?, event: String) {
+        val pending = pendingModelLoad.get() ?: return
+        if (pending.processId != null && disconnectedPid != null &&
+            pending.processId != disconnectedPid
+        ) {
+            return
+        }
+        if (!pendingModelLoad.compareAndSet(pending, null)) return
+
+        val pidLabel = pending.processId?.toString() ?: "unknown"
+        val error = IllegalStateException(
+            "Inference process PID=$pidLabel disconnected during model loading"
+        )
+        _modelLoadProgress.value = null
+        _state.value = EngineState.Error(error.message ?: "Inference process disconnected", error)
+        EngineDiagnostics.error("ipc_client", event, error)
+        pending.deferred.complete(Result.failure(error))
     }
 
     private fun bindToService() {
@@ -304,15 +338,23 @@ internal class InferenceClient(
         val deferred = CompletableDeferred<Result<ModelInfo>>()
         val effectiveTimeout = config.timeoutConfig
         val startNano = System.nanoTime()
+        var registeredPendingLoad: PendingModelLoad? = null
 
         try {
             _state.value = EngineState.LoadingModel(source)
             val file: File = ModelSourceResolver.resolveToFile(context, source)
+            val targetPid = runCatching { service.processId }.getOrNull()
+            val pending = PendingModelLoad(targetPid, deferred)
+            if (!pendingModelLoad.compareAndSet(null, pending)) {
+                throw IllegalStateException("Another model-load request is already pending")
+            }
+            registeredPendingLoad = pending
             _modelLoadProgress.value = 0
             _modelLoadProgressEvents.tryEmit(0)
 
             val callback = object : IInferenceCallback.Stub() {
                 override fun onModelLoaded(modelInfo: ModelInfo?) {
+                    if (!pendingModelLoad.compareAndSet(pending, null)) return
                     if (modelInfo != null) {
                         // Keep only a model confirmed by the service as the automatic
                         // recovery target after a later process restart.
@@ -333,6 +375,7 @@ internal class InferenceClient(
                 }
 
                 override fun onModelLoadFailed(errorMessage: String?) {
+                    if (!pendingModelLoad.compareAndSet(pending, null)) return
                     _modelLoadProgress.value = null
                     val msg = errorMessage ?: "Model loading failed"
                     _state.value = EngineState.Error(msg)
@@ -340,6 +383,7 @@ internal class InferenceClient(
                 }
 
                 override fun onModelLoadProgress(progressPercent: Int) {
+                    if (pendingModelLoad.get() !== pending) return
                     val percent = progressPercent.coerceIn(0, 99)
                     _modelLoadProgress.value = percent
                     _modelLoadProgressEvents.tryEmit(percent)
@@ -365,13 +409,20 @@ internal class InferenceClient(
                 Log.e(TAG, "Model loading timed out after ${elapsedMs}ms ($effectiveTimeout)")
                 // Model loading has no inference request ID. Abort the isolated process
                 // explicitly only after the model-load deadline expires.
-                abortRemoteProcess(requestId = null, reason = "model_load_timeout")
+                abortRemoteProcess(
+                    requestId = null,
+                    reason = "model_load_timeout",
+                    targetPidOverride = targetPid
+                )
                 _modelLoadProgress.value = null
                 val timeoutEx = InferenceTimeoutException(FinishReason.TIMEOUT_MODEL_LOAD, elapsedMs)
                 _state.value = EngineState.Error(timeoutEx.message ?: "Model load timed out", timeoutEx)
                 Result.failure(timeoutEx)
+            } finally {
+                pendingModelLoad.compareAndSet(pending, null)
             }
         } catch (t: Throwable) {
+            registeredPendingLoad?.let { pendingModelLoad.compareAndSet(it, null) }
             _state.value = EngineState.Error(t.message ?: "Failed to initiate model load")
             return Result.failure(t)
         }
@@ -772,22 +823,36 @@ internal class InferenceClient(
      * requestId may be null for operations such as model loading, which have no inference
      * request ID but have independently exceeded their configured timeout.
      */
-    private fun abortRemoteProcess(requestId: String?, reason: String) {
-        val targetPid = _remotePid.value
+    private fun abortRemoteProcess(
+        requestId: String?,
+        reason: String,
+        targetPidOverride: Int? = _remotePid.value
+    ) {
+        val targetPid = targetPidOverride
         val service = remoteService
+        val servicePid = runCatching { service?.processId }.getOrNull()
+        val serviceMatchesTarget = service != null &&
+            (targetPid == null || servicePid == targetPid)
         val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
 
-        if (service != null && targetPid != null) {
+        if (serviceMatchesTarget && targetPid != null) {
+            // Never send a kill request to a replacement process for an older operation.
             // One-way Binder call: it must not wait for native cleanup in the service process.
             try {
-                service.killProcess()
+                service?.killProcess()
             } catch (e: Exception) {
                 Log.w(TAG, "Remote inference process may already have exited", e)
             }
-        } else if (service != null && requestId != null) {
+        } else if (serviceMatchesTarget && service != null && requestId != null) {
             try {
                 service.cancelInference(requestId)
             } catch (ignored: Exception) {}
+        } else if (service != null && targetPid != null) {
+            EngineDiagnostics.info(
+                "ipc_client",
+                "PROCESS_ABORT_SKIPPED_REPLACEMENT",
+                "reason=$reason, targetPid=$targetPid, currentServicePid=$servicePid"
+            )
         }
 
         EngineDiagnostics.info(
@@ -824,7 +889,7 @@ internal class InferenceClient(
 
                 if (!isAlive) {
                     EngineDiagnostics.info("ipc_client", "PROCESS_ABORT_CONFIRMED", "Inference PID=$targetPid is no longer alive")
-                    if (mockService == null && !isClosed.get()) {
+                    if (mockService == null && !isClosed.get() && _remotePid.value == targetPid) {
                         _state.value = EngineState.Reconnecting
                         triggerReconnect()
                     }

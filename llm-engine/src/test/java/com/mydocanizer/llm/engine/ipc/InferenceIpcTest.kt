@@ -55,6 +55,8 @@ class InferenceIpcTest {
         val isShutdown = AtomicBoolean(false)
 
         val isKilled = AtomicBoolean(false)
+        val currentProcessId = AtomicInteger(99999)
+        val replacementProcessIdOnLoad = AtomicInteger(0)
         val shouldHangInference = AtomicBoolean(false)
         val hangBeforeStarted = AtomicBoolean(false)
         val hangAfterStartedBeforeToken = AtomicBoolean(false)
@@ -69,6 +71,7 @@ class InferenceIpcTest {
 
         override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
             loadedModel.set(modelPath)
+            replacementProcessIdOnLoad.get().takeIf { it > 0 }?.let(currentProcessId::set)
             if (hangModelLoad.get()) return
             callback?.onModelLoadProgress(23)
             callback?.onModelLoadProgress(79)
@@ -176,7 +179,7 @@ class InferenceIpcTest {
             recommendedThreads = 4
         )
 
-        override fun getProcessId(): Int = if (isKilled.get()) 0 else 99999
+        override fun getProcessId(): Int = if (isKilled.get()) 0 else currentProcessId.get()
 
         override fun shutdown() {
             isShutdown.set(true)
@@ -233,6 +236,52 @@ class InferenceIpcTest {
         assertTrue("Stalled model loading must fail by its deadline", result.isFailure)
         assertTrue(result.exceptionOrNull() is InferenceTimeoutException)
         assertTrue("A model-load timeout must abort the isolated process", fakeService.isKilled.get())
+        client.close()
+    }
+
+
+    @Test
+    fun modelLoadTimeoutNeverKillsReplacementInferenceProcess() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangModelLoad.set(true)
+            replacementProcessIdOnLoad.set(22222)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 50L,
+            prefillMs = 50L,
+            firstTokenMs = 150L,
+            interTokenMs = 50L,
+            totalInferenceMs = 300L,
+            abortGracePeriodMs = 10L,
+            reconnectMs = 1_000L
+        )
+        val modelFile = File.createTempFile("replacement_model", ".gguf").apply {
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46))
+            deleteOnExit()
+        }
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig,
+            processLivenessCheck = { false }
+        )
+
+        client.initialize()
+        assertEquals(99999, client.remotePid.value)
+
+        val result = client.loadModel(
+            ModelSource.FilePath(modelFile.absolutePath),
+            EngineConfig(timeoutConfig = timeoutConfig)
+        )
+
+        assertTrue("The original hung load must still time out", result.isFailure)
+        assertTrue(result.exceptionOrNull() is InferenceTimeoutException)
+        assertEquals("The fake service now represents the replacement process", 22222, fakeService.processId)
+        assertTrue(
+            "A timeout from the old process must not kill the replacement service",
+            !fakeService.isKilled.get()
+        )
         client.close()
     }
 
