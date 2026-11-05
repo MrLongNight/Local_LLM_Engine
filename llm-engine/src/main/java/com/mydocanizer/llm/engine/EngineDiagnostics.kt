@@ -198,11 +198,11 @@ object EngineDiagnostics {
                 val context = last?.let { field(it.line, "contextTokens") }
                 val batch = last?.let { field(it.line, "batchSize") }
                 val layers = last?.let { field(it.line, "gpuLayersRequested") }
-                "\$group n=${entries.size} PSS_peak=${peak { it.pssMb }}MB " +
+                "$group n=${entries.size} PSS_peak=${peak { it.pssMb }}MB " +
                     "nativePSS_peak=${peak { it.nativePssMb }}MB nativeHeap_peak=${peak { it.nativeHeapMb }}MB " +
                     "javaHeap_peak=${peak { it.javaHeapMb }}MB availableRAM_min=${minimumAvailable}MB " +
-                    listOfNotNull(model?.let { "model=\$it" }, context?.let { "ctx=\$it" },
-                        batch?.let { "batch=\$it" }, layers?.let { "gpuLayers=\$it" }).joinToString(" ")
+                    listOfNotNull(model?.let { "model=$it" }, context?.let { "ctx=$it" },
+                        batch?.let { "batch=$it" }, layers?.let { "gpuLayers=$it" }).joinToString(" ")
             }
 
         val memoryTimeline = samples
@@ -229,14 +229,14 @@ object EngineDiagnostics {
                     "pss=${sample.pssMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     "nativeHeap=${sample.nativeHeapMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     "availRAM=${sample.availableRamMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
-                    field(sample.line, "contextTokens")?.let { "ctx=\$it" },
-                    field(sample.line, "gpuLayersRequested")?.let { "gpuLayers=\$it" },
-                    field(sample.line, "backendActive")?.let { "backend=\$it" }
+                    field(sample.line, "contextTokens")?.let { "ctx=$it" },
+                    field(sample.line, "gpuLayersRequested")?.let { "gpuLayers=$it" },
+                    field(sample.line, "backendActive")?.let { "backend=$it" }
                 ).filterNotNull().joinToString(" ")
                 val backend = if (sample.line.contains("backendMemory=")) {
                     " " + sample.line.substringAfter("backendMemory=").take(360)
                 } else ""
-                "${sample.timestamp} pid=${sample.pid} ${sample.phase} \$values\$backend"
+                "${sample.timestamp} pid=${sample.pid} ${sample.phase} $values$backend"
             }
 
         return buildString {
