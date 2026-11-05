@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED true)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED true)
 
-if(ANDROID AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O2" CACHE STRING "Optimized native Debug C flags" FORCE)
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2" CACHE STRING "Optimized native Debug C++ flags" FORCE)
     message(STATUS "LocalLLM: native Debug keeps symbols and enables -O2")
