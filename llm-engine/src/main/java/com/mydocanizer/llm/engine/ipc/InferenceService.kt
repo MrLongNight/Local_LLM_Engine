@@ -132,7 +132,8 @@ class InferenceService : Service() {
             serviceScope.launch {
                 try {
                     val e = initEngine()
-                    e.initialize()
+                    val initialization = e.initialize()
+                    if (initialization.isSuccess) resourceMonitor?.nativeBackendReady()
                 } catch (e: Exception) {
                     EngineDiagnostics.error("ipc", "INIT_FAILED", e)
                 }
@@ -154,6 +155,7 @@ class InferenceService : Service() {
                         callback?.onModelLoadFailed(error.message ?: "Native engine initialization failed")
                         return@launch
                     }
+                    resourceMonitor?.nativeBackendReady()
                     EngineDiagnostics.info("ipc", "LOAD_MODEL_REQUESTED", "path=$modelPath, ctx=${config.contextSize}")
                     progressJob = serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         e.modelLoadProgressEvents.collect { percent ->
@@ -181,11 +183,14 @@ class InferenceService : Service() {
         }
 
         override fun unloadModel(callback: IInferenceCallback?) {
+            resourceMonitor?.modelUnloading()
             serviceScope.launch {
                 try {
                     engine?.unloadModel()?.onSuccess {
+                        resourceMonitor?.modelUnloaded()
                         callback?.onModelLoaded(null)
                     }?.onFailure { err ->
+                        resourceMonitor?.inferenceFinished()
                         callback?.onModelLoadFailed(err.message ?: "Unload failed")
                     }
                 } catch (t: Throwable) {
