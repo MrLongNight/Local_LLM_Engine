@@ -61,10 +61,12 @@ class InferenceService : Service() {
     private val activeRequestId = AtomicReference<String?>(null)
     private var activeInferenceJob: Job? = null
     private val isShuttingDown = AtomicBoolean(false)
+    private var resourceMonitor: EngineResourceMonitor? = null
 
     override fun onCreate() {
         super.onCreate()
         EngineDiagnostics.initialize(applicationContext)
+        resourceMonitor = EngineResourceMonitor(applicationContext).also { it.start() }
         val pid = Process.myPid()
         EngineDiagnostics.info("ipc", "SERVICE_CREATED", "InferenceService started in process PID=$pid")
         Log.i(TAG, "InferenceService created in process PID=$pid")
@@ -99,6 +101,8 @@ class InferenceService : Service() {
 
     override fun onDestroy() {
         isShuttingDown.set(true)
+        resourceMonitor?.close()
+        resourceMonitor = null
         EngineDiagnostics.info("ipc", "SERVICE_DESTROYED", "InferenceService destroying")
 
         // Signal native cancellation before waiting for the serial worker. Cleanup must not
@@ -136,8 +140,10 @@ class InferenceService : Service() {
         }
 
         override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
+            resourceMonitor?.beginModelLoad(modelPath, config)
             serviceScope.launch {
                 var progressJob: Job? = null
+                var modelLoadedSuccessfully = false
                 try {
                     val e = initEngine()
                     val initialization = e.initialize()
@@ -156,6 +162,8 @@ class InferenceService : Service() {
                     }
                     val result = e.loadModel(ModelSource.FilePath(modelPath), config)
                     result.onSuccess { info ->
+                        modelLoadedSuccessfully = true
+                        resourceMonitor?.modelLoaded(info, config)
                         EngineDiagnostics.info("ipc", "MODEL_LOADED", "model=${info.name}, backend=${info.activeBackend}")
                         callback?.onModelLoaded(info)
                     }.onFailure { err ->
@@ -166,6 +174,7 @@ class InferenceService : Service() {
                     Log.e(TAG, "Unhandled exception in loadModel", t)
                     callback?.onModelLoadFailed(t.message ?: t.javaClass.simpleName)
                 } finally {
+                    if (!modelLoadedSuccessfully) resourceMonitor?.modelLoadFailed()
                     progressJob?.cancel()
                 }
             }
@@ -197,6 +206,7 @@ class InferenceService : Service() {
 
             activeInferenceJob = serviceScope.launch {
                 val currentReqId = requestId
+                resourceMonitor?.inferenceStarted()
                 try {
                     val e = initEngine()
                     var tokenCount = 0
@@ -254,6 +264,7 @@ class InferenceService : Service() {
                     Log.e(TAG, "Error in streamChat IPC", t)
                     callback?.onError(currentReqId, t.message ?: t.javaClass.simpleName, "")
                 } finally {
+                    resourceMonitor?.inferenceFinished()
                     if (activeRequestId.get() == currentReqId) {
                         activeRequestId.set(null)
                         activeInferenceJob = null
