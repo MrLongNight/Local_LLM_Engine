@@ -46,12 +46,17 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 **Änderungen:**
 - Vulkan-Treiber-/Geräteverfügbarkeit nicht mehr als Beweis für aktives llama.cpp-GPU-Offloading behandeln.
 - llama.cpp-/GGML-Backend-Registry und Geräteeigenschaften erfassen.
-- Verfügbarkeit, Modell-Layer-Offload und tatsächlich gewähltes Backend als getrennte Zustände ausweisen.
+- Verfügbarkeit, ausgewähltes Gerät und angeforderte Layer-Offload-Anzahl getrennt ausweisen. Eine erfolgreiche Modellauswahl allein wird nicht als Messnachweis für GPU-Ausführung ausgegeben.
+- AUTO muss nach einem fehlgeschlagenen Vulkan-Modellladen einen expliziten CPU-only-Ladeversuch starten. Ein expliziter VULKAN-Wunsch darf nicht still auf CPU wechseln.
 - Native Modelllade- und Inferenzereignisse strukturiert exportieren; keine Prompt-/Antwortinhalte protokollieren.
 - Messpunkte getrennt erfassen: Modellladen, Template, Tokenisierung, Prefill, Time-to-first-token, Token-Generierung, Prozess-/Speicherstatus.
-- CPU und Vulkan mit identischem Modell, Kontext, Prompt und Ausgabegrenze vergleichen.
+- CPU und Vulkan mit identischem, allgemein einsetzbarem GGUF-Modell, Kontext, Prompt und Ausgabegrenze vergleichen.
 
-**Abnahme:** Ein Export belegt für einen realen Lauf, welches Backend registriert wurde, welche Ausführung tatsächlich gewählt wurde und welche Phase der Engpass ist. Backend-Name allein genügt nicht.
+**Bereits umgesetzt in Commit 479854a:** Backend- und Geräteauswahl erfolgt jetzt über llama.cpps GGML-Registry. CPU-Modus wird auf das registrierte CPU-Gerät begrenzt. AUTO versucht bei registriertem Vulkan zunächst diesen Backend-Pfad und wiederholt einen fehlgeschlagenen Modell-Load CPU-only. Die Anzeige nennt Vulkan deshalb „selected“ und nicht unbewiesen „active“.
+
+**Noch ausstehend:** Tatsächliche Layer-/Operation-Ausführung unabhängig belegen und reproduzierbare Geräte-Benchmarks durchführen. Das bisherige Log vom 05.11.2026 ist ein wichtiger Performance-Ausgangswert, aber kein valider Textqualitäts-Test: Das verwendete Evora-Modell ist auf eng definierte JSON-Tasks trainiert und wurde ohne den vorgesehenen deutschen LoRA-Adapter sowie mit abweichendem Prompt-/Thinking-Vertrag betrieben.
+
+**Abnahme:** Ein Export belegt für einen realen Lauf, welches Backend registriert und ausgewählt wurde, welche Layer-Offload-Anforderung konfiguriert war und welche Phase der Engpass ist. Ein Backend-Name allein genügt nicht.
 
 ## Phase 3 – Prozessisolation und zuverlässiger Abbruch
 
@@ -82,6 +87,17 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 - OpenMP-Variante getrennt gegen den aktuellen ARM64-Build benchmarken.
 
 **Abnahme:** Ein Backend wird nur angeboten, wenn der Build, die Runtime-Erkennung, reale Inferenz und ein reproduzierbarer Leistungs-/Stabilitätsvergleich belegt sind.
+
+## Geräte-Log vom 05.11.2026 – Ausgangsbefund, keine Abnahme
+
+Verwendetes Modell: `evora-qwen3-1.7b-en.Q4_K_M.gguf` (1,107,408,576 Bytes).
+
+- CPU-Lauf: 85 Prompt-Tokens, Decode/Prefill 75,627 ms; Generierung 50,934 ms; 19 native Tokens inklusive des abschließenden EOG-Tokens; gemeldete Rate 0.373 tokens/s.
+- Vulkan-Lauf: 110 Prompt-Tokens, Decode/Prefill 39,223 ms; Generierung 41,514 ms; 3 native Tokens inklusive des abschließenden EOG-Tokens; gemeldete Rate 0.072 tokens/s.
+- CPU-Konfiguration: 6 Threads, Batch 128, Kontext 2048. Der Systeminfo-String des damaligen Builds nennt NEON und ARM_FMA, aber keinen KleidiAI-Kernel.
+- Beide Läufe endeten mit `finishReason=STOP`; im bereitgestellten Ausschnitt ist weder Timeout noch Cancellation protokolliert. Die Textinhalte selbst werden aus Datenschutzgründen nicht protokolliert; daher lässt sich der konkrete Wortlaut aus diesem Log nicht rekonstruieren.
+- Der Dateiname verweist auf Evora v3. Laut Modellkarte ist dies eine englische Qwen3-1.7B-Basis mit separatem deutschem LoRA-Adapter. Das Modell erwartet definierte Evora-Task-Prompts und JSON-Ausgaben. Die Demo-App sendete stattdessen ihren generischen Assistenten-Systemprompt. Außerdem verwendet der native Renderer standardmäßig `enable_thinking=true`, während die dokumentierte Evora-Promptvorlage Thinking deaktiviert.
+- Konsequenz: Diese Läufe belegen sehr schlechte gemessene Performance, sind aber kein valider Beleg für die allgemeine Textqualität von llama.cpp oder Local LLM Engine. Für einen Engine-Funktionstest ist ein allgemeines Instruct-GGUF zu verwenden; Evora muss mit Adapter, passendem Task-Payload und korrekter Template-Konfiguration getestet werden.
 
 ## Aktueller CI-Ausgangsstand
 

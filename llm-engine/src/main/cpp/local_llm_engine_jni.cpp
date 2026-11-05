@@ -1,6 +1,5 @@
 #include <android/log.h>
 #include <jni.h>
-#include <vulkan/vulkan.h>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -179,43 +178,53 @@ static void report_prompt_eval_progress(
     }
 }
 
-static bool probeVulkanDevice(std::string& out_device_name) {
-    VkApplicationInfo appInfo = {};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "LocalLlmEngine";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "llama.cpp";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+struct BackendDeviceSelection {
+    ggml_backend_dev_t device = nullptr;
+    std::string backend_name;
+    std::string device_name;
+    std::string description;
+};
 
-    VkInstanceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
-
-    VkInstance instance = VK_NULL_HANDLE;
-    VkResult res = vkCreateInstance(&createInfo, nullptr, &instance);
-    if (res != VK_SUCCESS || instance == VK_NULL_HANDLE) {
-        LOGD("Vulkan vkCreateInstance returned %d", res);
+static bool findRegisteredVulkanDevice(BackendDeviceSelection& out) {
+    // Do not probe the Android Vulkan loader independently. The inference
+    // backend must be registered by the exact ggml/llama.cpp runtime we use.
+    ggml_backend_reg_t registry = ggml_backend_reg_by_name("Vulkan");
+    if (registry == nullptr) {
+        LOGI("llama.cpp Vulkan backend is not registered");
         return false;
     }
 
-    uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-    if (deviceCount == 0) {
-        vkDestroyInstance(instance, nullptr);
-        return false;
+    const size_t device_count = ggml_backend_reg_dev_count(registry);
+    for (size_t i = 0; i < device_count; ++i) {
+        ggml_backend_dev_t device = ggml_backend_reg_dev_get(registry, i);
+        if (device == nullptr) continue;
+
+        const auto type = ggml_backend_dev_type(device);
+        if (type != GGML_BACKEND_DEVICE_TYPE_GPU &&
+            type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            continue;
+        }
+
+        out.device = device;
+        out.backend_name = ggml_backend_reg_name(registry);
+        out.device_name = ggml_backend_dev_name(device);
+        out.description = ggml_backend_dev_description(device);
+        LOGI("llama.cpp backend registry selected %s device %s (%s)",
+             out.backend_name.c_str(), out.device_name.c_str(), out.description.c_str());
+        return true;
     }
 
-    std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+    LOGI("llama.cpp Vulkan backend is registered but exposes no GPU/IGPU device");
+    return false;
+}
 
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(devices[0], &props);
-    out_device_name = props.deviceName;
-    LOGI("Found Vulkan physical device: %s (Type: %d)", props.deviceName, props.deviceType);
-
-    vkDestroyInstance(instance, nullptr);
-    return true;
+static ggml_backend_dev_t findRegisteredCpuDevice() {
+    ggml_backend_dev_t device =
+        ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (device == nullptr) {
+        LOGE("llama.cpp CPU backend is not registered");
+    }
+    return device;
 }
 
 static bool is_valid_utf8(const char *string) {
@@ -346,42 +355,83 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         model_params.progress_callback_user_data = &progress_context;
     }
 
-    // GPU / Vulkan offload resolution
-    std::string vk_device_name;
-    bool has_vulkan = probeVulkanDevice(vk_device_name);
-
-    if (backend_mode == BACKEND_VULKAN) {
-        if (!has_vulkan) {
-            LOGE("Vulkan backend explicitly requested, but no Vulkan GPU device is available");
-            env->ReleaseStringUTFChars(jmodel_path, model_path);
-            return 101; // Vulkan init failure error code (no silent fallback!)
-        }
-        model_params.n_gpu_layers = gpu_layers > 0 ? gpu_layers : 999;
-        engine->active_backend = "Vulkan GPU (" + vk_device_name + ")";
-        LOGI("Configured explicit Vulkan GPU offload with %d layers", model_params.n_gpu_layers);
-    } else if (backend_mode == BACKEND_AUTO) {
-        if (has_vulkan) {
-            model_params.n_gpu_layers = gpu_layers > 0 ? gpu_layers : 999;
-            engine->active_backend = "Vulkan GPU (" + vk_device_name + ")";
-            LOGI("AUTO mode selected Vulkan GPU (%s) with %d layers", vk_device_name.c_str(), model_params.n_gpu_layers);
-        } else {
-            model_params.n_gpu_layers = 0;
-            engine->active_backend = "CPU (ARM NEON / AVX)";
-            LOGI("AUTO mode transparently fell back to CPU backend (Vulkan unavailable)");
-        }
-    } else { // BACKEND_CPU
-        model_params.n_gpu_layers = 0;
-        engine->active_backend = "CPU (ARM NEON / AVX)";
-        LOGI("Configured CPU backend");
+    // Select devices from llama.cpp's own backend registry. A Vulkan loader
+    // or physical device visible to Android is not proof that ggml-vulkan was
+    // compiled, registered, or made available to llama.cpp.
+    BackendDeviceSelection vulkan_device;
+    const bool has_registered_vulkan = findRegisteredVulkanDevice(vulkan_device);
+    ggml_backend_dev_t cpu_device = findRegisteredCpuDevice();
+    if (cpu_device == nullptr) {
+        env->ReleaseStringUTFChars(jmodel_path, model_path);
+        return 102;
     }
 
+    std::vector<ggml_backend_dev_t> selected_devices;
+    bool use_vulkan = false;
+    const int requested_gpu_layers = gpu_layers > 0 ? gpu_layers : 999;
+
+    if (backend_mode == BACKEND_VULKAN) {
+        if (!has_registered_vulkan) {
+            LOGE("Vulkan explicitly requested, but no Vulkan device is registered in llama.cpp");
+            env->ReleaseStringUTFChars(jmodel_path, model_path);
+            return 101; // no silent fallback for an explicit Vulkan request
+        }
+        selected_devices = {vulkan_device.device, nullptr};
+        model_params.devices = selected_devices.data();
+        model_params.n_gpu_layers = requested_gpu_layers;
+        use_vulkan = true;
+    } else if (backend_mode == BACKEND_AUTO && has_registered_vulkan) {
+        selected_devices = {vulkan_device.device, nullptr};
+        model_params.devices = selected_devices.data();
+        model_params.n_gpu_layers = requested_gpu_layers;
+        use_vulkan = true;
+    } else {
+        selected_devices = {cpu_device, nullptr};
+        model_params.devices = selected_devices.data();
+        model_params.n_gpu_layers = 0;
+    }
+
+    LOGI("Model device selection: requestedMode=%d, registeredVulkan=%s, selected=%s, requestedGpuLayers=%d",
+         backend_mode, has_registered_vulkan ? "true" : "false",
+         use_vulkan ? vulkan_device.device_name.c_str() : "CPU",
+         model_params.n_gpu_layers);
+
     llama_model* model = llama_model_load_from_file(model_path, model_params);
+
+    // AUTO is a policy, not merely a device-presence check: if registered
+    // Vulkan cannot load this model, retry with an explicitly CPU-only device list.
+    if (model == nullptr && backend_mode == BACKEND_AUTO && use_vulkan) {
+        LOGW("Vulkan model load failed; AUTO is retrying with the registered CPU backend");
+        selected_devices = {cpu_device, nullptr};
+        model_params.devices = selected_devices.data();
+        model_params.n_gpu_layers = 0;
+        use_vulkan = false;
+        model = llama_model_load_from_file(model_path, model_params);
+    }
+
     env->ReleaseStringUTFChars(jmodel_path, model_path);
 
     if (!model) {
-        LOGE("llama_model_load_from_file failed");
+        LOGE("llama_model_load_from_file failed on the selected backend (and CPU fallback if AUTO)");
         return 3;
     }
+
+    if (use_vulkan) {
+        const int total_offloadable_layers = std::max(0, llama_model_n_layer(model)) + 1;
+        const int requested_offloadable_layers =
+            std::min(model_params.n_gpu_layers, total_offloadable_layers);
+        engine->active_backend = "Vulkan selected (" + vulkan_device.device_name +
+            "; requested layers " + std::to_string(requested_offloadable_layers) +
+            "/" + std::to_string(total_offloadable_layers) + ")";
+        LOGI("Vulkan backend registered and selected for model load: device=%s, requested_layers=%d/%d. " 
+             "This is selection/configuration evidence, not a per-operation GPU execution measurement.",
+             vulkan_device.device_name.c_str(), requested_offloadable_layers,
+             total_offloadable_layers);
+    } else {
+        engine->active_backend = "CPU (registered ggml CPU backend)";
+        LOGI("Model loaded with the registered CPU backend (n_gpu_layers=0)");
+    }
+
     engine->model = model;
     report_model_load_stage(&progress_context, 0.72f); // weights complete; context setup begins
 
