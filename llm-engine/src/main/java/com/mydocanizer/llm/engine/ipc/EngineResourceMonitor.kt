@@ -20,6 +20,7 @@ import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Samples memory from the dedicated :inference process, where llama.cpp and Vulkan
@@ -43,6 +44,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
     companion object {
         private const val IDLE_INTERVAL_MS = 5_000L
         private const val ACTIVE_INTERVAL_MS = 1_000L
+        private const val NATIVE_BACKEND_MEMORY_INTERVAL_NS = 5_000_000_000L
         private const val MIB = 1024.0 * 1024.0
     }
 
@@ -54,6 +56,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
     private val model = AtomicReference<ModelSnapshot?>(null)
     private val sampleErrorLogged = AtomicBoolean(false)
     private val nativeBackendReady = AtomicBoolean(false)
+    private val lastNativeBackendMemorySampleNs = AtomicLong(0L)
     private var samplingJob: Job? = null
 
     @Synchronized
@@ -148,7 +151,14 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
             val javaUsedBytes = runtime.totalMemory() - runtime.freeMemory()
             val snapshot = model.get()
 
-            val nativeBackendMemory = if (nativeBackendReady.get()) {
+            val nowNs = System.nanoTime()
+            val lastNativeSampleNs = lastNativeBackendMemorySampleNs.get()
+            val shouldSampleNativeBackend = nativeBackendReady.get() &&
+                nowNs - lastNativeSampleNs >= NATIVE_BACKEND_MEMORY_INTERVAL_NS &&
+                lastNativeBackendMemorySampleNs.compareAndSet(lastNativeSampleNs, nowNs)
+            // Vulkan memory-budget queries enumerate physical-device memory heaps. Keep these
+            // less frequent than the cheap Android PSS/heap samples to limit benchmark impact.
+            val nativeBackendMemory = if (shouldSampleNativeBackend) {
                 runCatching { NativeEngineHandle.nativeGetBackendDiagnostics() }.getOrNull()
             } else null
 
