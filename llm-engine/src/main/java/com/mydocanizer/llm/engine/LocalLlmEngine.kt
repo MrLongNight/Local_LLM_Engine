@@ -1,7 +1,7 @@
 package com.mydocanizer.llm.engine
 
 import android.content.Context
-import com.mydocanizer.llm.engine.internal.LocalLlmEngineImpl
+import com.mydocanizer.llm.engine.ipc.InferenceClient
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -87,41 +87,16 @@ interface LocalLlmEngine : AutoCloseable {
 
     companion object {
         /**
-         * Creates a new instance of [LocalLlmEngine].
-         *
-         * By default delegates execution to the dedicated :inference process via [com.mydocanizer.llm.engine.ipc.InferenceClient].
-         *
-         * @param context Android Application Context.
-         * @param useIpcProcess If true (default), delegates execution to the isolated :inference process via AIDL IPC.
+         * Creates the public engine facade. Native execution always runs in the dedicated
+         * :inference process; callers cannot bypass process isolation through this factory.
          */
         fun create(
             context: Context,
-            useIpcProcess: Boolean = true,
             timeoutConfig: TimeoutConfig = TimeoutConfig()
         ): LocalLlmEngine {
             val appContext = runCatching { context.applicationContext }.getOrNull() ?: context
-            return if (useIpcProcess) {
-                com.mydocanizer.llm.engine.ipc.InferenceClient(
-                    context = appContext,
-                    timeoutConfig = timeoutConfig
-                )
-            } else {
-                LocalLlmEngineImpl(appContext)
-            }
-        }
-
-        /**
-         * Creates an IPC client connected to the isolated :inference process or a mock service.
-         */
-        fun createIpcClient(
-            context: Context,
-            mockService: com.mydocanizer.llm.engine.ipc.IInferenceService? = null,
-            timeoutConfig: TimeoutConfig = TimeoutConfig()
-        ): com.mydocanizer.llm.engine.ipc.InferenceClient {
-            val appContext = runCatching { context.applicationContext }.getOrNull() ?: context
-            return com.mydocanizer.llm.engine.ipc.InferenceClient(
+            return InferenceClient(
                 context = appContext,
-                mockService = mockService,
                 timeoutConfig = timeoutConfig
             )
         }

@@ -65,7 +65,7 @@ import kotlin.coroutines.CoroutineContext
  * - Dynamic reconnection lifecycle through [EngineState.Reconnecting].
  * - Request-ID versioning to ensure stale events never corrupt engine state.
  */
-class InferenceClient(
+internal class InferenceClient(
     private val context: Context,
     private val mockService: IInferenceService? = null,
     coroutineContext: CoroutineContext = Dispatchers.Default,
@@ -823,7 +823,3 @@ class InferenceClient(
     }
 }
 
-/**
- * Typealias for backwards compatibility.
- */
-typealias InferenceServiceClient = InferenceClient

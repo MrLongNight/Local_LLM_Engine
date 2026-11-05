@@ -3,6 +3,7 @@ package com.mydocanizer.llm.engine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import com.mydocanizer.llm.engine.ipc.InferenceClient
 import org.junit.Test
 
 class LocalLlmEngineApiTest {
@@ -94,7 +95,7 @@ class LocalLlmEngineApiTest {
     }
 
     @Test
-    fun testDefaultEngineCreationUsesIpc() {
+    fun testIpcClientImplementsEngineApi() {
         val fakeService = object : com.mydocanizer.llm.engine.ipc.IInferenceService {
             override fun asBinder(): android.os.IBinder? = null
             override fun initialize() {}
@@ -108,7 +109,7 @@ class LocalLlmEngineApiTest {
             override fun getProcessId(): Int = 1234
             override fun shutdown() {}
         }
-        val client = LocalLlmEngine.createIpcClient(
+        val client = InferenceClient(
             context = object : android.content.ContextWrapper(null) {
                 override fun getApplicationContext(): android.content.Context = this
             },

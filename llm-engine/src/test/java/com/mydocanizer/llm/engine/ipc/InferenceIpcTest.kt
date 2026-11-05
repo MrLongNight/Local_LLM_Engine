@@ -239,7 +239,7 @@ class InferenceIpcTest {
     @Test
     fun testMockIpcClientInitializationAndQueries() = runBlocking {
         val fakeService = FakeInferenceService()
-        val client = InferenceServiceClient(
+        val client = InferenceClient(
             context = object : android.content.ContextWrapper(null) {},
             mockService = fakeService
         )
@@ -258,7 +258,7 @@ class InferenceIpcTest {
             deleteOnExit()
         }
 
-        val client = InferenceServiceClient(
+        val client = InferenceClient(
             context = object : android.content.ContextWrapper(null) {},
             mockService = fakeService
         )

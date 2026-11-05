@@ -15,6 +15,7 @@ import com.mydocanizer.llm.engine.InferenceEvent.ProgressPhase
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.LocalLlmEngine
+import com.mydocanizer.llm.engine.internal.LocalLlmEngineImpl
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
@@ -26,6 +27,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
@@ -80,10 +82,7 @@ class InferenceService : Service() {
             "LOCAL_ENGINE_CREATE",
             "Creating in-process native engine inside :inference PID=${Process.myPid()}"
         )
-        val newEngine = LocalLlmEngine.create(
-            applicationContext,
-            useIpcProcess = false
-        )
+        val newEngine = LocalLlmEngineImpl(applicationContext)
         engine = newEngine
         return newEngine
     }
@@ -99,20 +98,28 @@ class InferenceService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         isShuttingDown.set(true)
         EngineDiagnostics.info("ipc", "SERVICE_DESTROYED", "InferenceService destroying")
-        serviceScope.launch {
-            try {
-                activeInferenceJob?.cancel()
+
+        // Signal native cancellation before waiting for the serial worker. Cleanup must not
+        // be launched into serviceScope and then immediately cancelled with that same scope.
+        activeInferenceJob?.cancel()
+        engine?.cancelInference()
+        runCatching {
+            runBlocking(workerDispatcher) {
+                activeInferenceJob?.join()
                 engine?.close()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error closing engine on destroy", e)
-            } finally {
-                workerExecutor.shutdown()
+                engine = null
             }
+        }.onFailure { error ->
+            Log.e(TAG, "Error closing inference engine on destroy", error)
+            EngineDiagnostics.error("ipc", "SERVICE_ENGINE_CLEANUP_FAILED", error)
         }
+
+        workerExecutor.shutdown()
         serviceScope.cancel()
+        workerDispatcher.close()
+        super.onDestroy()
     }
 
     private val binder = object : IInferenceService.Stub() {
