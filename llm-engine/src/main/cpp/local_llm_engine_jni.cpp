@@ -485,6 +485,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         return 2;
     }
 
+    const int64_t prompt_prepare_start_us = llama_time_us();
     const bool has_chat_template = common_chat_templates_was_explicit(engine->chat_templates.get());
     std::vector<common_chat_msg> messages;
     messages.reserve(static_cast<size_t>(count));
@@ -555,10 +556,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         LOGW("No usable model chat template; using role/content fallback");
     }
     engine->chat_msgs = messages;
+    const int64_t template_duration_ms = (llama_time_us() - prompt_prepare_start_us) / 1000;
 
-    LOGI("Prompt prepared: messages=%zu, template=%s, characters=%zu",
-         messages.size(), used_chat_template ? "llama.cpp" : "fallback", full_prompt.size());
+    LOGI("Prompt prepared: messages=%zu, template=%s, characters=%zu, template_ms=%lld",
+         messages.size(), used_chat_template ? "llama.cpp" : "fallback", full_prompt.size(),
+         static_cast<long long>(template_duration_ms));
+    const int64_t tokenization_start_us = llama_time_us();
     auto tokens = common_tokenize(engine->context, full_prompt, used_chat_template, used_chat_template);
+    const int64_t tokenization_duration_ms = (llama_time_us() - tokenization_start_us) / 1000;
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
         return 3;
@@ -596,6 +601,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
 
     engine->current_position += prompt_size;
+    LOGI("Prompt stage metrics: template_ms=%lld, tokenization_ms=%lld, "
+         "decode_ms=%lld, prompt_tokens=%d, batch_size=%d, backend=%s",
+         static_cast<long long>(template_duration_ms),
+         static_cast<long long>(tokenization_duration_ms),
+         static_cast<long long>(prompt_duration_ms),
+         prompt_size, engine->batch_size, engine->active_backend.c_str());
     LOGI("Prompt evaluation completed: prompt_tokens=%d, duration_ms=%lld",
          prompt_size, static_cast<long long>(prompt_duration_ms));
     int predict_len = max_predict > 0 ? max_predict : 1024;
@@ -636,6 +647,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return nullptr;
     }
 
+    const int64_t token_step_start_us = llama_time_us();
     const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
     common_sampler_accept(engine->sampler, new_token_id, true);
 
@@ -650,6 +662,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     engine->current_position++;
     engine->tokens_generated++;
+    const int64_t token_step_duration_us = llama_time_us() - token_step_start_us;
+    if (engine->tokens_generated <= 4 || engine->tokens_generated % 8 == 0) {
+        LOGI("Token step metric: index=%d, duration_ms=%.3f, backend=%s",
+             engine->tokens_generated,
+             static_cast<double>(token_step_duration_us) / 1000.0,
+             engine->active_backend.c_str());
+    }
 
     const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
     if (llama_vocab_is_eog(vocab, new_token_id)) {

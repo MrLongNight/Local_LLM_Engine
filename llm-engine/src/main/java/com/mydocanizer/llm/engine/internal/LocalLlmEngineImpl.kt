@@ -285,6 +285,7 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.error("native", "PROMPT_EVALUATION_FAILED", err)
             trySend(InferenceEvent.Error(err))
             _state.value = EngineState.ModelLoaded(modelInfo)
+            close()
             return@callbackFlow
         }
 
@@ -298,12 +299,24 @@ internal class LocalLlmEngineImpl(
 
         val outputBuilder = StringBuilder()
         var tokenCount = 0
+        var nativeTokenSteps = 0
 
         try {
             while (!isCancelled.get()) {
+                val tokenStepStartNano = System.nanoTime()
                 val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
+                val tokenStepDurationMs = (System.nanoTime() - tokenStepStartNano) / 1_000_000L
                 if (tokenPiece == null) {
                     break
+                }
+                nativeTokenSteps++
+                if (nativeTokenSteps <= 4 || nativeTokenSteps % 8 == 0) {
+                    EngineDiagnostics.info(
+                        "inference",
+                        "TOKEN_STEP_METRIC",
+                        "nativeStep=$nativeTokenSteps, durationMs=$tokenStepDurationMs, " +
+                            "visiblePieces=$tokenCount, backend=${modelInfo.activeBackend}"
+                    )
                 }
                 if (tokenPiece.isNotEmpty()) {
                     outputBuilder.append(tokenPiece)

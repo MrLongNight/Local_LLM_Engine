@@ -67,6 +67,7 @@ import com.mydocanizer.llm.engine.ChatMessage
 import com.mydocanizer.llm.engine.ChatRole
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineState
+import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.ModelInfo
 import java.io.File
 
