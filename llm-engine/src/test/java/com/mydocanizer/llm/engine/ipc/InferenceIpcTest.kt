@@ -287,6 +287,32 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun concurrentStreamIsRejectedWithoutReplacingFirstRequestWatchdog() = runBlocking {
+        val fakeService = FakeInferenceService().apply { hangBeforeStarted.set(true) }
+        val timeoutConfig = TimeoutConfig.fast(
+            prefillMs = 2_000L,
+            firstTokenMs = 2_000L,
+            interTokenMs = 2_000L,
+            totalInferenceMs = 4_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+        val first = launch { client.streamChat(InferenceRequest.single("first")).collect {} }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) delay(5L)
+        }
+
+        val secondEvents = client.streamChat(InferenceRequest.single("second")).toList()
+        assertTrue(secondEvents.single() is InferenceEvent.Error)
+        assertTrue("The rejected stream must not abort the active request", !fakeService.isKilled.get())
+        first.cancel()
+        client.close()
+    }
+
+    @Test
     fun testMockIpcClientInitializationAndQueries() = runBlocking {
         val fakeService = FakeInferenceService()
         val client = InferenceClient(
@@ -393,7 +419,11 @@ class InferenceIpcTest {
         // 2. Trigger process-level cancelInference()
         client.cancelInference()
 
-        // 3. Verify service was commanded to kill its process
+        // Cooperative cancel is sent first; this fake deliberately does not acknowledge.
+        assertEquals(fakeService.lastRequestId.get(), fakeService.cancelledRequestId.get())
+        withTimeout(1_000L) {
+            while (!fakeService.isKilled.get()) delay(5L)
+        }
         assertTrue(fakeService.isKilled.get())
 
         // 4. Verify PID of service process is no longer alive
@@ -443,11 +473,8 @@ class InferenceIpcTest {
         // 1. Ultima ratio process kill was invoked
         assertTrue(fakeService.isKilled.get())
 
-        // 2. Specific FinishReason TIMEOUT_PREFILL reported
-        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
-        assertNotNull(completed)
-        assertEquals(FinishReason.TIMEOUT_PREFILL, completed?.result?.finishReason)
-        assertTrue(completed?.result?.finishReason?.isTimeout == true)
+        // Timeout is a failure event, never a successful completion.
+        assertTrue(events.none { it is InferenceEvent.Completed })
 
         // 3. Error event contains InferenceTimeoutException
         val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
@@ -519,10 +546,8 @@ class InferenceIpcTest {
         // 2. Started event was received before timeout
         assertTrue(events.any { it is InferenceEvent.Started })
 
-        // 3. Specific FinishReason TIMEOUT_FIRST_TOKEN reported
-        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
-        assertNotNull(completed)
-        assertEquals(FinishReason.TIMEOUT_FIRST_TOKEN, completed?.result?.finishReason)
+        // Timeout is a failure event, never a successful completion.
+        assertTrue(events.none { it is InferenceEvent.Completed })
 
         val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
         assertNotNull(errorEvent)
@@ -559,11 +584,8 @@ class InferenceIpcTest {
         // 2. Ultima ratio process kill was invoked
         assertTrue(fakeService.isKilled.get())
 
-        // 3. Specific FinishReason TIMEOUT_INTER_TOKEN reported
-        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
-        assertNotNull(completed)
-        assertEquals(FinishReason.TIMEOUT_INTER_TOKEN, completed?.result?.finishReason)
-        assertEquals("Hallo", completed?.result?.text)
+        // Timeout is a failure event, never a successful completion.
+        assertTrue(events.none { it is InferenceEvent.Completed })
 
         val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
         assertNotNull(errorEvent)
@@ -597,10 +619,8 @@ class InferenceIpcTest {
         // 1. Ultima ratio process kill was invoked
         assertTrue(fakeService.isKilled.get())
 
-        // 2. Specific FinishReason TIMEOUT_TOTAL_INFERENCE reported
-        val completed = events.filterIsInstance<InferenceEvent.Completed>().firstOrNull()
-        assertNotNull(completed)
-        assertEquals(FinishReason.TIMEOUT_TOTAL_INFERENCE, completed?.result?.finishReason)
+        // Timeout is a failure event, never a successful completion.
+        assertTrue(events.none { it is InferenceEvent.Completed })
 
         val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
         assertNotNull(errorEvent)
