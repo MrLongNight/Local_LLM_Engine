@@ -127,6 +127,48 @@ jobs:
       - name: Build APK
         run: gradle --no-daemon :app:assembleDebug
 
+      - name: Verify native Debug optimization flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          import re
+          import shlex
+
+          databases = glob.glob("llm-engine/.cxx/**/compile_commands.json", recursive=True)
+          if not databases:
+              raise SystemExit("No compile_commands.json found; cannot verify native optimization flags")
+
+          for abi in ("arm64-v8a", "x86_64"):
+              db = next((p for p in databases if f"/{abi}/" in p.replace("\\\\", "/")), None)
+              if db is None:
+                  raise SystemExit(f"No compile database found for ABI {abi}")
+
+              with open(db, encoding="utf-8") as stream:
+                  entries = json.load(stream)
+
+              selected = [
+                  e for e in entries
+                  if os.path.basename(e.get("file", "")) == "local_llm_engine_jni.cpp"
+              ]
+              if not selected:
+                  raise SystemExit(f"No JNI compile entry found for ABI {abi}")
+
+              for entry in selected:
+                  command = entry.get("command")
+                  args = shlex.split(command) if command else entry.get("arguments", [])
+                  optimizations = [arg for arg in args if re.fullmatch(r"-O(?:[0-3]|s|z|fast)", arg)]
+                  final_optimization = optimizations[-1] if optimizations else None
+                  print(f"{abi}: native JNI compile optimization flags={optimizations}")
+                  if final_optimization != "-O2":
+                      raise SystemExit(f"{abi}: expected final -O2 but found {final_optimization}")
+
+          print("Verified native JNI compilation with -O2 for arm64-v8a and x86_64.")
+          PY
+
       - name: Verify APK exists
         shell: bash
         run: |

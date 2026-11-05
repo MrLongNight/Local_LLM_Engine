@@ -749,6 +749,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     }
 
     engine->current_position++;
+
+    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
+    if (llama_vocab_is_eog(vocab, new_token_id)) {
+        const int64_t stop_step_duration_us = llama_time_us() - token_step_start_us;
+        LOGI("Generated EOG token: %d (excluded from visible token count; stop_step_ms=%.3f)",
+             new_token_id,
+             static_cast<double>(stop_step_duration_us) / 1000.0);
+        engine->last_finish_reason = 0; // STOP
+        return nullptr;
+    }
+
+    // The EOG token is decoded into the native context but is not returned to the UI.
+    // Count only ordinary model-output tokens in results and tokens-per-second metrics.
     engine->tokens_generated++;
     const int64_t token_step_duration_us = llama_time_us() - token_step_start_us;
     if (engine->tokens_generated <= 4 || engine->tokens_generated % 8 == 0) {
@@ -756,13 +769,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
              engine->tokens_generated,
              static_cast<double>(token_step_duration_us) / 1000.0,
              engine->active_backend.c_str());
-    }
-
-    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
-    if (llama_vocab_is_eog(vocab, new_token_id)) {
-        LOGI("Generated EOG token: %d", new_token_id);
-        engine->last_finish_reason = 0; // STOP
-        return nullptr;
     }
 
     auto token_piece = common_token_to_piece(engine->context, new_token_id);

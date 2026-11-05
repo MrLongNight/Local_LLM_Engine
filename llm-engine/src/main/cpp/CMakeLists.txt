@@ -6,6 +6,9 @@ set(CMAKE_C_STANDARD_REQUIRED true)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED true)
 
+# Export real compile commands so CI can verify optimization flags for each ABI.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export native compile commands for CI verification" FORCE)
+
 # This CMake project is only built by the Android NDK. Keep the Android Debug
 # variant debuggable, but never run llama.cpp/GGML at the compiler's -O0 default.
 # The Android NDK seeds these as normal variables. A CACHE-only set does not
@@ -26,8 +29,8 @@ string(FIND "${CMAKE_CXX_FLAGS_DEBUG}" "-O2" LOCAL_LLM_CXX_DEBUG_O2_VERIFY)
 if(LOCAL_LLM_C_DEBUG_O2_VERIFY EQUAL -1 OR LOCAL_LLM_CXX_DEBUG_O2_VERIFY EQUAL -1)
     message(FATAL_ERROR "LocalLLM: native Debug optimization -O2 was not applied to both C and C++ flags")
 endif()
-message(STATUS "LocalLLM native Debug C flags: ${CMAKE_C_FLAGS_DEBUG}")
-message(STATUS "LocalLLM native Debug CXX flags: ${CMAKE_CXX_FLAGS_DEBUG}")
+message("LocalLLM native Debug C flags: ${CMAKE_C_FLAGS_DEBUG}")
+message("LocalLLM native Debug CXX flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
 if(DEFINED ANDROID_ABI)
     message(STATUS "LocalLLM detected Android ABI: ${ANDROID_ABI}")
