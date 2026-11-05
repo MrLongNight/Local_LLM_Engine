@@ -112,6 +112,12 @@ class EngineViewModel(
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
 
+    private val _isBenchmarking = MutableStateFlow(false)
+    val isBenchmarking: StateFlow<Boolean> = _isBenchmarking.asStateFlow()
+
+    private val _benchmarkReport = MutableStateFlow<String?>(null)
+    val benchmarkReport: StateFlow<String?> = _benchmarkReport.asStateFlow()
+
     private var inferenceJob: Job? = null
     private var generationSequence: Long = 0L
 
@@ -235,6 +241,166 @@ class EngineViewModel(
                     _statusMessage.value = null
                     _errorMessage.value = "Modell konnte nicht entladen werden: ${error.message ?: error.javaClass.simpleName}"
                 }
+        }
+    }
+
+
+    /**
+     * Runs the fixed Ricardo Villalobos prompt on CPU and Vulkan using the current
+     * app configuration. Only backendPreference changes between the two measured runs.
+     * The model is reloaded for each backend and the user's original backend is restored.
+     * Prompt/response text is never written to diagnostics.
+     */
+    fun runDefaultBackendBenchmark() {
+        if (_isBenchmarking.value) return
+        if (_isGenerating.value || _isImporting.value) {
+            _errorMessage.value = "Benchmark erst starten, wenn keine Inferenz oder Modell-Operation läuft."
+            return
+        }
+
+        val model = currentModel.value
+        if (model == null) {
+            _errorMessage.value = "Bitte zuerst ein GGUF-Modell laden."
+            return
+        }
+
+        val originalConfig = _engineConfig.value
+        val systemPromptSnapshot = _systemPrompt.value
+        val source = ModelSource.FilePath(model.path)
+        val benchmarkPrompt = "Wer ist Ricardo Villalobos?"
+        val benchmarkConfig = originalConfig.copy()
+        val backends = listOf(BackendPreference.CPU, BackendPreference.VULKAN)
+
+        _isBenchmarking.value = true
+        _benchmarkReport.value = "Benchmark wird vorbereitet…"
+        _errorMessage.value = null
+
+        viewModelScope.launch {
+            val lines = mutableListOf<String>()
+            EngineDiagnostics.info(
+                "benchmark",
+                "BACKEND_BENCHMARK_STARTED",
+                "model=${model.name},modelBytes=${model.sizeBytes},prompt=ricardo_villalobos_fixed," +
+                    "context=${benchmarkConfig.contextSize},batch=${benchmarkConfig.batchSize}," +
+                    "threads=${benchmarkConfig.threads},gpuLayers=${benchmarkConfig.gpuLayers}," +
+                    "temperature=${benchmarkConfig.temperature},topP=${benchmarkConfig.topP}," +
+                    "maxPredictTokens=${benchmarkConfig.maxPredictTokens},systemPromptChars=${systemPromptSnapshot.length}"
+            )
+
+            try {
+                for (backend in backends) {
+                    _benchmarkReport.value = "Lade ${backend.name} für den identischen Test…"
+                    try {
+                        val backendConfig = benchmarkConfig.copy(backendPreference = backend)
+                        val loadStarted = System.nanoTime()
+                        val loaded = engine.loadModel(source, backendConfig).getOrElse { throw it }
+                        val modelLoadMs = (System.nanoTime() - loadStarted) / 1_000_000L
+
+                        val messages = buildList {
+                            if (systemPromptSnapshot.isNotBlank()) add(ChatMessage.system(systemPromptSnapshot))
+                            add(ChatMessage.user(benchmarkPrompt))
+                        }
+                        val request = InferenceRequest(
+                            messages = messages,
+                            maxPredictTokens = backendConfig.maxPredictTokens,
+                            temperature = backendConfig.temperature,
+                            topP = backendConfig.topP
+                        )
+
+                        var firstTokenMs: Long? = null
+                        var promptProgressElapsedMs: Long? = null
+                        var promptTokensTotal = 0
+                        var promptTokensProcessed = 0
+                        var completed: com.mydocanizer.llm.engine.InferenceResult? = null
+                        val inferenceStarted = System.nanoTime()
+
+                        engine.streamChat(request).collect { event ->
+                            when (event) {
+                                is InferenceEvent.Progress -> {
+                                    if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION) {
+                                        promptProgressElapsedMs = event.elapsedMs
+                                        promptTokensTotal = event.promptTokensTotal
+                                        promptTokensProcessed = event.promptTokensProcessed
+                                    }
+                                }
+                                is InferenceEvent.Token -> {
+                                    if (firstTokenMs == null) {
+                                        firstTokenMs = (System.nanoTime() - inferenceStarted) / 1_000_000L
+                                    }
+                                }
+                                is InferenceEvent.Completed -> completed = event.result
+                                is InferenceEvent.Error -> throw event.throwable
+                                is InferenceEvent.Cancelled -> throw IllegalStateException(
+                                    "Benchmark-Inferenz wurde unerwartet abgebrochen"
+                                )
+                                is InferenceEvent.Started -> Unit
+                            }
+                        }
+
+                        val inferenceWallMs = (System.nanoTime() - inferenceStarted) / 1_000_000L
+                        val result = completed
+                            ?: throw IllegalStateException("Keine abgeschlossene Inferenzantwort erhalten")
+                        val reportLine = String.format(
+                            java.util.Locale.US,
+                            "%s: backend=%s, modelLoadMs=%d, promptTokens=%d, prefillProgressMs=%s, " +
+                                "timeToFirstTokenMs=%s, generationMs=%d, outputTokens=%d, tokensPerSecond=%.3f, " +
+                                "streamWallMs=%d, finishReason=%s, activeBackend=%s",
+                            backend.name,
+                            backend.name,
+                            modelLoadMs,
+                            promptTokensTotal.coerceAtLeast(promptTokensProcessed),
+                            promptProgressElapsedMs?.toString() ?: "n/a",
+                            firstTokenMs?.toString() ?: "n/a",
+                            result.durationMs,
+                            result.tokensGenerated,
+                            result.tokensPerSecond,
+                            inferenceWallMs,
+                            result.finishReason.name,
+                            loaded.activeBackend
+                        )
+                        lines.add(reportLine)
+                        EngineDiagnostics.info(
+                            "benchmark",
+                            "BACKEND_BENCHMARK_RESULT",
+                            reportLine + ",context=${backendConfig.contextSize},batch=${backendConfig.batchSize}," +
+                                "threads=${backendConfig.threads},gpuLayers=${backendConfig.gpuLayers}," +
+                                "temperature=${backendConfig.temperature},topP=${backendConfig.topP}," +
+                                "maxPredictTokens=${backendConfig.maxPredictTokens}"
+                        )
+                    } catch (error: Throwable) {
+                        val failure = "${backend.name}: FEHLER - ${error.message ?: error.javaClass.simpleName}"
+                        lines.add(failure)
+                        EngineDiagnostics.error("benchmark", "BACKEND_BENCHMARK_FAILED", error)
+                    }
+                }
+            } finally {
+                _benchmarkReport.value = "Stelle ursprüngliche Backend-Einstellung wieder her…"
+                val restore = runCatching { engine.loadModel(source, originalConfig).getOrThrow() }
+                restore.onSuccess { restored ->
+                    EngineDiagnostics.info(
+                        "benchmark",
+                        "BACKEND_BENCHMARK_RESTORED",
+                        "backendPreference=${originalConfig.backendPreference},activeBackend=${restored.activeBackend}"
+                    )
+                }.onFailure { error ->
+                    lines.add("Wiederherstellung des ursprünglichen Backends fehlgeschlagen: ${error.message}")
+                    EngineDiagnostics.error("benchmark", "BACKEND_BENCHMARK_RESTORE_FAILED", error)
+                }
+
+                _benchmarkReport.value = buildString {
+                    appendLine("Frage: Wer ist Ricardo Villalobos?")
+                    appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB)")
+                    appendLine(
+                        "Fixe Parameter: Kontext ${benchmarkConfig.contextSize}, Batch ${benchmarkConfig.batchSize}, " +
+                            "${benchmarkConfig.threads} Threads, GPU-Layer ${benchmarkConfig.gpuLayers}, " +
+                            "Temp ${benchmarkConfig.temperature}, Top-P ${benchmarkConfig.topP}, " +
+                            "max. ${benchmarkConfig.maxPredictTokens} Tokens"
+                    )
+                    lines.forEach { appendLine(it) }
+                    append("RAM-Messwerte stehen im Diagnose-Export unter RESOURCE_SNAPSHOT.")
+                }
+                _isBenchmarking.value = false
+            }
         }
     }
 
