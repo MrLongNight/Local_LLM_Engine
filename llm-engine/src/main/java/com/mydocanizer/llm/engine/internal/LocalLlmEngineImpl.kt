@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
@@ -116,16 +116,18 @@ internal class LocalLlmEngineImpl(
 
             val file: File = ModelSourceResolver.resolveToFile(context, source)
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
-            _modelLoadProgress.value = 0
+            EngineDiagnostics.info(
+                "engine",
+                "MODEL_LOAD_STARTED",
+                "fileBytes=${file.length()}, backendPreference=${config.backendPreference}, " +
+                    "threads=${config.threads}, batch=${config.batchSize}, context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
+            )
+            updateModelLoadProgress(0)
+            val nativeLoadStartNano = System.nanoTime()
             val progressCallback = NativeModelLoadProgressCallback { progress ->
-                // Reserve 100% until all context, sampler, metadata and checksum work is done.
-                val percent = (progress.coerceIn(0.0f, 1.0f) * 99.0f)
-                    .roundToInt()
-                    .coerceIn(0, 99)
-                if (_modelLoadProgress.value != percent) {
-                    _modelLoadProgress.value = percent
-                    _modelLoadProgressEvents.tryEmit(percent)
-                }
+                updateModelLoadProgress(
+                    (progress.coerceIn(0.0f, 1.0f) * 100.0f).roundToInt().coerceIn(0, 99)
+                )
             }
 
             val ret = NativeEngineHandle.nativeLoadModel(
@@ -149,7 +151,15 @@ internal class LocalLlmEngineImpl(
                 else -> throw IllegalStateException("Native model load failed with error code: $ret")
             }
 
+            val nativeLoadDurationMs = (System.nanoTime() - nativeLoadStartNano) / 1_000_000L
+            EngineDiagnostics.info(
+                "engine",
+                "MODEL_NATIVE_RUNTIME_READY",
+                "durationMs=$nativeLoadDurationMs, backend=${NativeEngineHandle.nativeGetActiveBackend(handle)}, " +
+                    "threads=${config.threads}, batch=${config.batchSize}, context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
+            )
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)
+            updateModelLoadProgress(87) // native runtime ready; metadata has been read
             val parts = rawMetadata.split(";")
             val desc = parts.getOrNull(0) ?: ""
             val nParams = parts.getOrNull(1)?.toLongOrNull() ?: 0L
@@ -157,7 +167,15 @@ internal class LocalLlmEngineImpl(
             val sizeBytes = parts.getOrNull(3)?.toLongOrNull() ?: file.length()
             val activeBackend = parts.getOrNull(4) ?: NativeEngineHandle.nativeGetActiveBackend(handle)
 
-            val sha256 = calculateSha256(file)
+            val shaStartNano = System.nanoTime()
+            val sha256 = calculateSha256(file) { percent ->
+                updateModelLoadProgress(percent)
+            }
+            EngineDiagnostics.info(
+                "engine",
+                "MODEL_SHA256_COMPLETED",
+                "durationMs=${(System.nanoTime() - shaStartNano) / 1_000_000L}, fileBytes=${file.length()}"
+            )
 
             val info = ModelInfo(
                 name = file.name,
@@ -171,8 +189,7 @@ internal class LocalLlmEngineImpl(
                 sha256 = sha256
             )
 
-            _modelLoadProgress.value = 100
-            _modelLoadProgressEvents.tryEmit(100)
+            updateModelLoadProgress(100)
             _currentModel.value = info
             _state.value = EngineState.ModelLoaded(info)
             Log.i(TAG, "Model loaded successfully: $info")
@@ -200,7 +217,8 @@ internal class LocalLlmEngineImpl(
         }
     }
 
-    override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = flow {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = callbackFlow {
         val modelInfo = _currentModel.value
             ?: throw IllegalStateException("No model loaded. Call loadModel() before chat.")
 
@@ -208,14 +226,50 @@ internal class LocalLlmEngineImpl(
         _state.value = EngineState.Inferring(request)
         isCancelled.set(false)
 
+        val requestStartNano = System.nanoTime()
         val roles = request.messages.map { it.role.roleName }.toTypedArray()
         val contents = request.messages.map { it.content }.toTypedArray()
+
+        trySend(
+            InferenceEvent.Progress(
+                tokensGenerated = 0,
+                elapsedMs = 0L,
+                phase = InferenceEvent.ProgressPhase.PROMPT_PREPARATION
+            )
+        )
+        EngineDiagnostics.info(
+            "inference",
+            "PROMPT_EVALUATION_STARTED",
+            "messages=${request.messages.size}, maxPredictTokens=${request.maxPredictTokens}, backend=${modelInfo.activeBackend}"
+        )
+
+        val progressCallback = NativeInferenceProgressCallback { processed, total ->
+            val elapsedMs = (System.nanoTime() - requestStartNano) / 1_000_000L
+            val safeProcessed = processed.coerceAtLeast(0)
+            val safeTotal = total.coerceAtLeast(0)
+            val speed = if (elapsedMs > 0L) safeProcessed * 1000.0 / elapsedMs else 0.0
+            val etaMs = if (speed > 0.0 && safeTotal > safeProcessed) {
+                (((safeTotal - safeProcessed) * 1000.0) / speed).toLong()
+            } else null
+            trySend(
+                InferenceEvent.Progress(
+                    tokensGenerated = 0,
+                    elapsedMs = elapsedMs,
+                    phase = InferenceEvent.ProgressPhase.PROMPT_EVALUATION,
+                    promptTokensProcessed = safeProcessed,
+                    promptTokensTotal = safeTotal,
+                    tokensPerSecond = speed,
+                    estimatedRemainingMs = etaMs
+                )
+            )
+        }
 
         val processRes = NativeEngineHandle.nativeProcessChat(
             handle = handle,
             roles = roles,
             contents = contents,
-            maxPredict = request.maxPredictTokens
+            maxPredict = request.maxPredictTokens,
+            progressCallback = progressCallback
         )
 
         if (processRes != 0) {
@@ -229,14 +283,18 @@ internal class LocalLlmEngineImpl(
             }
             val err = IllegalStateException(message)
             EngineDiagnostics.error("native", "PROMPT_EVALUATION_FAILED", err)
-            emit(InferenceEvent.Error(err))
+            trySend(InferenceEvent.Error(err))
             _state.value = EngineState.ModelLoaded(modelInfo)
-            return@flow
+            return@callbackFlow
         }
 
-        // Only now has llama.cpp completed prompt evaluation and prefill.
-        emit(InferenceEvent.Started(request.messages.size))
-        EngineDiagnostics.info("inference", "PREFILL_COMPLETED", "messages=${request.messages.size}")
+        val prefillDurationMs = (System.nanoTime() - requestStartNano) / 1_000_000L
+        EngineDiagnostics.info(
+            "inference",
+            "PREFILL_COMPLETED",
+            "messages=${request.messages.size}, prefillMs=$prefillDurationMs, backend=${modelInfo.activeBackend}"
+        )
+        trySend(InferenceEvent.Started(request.messages.size))
 
         val outputBuilder = StringBuilder()
         var tokenCount = 0
@@ -249,7 +307,7 @@ internal class LocalLlmEngineImpl(
                 }
                 if (tokenPiece.isNotEmpty()) {
                     outputBuilder.append(tokenPiece)
-                    emit(InferenceEvent.Token(tokenPiece, tokenCount))
+                    trySend(InferenceEvent.Token(tokenPiece, tokenCount))
                     tokenCount++
                     if (tokenCount >= request.maxPredictTokens) {
                         break
@@ -271,15 +329,20 @@ internal class LocalLlmEngineImpl(
             val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
             val tokensPerSec = (actualTokens * 1000.0) / durationMs
             val fullText = outputBuilder.toString()
+            EngineDiagnostics.info(
+                "inference",
+                "GENERATION_COMPLETED",
+                "tokens=$actualTokens, generationMs=$durationMs, tokensPerSecond=$tokensPerSec, finishReason=$finishReason, backend=${modelInfo.activeBackend}"
+            )
 
             when (finishReason) {
-                FinishReason.CANCELLED -> emit(InferenceEvent.Cancelled(fullText, actualTokens))
+                FinishReason.CANCELLED -> trySend(InferenceEvent.Cancelled(fullText, actualTokens))
                 FinishReason.ERROR -> {
                     val error = IllegalStateException(
                         "Native token generation failed (llama.cpp finish reason=$rawReason)"
                     )
                     EngineDiagnostics.error("native", "TOKEN_GENERATION_FAILED", error)
-                    emit(InferenceEvent.Error(error, fullText))
+                    trySend(InferenceEvent.Error(error, fullText))
                 }
                 else -> {
                     val result = InferenceResult(
@@ -289,21 +352,23 @@ internal class LocalLlmEngineImpl(
                         tokensPerSecond = tokensPerSec,
                         finishReason = finishReason
                     )
-                    emit(InferenceEvent.Completed(result))
+                    trySend(InferenceEvent.Completed(result))
                 }
             }
         } catch (e: CancellationException) {
             Log.i(TAG, "streamChat coroutine cancelled, notifying native engine")
             NativeEngineHandle.nativeCancel(handle)
             val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
-            emit(InferenceEvent.Cancelled(outputBuilder.toString(), actualTokens))
+            trySend(InferenceEvent.Cancelled(outputBuilder.toString(), actualTokens))
             throw e
         } catch (t: Throwable) {
             Log.e(TAG, "Error during generation loop", t)
-            emit(InferenceEvent.Error(t, outputBuilder.toString()))
+            EngineDiagnostics.error("inference", "GENERATION_LOOP_FAILED", t)
+            trySend(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
             isCancelled.set(false)
             _state.value = EngineState.ModelLoaded(modelInfo)
+            close()
         }
     }.flowOn(llamaDispatcher)
 
@@ -351,15 +416,35 @@ internal class LocalLlmEngineImpl(
         Log.i(TAG, "LocalLlmEngine closed")
     }
 
-    private fun calculateSha256(file: File): String = runCatching {
+    private fun updateModelLoadProgress(percent: Int) {
+        val safePercent = percent.coerceIn(0, 100)
+        if (_modelLoadProgress.value != safePercent) {
+            _modelLoadProgress.value = safePercent
+            _modelLoadProgressEvents.tryEmit(safePercent)
+        }
+    }
+
+    private fun calculateSha256(file: File, onProgress: (Int) -> Unit): String = runCatching {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val totalBytes = file.length().coerceAtLeast(1L)
+        var processedBytes = 0L
+        var lastReportedPercent = 86
         file.inputStream().use { input ->
             val buffer = ByteArray(65536)
             var bytesRead: Int
             while (input.read(buffer).also { bytesRead = it } != -1) {
                 digest.update(buffer, 0, bytesRead)
+                processedBytes += bytesRead
+                val percent = (87.0 + (processedBytes.toDouble() / totalBytes.toDouble()) * 12.0)
+                    .roundToInt()
+                    .coerceIn(87, 99)
+                if (percent != lastReportedPercent) {
+                    lastReportedPercent = percent
+                    onProgress(percent)
+                }
             }
         }
+        onProgress(99)
         digest.digest().joinToString("") { "%02x".format(it) }
     }.getOrDefault("N/A")
 

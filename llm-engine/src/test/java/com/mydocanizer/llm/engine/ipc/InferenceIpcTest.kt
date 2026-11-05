@@ -118,6 +118,7 @@ class InferenceIpcTest {
                 return
             }
 
+            callback?.onPromptProgress(requestId, 2, 4, 5L)
             callback?.onStarted(requestId, request.messages.size)
             if (shouldHangInference.get() || hangAfterStartedBeforeToken.get()) {
                 return
@@ -281,7 +282,17 @@ class InferenceIpcTest {
         val events = client.streamChat(request).toList()
 
         assertTrue(events.any { it is InferenceEvent.Started })
-        assertTrue(events.any { it is InferenceEvent.Progress })
+        assertTrue(events.any {
+            it is InferenceEvent.Progress &&
+                it.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION &&
+                it.promptTokensProcessed == 2 &&
+                it.promptTokensTotal == 4
+        })
+        assertTrue(events.any {
+            it is InferenceEvent.Progress &&
+                it.phase == InferenceEvent.ProgressPhase.GENERATING &&
+                it.tokensGenerated > 0
+        })
         val tokens = events.filterIsInstance<InferenceEvent.Token>().map { it.token }
         assertEquals(listOf("Hallo", " Welt"), tokens)
 

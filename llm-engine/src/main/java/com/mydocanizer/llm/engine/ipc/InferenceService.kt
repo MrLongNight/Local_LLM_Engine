@@ -11,6 +11,7 @@ import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.FinishReason
 import com.mydocanizer.llm.engine.InferenceEvent
+import com.mydocanizer.llm.engine.InferenceEvent.ProgressPhase
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.LocalLlmEngine
@@ -208,7 +209,21 @@ class InferenceService : Service() {
                                 callback?.onToken(currentReqId, event.token, event.tokenIndex)
                             }
                             is InferenceEvent.Progress -> {
-                                callback?.onProgress(currentReqId, event.tokensGenerated, event.elapsedMs)
+                                when (event.phase) {
+                                    ProgressPhase.PROMPT_PREPARATION,
+                                    ProgressPhase.PROMPT_EVALUATION -> callback?.onPromptProgress(
+                                        currentReqId,
+                                        event.promptTokensProcessed,
+                                        event.promptTokensTotal,
+                                        event.elapsedMs
+                                    )
+                                    ProgressPhase.WAITING_FOR_FIRST_TOKEN -> Unit
+                                    ProgressPhase.GENERATING -> callback?.onProgress(
+                                        currentReqId,
+                                        event.tokensGenerated,
+                                        event.elapsedMs
+                                    )
+                                }
                             }
                             is InferenceEvent.Completed -> {
                                 callback?.onCompleted(currentReqId, event.result)

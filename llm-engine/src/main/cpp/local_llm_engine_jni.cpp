@@ -128,9 +128,8 @@ struct ModelLoadProgressContext {
     jmethodID on_progress;
 };
 
-static bool report_model_load_progress(float progress, void* user_data) {
-    auto* context = static_cast<ModelLoadProgressContext*>(user_data);
-    if (!context || !context->env || !context->listener || !context->on_progress) return true;
+static void invoke_model_load_progress(ModelLoadProgressContext* context, float progress) {
+    if (!context || !context->env || !context->listener || !context->on_progress) return;
     const float clamped = std::max(0.0f, std::min(1.0f, progress));
     context->env->CallVoidMethod(
         context->listener, context->on_progress, static_cast<jfloat>(clamped));
@@ -138,7 +137,37 @@ static bool report_model_load_progress(float progress, void* user_data) {
         context->env->ExceptionClear();
         LOGW("Java model-load progress listener threw; continuing model load");
     }
+}
+
+// llama.cpp's callback measures GGUF tensor/weight loading. Other phases are reported
+// explicitly below and the final SHA-256 pass reports actual bytes read from Kotlin.
+static bool report_model_load_progress(float progress, void* user_data) {
+    auto* context = static_cast<ModelLoadProgressContext*>(user_data);
+    const float clamped = std::max(0.0f, std::min(1.0f, progress));
+    invoke_model_load_progress(context, clamped * 0.70f);
     return true;
+}
+
+static void report_model_load_stage(ModelLoadProgressContext* context, float stage_progress) {
+    invoke_model_load_progress(context, stage_progress);
+}
+
+struct PromptEvalProgressContext {
+    JNIEnv* env;
+    jobject listener;
+    jmethodID on_progress;
+};
+
+static void report_prompt_eval_progress(
+        PromptEvalProgressContext* context, int processed, int total) {
+    if (!context || !context->env || !context->listener || !context->on_progress) return;
+    context->env->CallVoidMethod(
+        context->listener, context->on_progress,
+        static_cast<jint>(processed), static_cast<jint>(total));
+    if (context->env->ExceptionCheck()) {
+        context->env->ExceptionClear();
+        LOGW("Java prompt-progress listener threw; continuing inference");
+    }
 }
 
 static bool probeVulkanDevice(std::string& out_device_name) {
@@ -207,7 +236,7 @@ static bool is_valid_utf8(const char *string) {
     return true;
 }
 
-static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, llama_pos start_pos, bool want_last_logit) {
+static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, llama_pos start_pos, bool want_last_logit, PromptEvalProgressContext* progress_context) {
     if (!engine || !engine->context) return -1;
     for (int i = 0; i < (int)tokens.size(); i += engine->batch_size) {
         if (engine->cancel_requested.load()) return -2;
@@ -230,6 +259,10 @@ static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, lla
             LOGE("llama_decode failed with code %d", res);
             return res;
         }
+        report_prompt_eval_progress(
+            progress_context,
+            std::min(i + cur_batch_size, static_cast<int>(tokens.size())),
+            static_cast<int>(tokens.size()));
     }
     return 0;
 }
@@ -341,6 +374,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         return 3;
     }
     engine->model = model;
+    report_model_load_stage(&progress_context, 0.72f); // weights complete; context setup begins
 
     int n_threads = threads;
     if (n_threads <= 0) {
@@ -377,8 +411,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         return 4;
     }
     engine->context = ctx;
+    report_model_load_stage(&progress_context, 0.80f); // context created
 
     engine->batch = llama_batch_init(b_size, 0, 1);
+    report_model_load_stage(&progress_context, 0.81f); // template and sampler setup begins
     engine->is_batch_allocated = true;
 
     engine->chat_templates = common_chat_templates_init(model, "");
@@ -387,6 +423,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     sparams.temp = temperature >= 0.0f ? temperature : DEFAULT_TEMP;
     sparams.top_p = (top_p >= 0.0f && top_p <= 1.0f) ? top_p : 0.9f;
     engine->sampler = common_sampler_init(model, sparams);
+    report_model_load_stage(&progress_context, 0.86f); // native runtime ready
 
     engine->reset_short_term();
     engine->reset_long_term(true);
@@ -433,7 +470,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         jlong handle,
         jobjectArray jroles,
         jobjectArray jcontents,
-        jint max_predict) {
+        jint max_predict,
+        jobject progress_listener) {
     auto* engine = fromHandle(handle);
     if (!engine || !engine->model || !engine->context) return 1;
 
@@ -534,13 +572,32 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         prompt_size = max_allowed;
     }
 
-    int dec_res = decode_tokens(engine, tokens, engine->current_position, true);
+    PromptEvalProgressContext progress_context{env, progress_listener, nullptr};
+    if (progress_listener != nullptr) {
+        jclass listener_class = env->GetObjectClass(progress_listener);
+        if (listener_class != nullptr) {
+            progress_context.on_progress = env->GetMethodID(listener_class, "onProgress", "(II)V");
+            env->DeleteLocalRef(listener_class);
+        }
+        if (progress_context.on_progress == nullptr && env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+    report_prompt_eval_progress(&progress_context, 0, prompt_size);
+    LOGI("Prompt evaluation started: prompt_tokens=%d, batch_size=%d",
+         prompt_size, engine->batch_size);
+    const int64_t prompt_start_us = llama_time_us();
+    int dec_res = decode_tokens(
+        engine, tokens, engine->current_position, true, &progress_context);
+    const int64_t prompt_duration_ms = (llama_time_us() - prompt_start_us) / 1000;
     if (dec_res != 0) {
         LOGE("Prompt decoding failed with code %d", dec_res);
         return 4;
     }
 
     engine->current_position += prompt_size;
+    LOGI("Prompt evaluation completed: prompt_tokens=%d, duration_ms=%lld",
+         prompt_size, static_cast<long long>(prompt_duration_ms));
     int predict_len = max_predict > 0 ? max_predict : 1024;
     engine->stop_generation_position = engine->current_position + predict_len;
     engine->inference_start_us = llama_time_us();

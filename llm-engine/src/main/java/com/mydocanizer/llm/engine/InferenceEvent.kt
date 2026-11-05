@@ -19,13 +19,27 @@ sealed interface InferenceEvent {
      */
     data class Token(val token: String, val tokenIndex: Int) : InferenceEvent
 
+    enum class ProgressPhase {
+        PROMPT_PREPARATION,
+        PROMPT_EVALUATION,
+        WAITING_FOR_FIRST_TOKEN,
+        GENERATING
+    }
+
     /**
-     * Emitted periodically during generation with token metrics.
-     *
-     * @property tokensGenerated Number of tokens generated so far.
-     * @property elapsedMs Elapsed time in milliseconds since generation started.
+     * Measured progress. Prompt counts are exact llama.cpp token counts. The ETA during
+     * generation is only a projection to the configured output-token cap, not a promise
+     * that the model will use the entire cap.
      */
-    data class Progress(val tokensGenerated: Int, val elapsedMs: Long) : InferenceEvent
+    data class Progress(
+        val tokensGenerated: Int,
+        val elapsedMs: Long,
+        val phase: ProgressPhase = ProgressPhase.GENERATING,
+        val promptTokensProcessed: Int = 0,
+        val promptTokensTotal: Int = 0,
+        val tokensPerSecond: Double = 0.0,
+        val estimatedRemainingMs: Long? = null
+    ) : InferenceEvent
 
     /**
      * Emitted when generation successfully finishes.

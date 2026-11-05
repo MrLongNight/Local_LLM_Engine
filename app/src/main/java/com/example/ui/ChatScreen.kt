@@ -36,6 +36,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
@@ -104,9 +105,10 @@ fun ChatScreen(
     // The transient streaming/progress row exists only while generation is active.
     LaunchedEffect(messages.size, streamingText.length / 80, isGenerating) {
         if (messages.isNotEmpty()) {
-            val lastItemIndex = (
-                messages.size - 1 + if (isGenerating) 1 else 0
-            ).coerceAtLeast(0)
+            val transientItems = if (isGenerating) {
+                if (streamingText.isNotEmpty()) 2 else 1
+            } else 0
+            val lastItemIndex = (messages.size + transientItems - 1).coerceAtLeast(0)
             listState.animateScrollToItem(lastItemIndex)
         }
     }
@@ -443,22 +445,17 @@ fun ChatScreen(
                         isStreaming = true
                     )
                 }
-            } else if (isGenerating) {
+            }
+
+            if (isGenerating) {
                 item {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = inferenceProgress?.let { progress ->
-                                "Modell erzeugt Tokens, aber noch keine sichtbare Textausgabe: ${progress.tokensGenerated} Tokens, ${progress.elapsedMs / 1000}s"
-                            } ?: "Prompt wird verarbeitet – warte auf die erste Textausgabe…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    }
+                    InferenceProgressIndicator(
+                        progress = inferenceProgress,
+                        maxPredictTokens = engineConfig.maxPredictTokens,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 6.dp)
+                    )
                 }
             }
         }
@@ -610,4 +607,93 @@ fun ChatBubble(
             }
         }
     }
+}
+
+
+@Composable
+private fun InferenceProgressIndicator(
+    progress: InferenceEvent.Progress?,
+    maxPredictTokens: Int,
+    modifier: Modifier = Modifier
+) {
+    val maxTokens = maxPredictTokens.coerceAtLeast(1)
+    val phase = progress?.phase ?: InferenceEvent.ProgressPhase.PROMPT_PREPARATION
+    val title: String
+    val detail: String
+    val fraction: Float?
+
+    when (phase) {
+        InferenceEvent.ProgressPhase.PROMPT_PREPARATION -> {
+            val elapsed = progress?.elapsedMs ?: 0L
+            title = "Prompt wird vorbereitet und tokenisiert"
+            detail = if (elapsed > 0L) "Laufzeit: ${formatProgressDuration(elapsed)} · Tokenzahl wird ermittelt"
+                else "Warte auf die ersten Messwerte aus der Engine"
+            fraction = null
+        }
+        InferenceEvent.ProgressPhase.PROMPT_EVALUATION -> {
+            val total = progress?.promptTokensTotal ?: 0
+            val processed = progress?.promptTokensProcessed ?: 0
+            val speed = progress?.tokensPerSecond ?: 0.0
+            val eta = progress?.estimatedRemainingMs
+            val percent = if (total > 0) (processed * 100 / total).coerceIn(0, 100) else 0
+            title = if (total > 0) "Prompt-Auswertung: $processed / $total Tokens ($percent %)"
+                else "Prompt-Auswertung läuft – Tokenfortschritt wird ermittelt"
+            detail = buildString {
+                if (speed > 0.0) append("Gemessen: ${String.format("%.2f", speed)} Prompt-Tokens/s")
+                if (eta != null) {
+                    if (isNotEmpty()) append(" · ")
+                    append("Restzeit geschätzt: ${formatProgressDuration(eta)}")
+                }
+                if (isNotEmpty()) append(" · ")
+                append("Zeit: ${formatProgressDuration(progress?.elapsedMs ?: 0L)}")
+            }
+            fraction = if (total > 0) processed.toFloat() / total.toFloat() else null
+        }
+        InferenceEvent.ProgressPhase.WAITING_FOR_FIRST_TOKEN -> {
+            title = "Prompt vollständig ausgewertet – warte auf den ersten Antwort-Token"
+            detail = "Wartezeit seit Prefill: ${formatProgressDuration(progress?.elapsedMs ?: 0L)} · Bisher 0 Antwort-Tokens"
+            fraction = 1f
+        }
+        InferenceEvent.ProgressPhase.GENERATING -> {
+            val generated = progress?.tokensGenerated ?: 0
+            val speed = progress?.tokensPerSecond ?: 0.0
+            val eta = progress?.estimatedRemainingMs
+            title = "Antwort wird erzeugt: $generated Tokens · Ausgabelimit: $maxTokens"
+            detail = buildString {
+                if (speed > 0.0) append("Gemessen: ${String.format("%.2f", speed)} Tokens/s")
+                if (isNotEmpty()) append(" · ")
+                append("Laufzeit: ${formatProgressDuration(progress?.elapsedMs ?: 0L)}")
+                if (eta != null) {
+                    append(" · ca. ${formatProgressDuration(eta)} bis zum Maximal-Limit")
+                }
+            }
+            fraction = (generated.toFloat() / maxTokens.toFloat()).coerceIn(0f, 1f)
+        }
+    }
+
+    Column(
+        modifier = modifier.padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+        if (fraction != null) {
+            LinearProgressIndicator(
+                progress = fraction,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        val qualifier = if (
+            phase == InferenceEvent.ProgressPhase.GENERATING && progress?.estimatedRemainingMs != null
+        ) " (Prognose bis zur Obergrenze; die Antwort kann vorher enden.)" else ""
+        Text(
+            detail + qualifier,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun formatProgressDuration(milliseconds: Long): String {
+    val seconds = milliseconds.coerceAtLeast(0L) / 1000L
+    return if (seconds < 60L) "${seconds}s" else "${seconds / 60L}m ${seconds % 60L}s"
 }

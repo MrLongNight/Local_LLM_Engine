@@ -9,6 +9,7 @@ interface IInferenceCallback {
     void onModelLoadProgress(int progressPercent);
     void onStarted(String requestId, int promptMessageCount);
     void onToken(String requestId, String token, int tokenIndex);
+    void onPromptProgress(String requestId, int tokensProcessed, int totalPromptTokens, long elapsedMs);
     void onProgress(String requestId, int tokensGenerated, long elapsedMs);
     void onCompleted(String requestId, in InferenceResult result);
     void onCancelled(String requestId, String partialText, int tokensGenerated);

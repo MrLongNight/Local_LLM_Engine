@@ -10,6 +10,11 @@ internal fun interface NativeModelLoadProgressCallback {
     fun onProgress(progress: Float)
 }
 
+/** Receives exact prompt-token progress after each completed llama.cpp decode batch. */
+internal fun interface NativeInferenceProgressCallback {
+    fun onProgress(tokensProcessed: Int, totalPromptTokens: Int)
+}
+
 /**
  * JNI bridge interfacing with the native C++ llama.cpp wrapper `localllm_engine`.
  */
@@ -73,7 +78,8 @@ internal object NativeEngineHandle {
         handle: Long,
         roles: Array<String>,
         contents: Array<String>,
-        maxPredict: Int
+        maxPredict: Int,
+        progressCallback: NativeInferenceProgressCallback
     ): Int
 
     @JvmStatic

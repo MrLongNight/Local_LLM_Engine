@@ -14,6 +14,7 @@ import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.FinishReason
 import com.mydocanizer.llm.engine.InferenceEvent
+import com.mydocanizer.llm.engine.InferenceEvent.ProgressPhase
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.InferenceTimeoutException
@@ -337,6 +338,7 @@ class InferenceClient(
                 override fun onStarted(requestId: String?, promptMessageCount: Int) {}
                 override fun onToken(requestId: String?, token: String?, tokenIndex: Int) {}
                 override fun onProgress(requestId: String?, tokensGenerated: Int, elapsedMs: Long) {}
+                override fun onPromptProgress(requestId: String?, tokensProcessed: Int, totalPromptTokens: Int, elapsedMs: Long) {}
                 override fun onCompleted(requestId: String?, result: InferenceResult?) {}
                 override fun onCancelled(requestId: String?, partialText: String?, tokensGenerated: Int) {}
                 override fun onError(requestId: String?, errorMessage: String?, partialText: String?) {}
@@ -389,6 +391,7 @@ class InferenceClient(
                     override fun onStarted(requestId: String?, promptMessageCount: Int) {}
                     override fun onToken(requestId: String?, token: String?, tokenIndex: Int) {}
                     override fun onProgress(requestId: String?, tokensGenerated: Int, elapsedMs: Long) {}
+                override fun onPromptProgress(requestId: String?, tokensProcessed: Int, totalPromptTokens: Int, elapsedMs: Long) {}
                     override fun onCompleted(requestId: String?, result: InferenceResult?) {}
                     override fun onCancelled(requestId: String?, partialText: String?, tokensGenerated: Int) {}
                     override fun onError(requestId: String?, errorMessage: String?, partialText: String?) {}
@@ -416,6 +419,9 @@ class InferenceClient(
         val receivedFirstToken = AtomicBoolean(false)
         val receivedStarted = AtomicBoolean(false)
         val tokenCount = AtomicInteger(0)
+        val promptTokensProcessed = AtomicInteger(0)
+        val promptTokensTotal = AtomicInteger(0)
+        val lastUiProgressNano = AtomicLong(startNano)
         val streamBuilder = StringBuilder()
 
         fun triggerTimeout(reason: FinishReason, elapsedMs: Long) {
@@ -479,6 +485,54 @@ class InferenceClient(
                         break
                     }
                 }
+
+                // Keep elapsed time visible at 1 Hz. This is a status heartbeat, not
+                // fabricated progress: token counts only change on actual engine callbacks.
+                if (now - lastUiProgressNano.get() >= 1_000_000_000L) {
+                    val generated = tokenCount.get()
+                    val progress = when {
+                        !receivedStarted.get() -> {
+                            val processed = promptTokensProcessed.get()
+                            val total = promptTokensTotal.get()
+                            val speed = if (elapsedTotalMs > 0L) processed * 1000.0 / elapsedTotalMs else 0.0
+                            val eta = if (speed > 0.0 && total > processed) {
+                                (((total - processed) * 1000.0) / speed).toLong()
+                            } else null
+                            InferenceEvent.Progress(
+                                tokensGenerated = 0,
+                                elapsedMs = elapsedTotalMs,
+                                phase = if (total > 0) ProgressPhase.PROMPT_EVALUATION else ProgressPhase.PROMPT_PREPARATION,
+                                promptTokensProcessed = processed,
+                                promptTokensTotal = total,
+                                tokensPerSecond = speed,
+                                estimatedRemainingMs = eta
+                            )
+                        }
+                        !receivedFirstToken.get() -> InferenceEvent.Progress(
+                            tokensGenerated = 0,
+                            elapsedMs = ((now - prefillCompletedNano.get()) / 1_000_000L).coerceAtLeast(0L),
+                            phase = ProgressPhase.WAITING_FOR_FIRST_TOKEN,
+                            promptTokensProcessed = promptTokensProcessed.get(),
+                            promptTokensTotal = promptTokensTotal.get()
+                        )
+                        else -> {
+                            val elapsed = ((now - prefillCompletedNano.get()) / 1_000_000L).coerceAtLeast(0L)
+                            val speed = if (elapsed > 0L) generated * 1000.0 / elapsed else 0.0
+                            val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
+                                (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
+                            } else null
+                            InferenceEvent.Progress(
+                                tokensGenerated = generated,
+                                elapsedMs = elapsed,
+                                phase = ProgressPhase.GENERATING,
+                                tokensPerSecond = speed,
+                                estimatedRemainingMs = eta
+                            )
+                        }
+                    }
+                    trySend(progress)
+                    lastUiProgressNano.set(now)
+                }
             }
         }
 
@@ -494,6 +548,16 @@ class InferenceClient(
                         "request=$reqId, messages=$promptMessageCount, elapsedMs=$elapsedMs"
                     )
                     trySend(InferenceEvent.Started(promptMessageCount))
+                    trySend(
+                        InferenceEvent.Progress(
+                            tokensGenerated = 0,
+                            elapsedMs = 0L,
+                            phase = ProgressPhase.WAITING_FOR_FIRST_TOKEN,
+                            promptTokensProcessed = promptTokensProcessed.get(),
+                            promptTokensTotal = promptTokensTotal.get()
+                        )
+                    )
+                    lastUiProgressNano.set(completedAt)
                 }
             }
 
@@ -502,7 +566,7 @@ class InferenceClient(
                     val receivedAt = System.nanoTime()
                     lastTokenNano.set(receivedAt)
                     val isFirstToken = receivedFirstToken.compareAndSet(false, true)
-                    tokenCount.incrementAndGet()
+                    val generated = tokenCount.incrementAndGet()
                     synchronized(streamBuilder) { streamBuilder.append(token) }
                     if (isFirstToken) {
                         val elapsedMs = (receivedAt - prefillCompletedNano.get()) / 1_000_000L
@@ -513,12 +577,72 @@ class InferenceClient(
                         )
                     }
                     trySend(InferenceEvent.Token(token, tokenIndex))
+                    val elapsedMs = ((receivedAt - prefillCompletedNano.get()) / 1_000_000L).coerceAtLeast(0L)
+                    val speed = if (elapsedMs > 0L) generated * 1000.0 / elapsedMs else 0.0
+                    val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
+                        (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
+                    } else null
+                    trySend(
+                        InferenceEvent.Progress(
+                            tokensGenerated = generated,
+                            elapsedMs = elapsedMs,
+                            phase = ProgressPhase.GENERATING,
+                            tokensPerSecond = speed,
+                            estimatedRemainingMs = eta
+                        )
+                    )
+                    lastUiProgressNano.set(receivedAt)
+                }
+            }
+
+            override fun onPromptProgress(
+                reqId: String?,
+                tokensProcessed: Int,
+                totalPromptTokens: Int,
+                elapsedMs: Long
+            ) {
+                if (reqId == activeRequestId.get()) {
+                    val processed = tokensProcessed.coerceAtLeast(0)
+                    val total = totalPromptTokens.coerceAtLeast(0)
+                    promptTokensProcessed.set(processed)
+                    promptTokensTotal.set(total)
+                    val speed = if (elapsedMs > 0L) processed * 1000.0 / elapsedMs else 0.0
+                    val eta = if (speed > 0.0 && total > processed) {
+                        (((total - processed) * 1000.0) / speed).toLong()
+                    } else null
+                    trySend(
+                        InferenceEvent.Progress(
+                            tokensGenerated = 0,
+                            elapsedMs = elapsedMs.coerceAtLeast(0L),
+                            phase = ProgressPhase.PROMPT_EVALUATION,
+                            promptTokensProcessed = processed,
+                            promptTokensTotal = total,
+                            tokensPerSecond = speed,
+                            estimatedRemainingMs = eta
+                        )
+                    )
+                    lastUiProgressNano.set(System.nanoTime())
                 }
             }
 
             override fun onProgress(reqId: String?, tokensGenerated: Int, elapsedMs: Long) {
                 if (reqId == activeRequestId.get()) {
-                    trySend(InferenceEvent.Progress(tokensGenerated, elapsedMs))
+                    val generated = tokensGenerated.coerceAtLeast(0)
+                    val elapsed = elapsedMs.coerceAtLeast(0L)
+                    val speed = if (elapsed > 0L) generated * 1000.0 / elapsed else 0.0
+                    val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
+                        (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
+                    } else null
+                    trySend(
+                        InferenceEvent.Progress(
+                            tokensGenerated = generated,
+                            elapsedMs = elapsed,
+                            phase = ProgressPhase.GENERATING,
+                            tokensPerSecond = speed,
+                            estimatedRemainingMs = eta
+                        )
+                    )
+                    lastUiProgressNano.set(System.nanoTime())
                 }
             }
 
@@ -554,6 +678,7 @@ class InferenceClient(
             override fun onModelLoaded(modelInfo: ModelInfo?) {}
             override fun onModelLoadFailed(errorMessage: String?) {}
             override fun onModelLoadProgress(progressPercent: Int) {}
+            override fun onPromptProgress(requestId: String?, tokensProcessed: Int, totalPromptTokens: Int, elapsedMs: Long) {}
         }
 
         try {
