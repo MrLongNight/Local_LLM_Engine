@@ -295,14 +295,14 @@ internal class InferenceClient(
 
     fun isProcessAlive(pid: Int): Boolean {
         processLivenessCheck?.let { return it(pid) }
+        // /proc is the primary same-device liveness signal. ActivityManager's
+        // runningAppProcesses list is throttled/filtered on modern Android releases.
         try {
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            val isListed = am?.runningAppProcesses?.any { it.pid == pid } == true
-            if (isListed) return true
+            if (File("/proc/$pid").exists()) return true
         } catch (ignored: Exception) {}
-        // runningAppProcesses may omit a process; check the kernel process entry too.
         return try {
-            File("/proc/$pid").exists()
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            am?.runningAppProcesses?.any { it.pid == pid } == true
         } catch (ignored: Exception) {
             false
         }
@@ -466,8 +466,17 @@ internal class InferenceClient(
 
     override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = callbackFlow {
         val currentModelInfo = _currentModel.value
+        if (currentModelInfo == null) {
+            trySend(InferenceEvent.Error(IllegalStateException("No model is loaded")))
+            channel.close()
+            return@callbackFlow
+        }
         val requestId = UUID.randomUUID().toString()
-        activeRequestId.set(requestId)
+        if (!activeRequestId.compareAndSet(null, requestId)) {
+            trySend(InferenceEvent.Error(IllegalStateException("Another inference request is already active")))
+            channel.close()
+            return@callbackFlow
+        }
         _state.value = EngineState.Inferring(request)
 
         val effectiveTimeout = request.timeoutConfig
@@ -504,7 +513,8 @@ internal class InferenceClient(
                     tokensPerSecond = if (elapsedMs > 0) (generatedTokens.toDouble() * 1000.0) / elapsedMs else 0.0,
                     finishReason = reason
                 )
-                trySend(InferenceEvent.Completed(result))
+                // A timeout is a failure, not a successful completion carrying
+                // a TIMEOUT finish reason. Keep partial output on the error event.
                 trySend(InferenceEvent.Error(InferenceTimeoutException(reason, elapsedMs), partial))
                 channel.close()
             }
