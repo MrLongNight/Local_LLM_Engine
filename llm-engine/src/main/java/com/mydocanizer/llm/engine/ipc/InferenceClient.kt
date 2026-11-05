@@ -466,11 +466,6 @@ internal class InferenceClient(
 
     override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = callbackFlow {
         val currentModelInfo = _currentModel.value
-        if (currentModelInfo == null) {
-            trySend(InferenceEvent.Error(IllegalStateException("No model is loaded")))
-            channel.close()
-            return@callbackFlow
-        }
         val requestId = UUID.randomUUID().toString()
         if (!activeRequestId.compareAndSet(null, requestId)) {
             trySend(InferenceEvent.Error(IllegalStateException("Another inference request is already active")))
