@@ -186,7 +186,7 @@ object EngineDiagnostics {
         ).distinct().map { compactLine(it, 520) }
 
         val memorySummaries = samples
-            .groupBy { "\${it.pid}/\${it.phase}" }
+            .groupBy { "${it.pid}/${it.phase}" }
             .toSortedMap()
             .map { (group, entries) ->
                 fun peak(selector: (ResourceSample) -> Double?): String =
@@ -198,15 +198,15 @@ object EngineDiagnostics {
                 val context = last?.let { field(it.line, "contextTokens") }
                 val batch = last?.let { field(it.line, "batchSize") }
                 val layers = last?.let { field(it.line, "gpuLayersRequested") }
-                "\$group n=\${entries.size} PSS_peak=\${peak { it.pssMb }}MB " +
-                    "nativePSS_peak=\${peak { it.nativePssMb }}MB nativeHeap_peak=\${peak { it.nativeHeapMb }}MB " +
-                    "javaHeap_peak=\${peak { it.javaHeapMb }}MB availableRAM_min=\${minimumAvailable}MB " +
+                "\$group n=${entries.size} PSS_peak=${peak { it.pssMb }}MB " +
+                    "nativePSS_peak=${peak { it.nativePssMb }}MB nativeHeap_peak=${peak { it.nativeHeapMb }}MB " +
+                    "javaHeap_peak=${peak { it.javaHeapMb }}MB availableRAM_min=${minimumAvailable}MB " +
                     listOfNotNull(model?.let { "model=\$it" }, context?.let { "ctx=\$it" },
                         batch?.let { "batch=\$it" }, layers?.let { "gpuLayers=\$it" }).joinToString(" ")
             }
 
         val memoryTimeline = samples
-            .groupBy { "\${it.pid}/\${it.phase}" }
+            .groupBy { "${it.pid}/${it.phase}" }
             .values
             .flatMap { group ->
                 val indices = buildSet {
@@ -226,9 +226,9 @@ object EngineDiagnostics {
             .takeLast(MAX_MEMORY_TIMELINE_LINES)
             .map { sample ->
                 val values = listOf(
-                    "pss=\${sample.pssMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
-                    "nativeHeap=\${sample.nativeHeapMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
-                    "availRAM=\${sample.availableRamMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
+                    "pss=${sample.pssMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
+                    "nativeHeap=${sample.nativeHeapMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
+                    "availRAM=${sample.availableRamMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     field(sample.line, "contextTokens")?.let { "ctx=\$it" },
                     field(sample.line, "gpuLayersRequested")?.let { "gpuLayers=\$it" },
                     field(sample.line, "backendActive")?.let { "backend=\$it" }
@@ -236,14 +236,14 @@ object EngineDiagnostics {
                 val backend = if (sample.line.contains("backendMemory=")) {
                     " " + sample.line.substringAfter("backendMemory=").take(360)
                 } else ""
-                "\${sample.timestamp} pid=\${sample.pid} \${sample.phase} \$values\$backend"
+                "${sample.timestamp} pid=${sample.pid} ${sample.phase} \$values\$backend"
             }
 
         return buildString {
             appendLine("LOCAL LLM ENGINE – KOMPAKTER DIAGNOSEBERICHT")
-            appendLine("Erstellt: \${Date()}")
-            appendLine("Erfasste Logzeilen: \${ordered.size}; RAM-Samples: \${samples.size}")
-            appendLine("Zeitraum: \${ordered.firstOrNull()?.substringBefore(" [") ?: "n/a"} bis \${ordered.lastOrNull()?.substringBefore(" [") ?: "n/a"}")
+            appendLine("Erstellt: ${Date()}")
+            appendLine("Erfasste Logzeilen: ${ordered.size}; RAM-Samples: ${samples.size}")
+            appendLine("Zeitraum: ${ordered.firstOrNull()?.substringBefore(" [") ?: "n/a"} bis ${ordered.lastOrNull()?.substringBefore(" [") ?: "n/a"}")
             appendLine()
             appendLine("[WICHTIGE EREIGNISSE]")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
