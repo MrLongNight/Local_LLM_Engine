@@ -421,6 +421,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         const int requested_offloadable_layers =
             std::min(model_params.n_gpu_layers, total_offloadable_layers);
         engine->active_backend = "Vulkan selected (" + vulkan_device.device_name +
+            " / " + vulkan_device.description +
             "; requested layers " + std::to_string(requested_offloadable_layers) +
             "/" + std::to_string(total_offloadable_layers) + ")";
         LOGI("Vulkan backend registered and selected for model load: device=%s, requested_layers=%d/%d. " 

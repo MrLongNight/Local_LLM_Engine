@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.AppTab
 import com.example.ui.EngineViewModel
-import com.mydocanizer.llm.engine.ChatRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -49,8 +48,7 @@ class LocalLlmEngineAppTest {
         assertEquals(AppTab.CHAT, viewModel.currentTab.value)
         assertEquals(false, viewModel.isGenerating.value)
         assertEquals("", viewModel.inputText.value)
-        assertTrue(viewModel.chatMessages.value.isNotEmpty())
-        assertEquals(ChatRole.ASSISTANT, viewModel.chatMessages.value[0].role)
+        assertTrue(viewModel.chatMessages.value.isEmpty())
         assertTrue(viewModel.systemPrompt.value.isNotBlank())
 
         viewModel.selectTab(AppTab.IMPORT)

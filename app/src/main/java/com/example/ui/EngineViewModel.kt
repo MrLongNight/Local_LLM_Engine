@@ -66,13 +66,9 @@ class EngineViewModel(
     val backendInfo: StateFlow<BackendInfo> = engine.backendInfo
     val modelLoadProgress: StateFlow<Int?> = engine.modelLoadProgress
 
-    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
-        listOf(
-            ChatMessage.assistant(
-                "Willkommen bei Local LLM Engine! Wähle oder importiere ein GGUF-Modell, um lokal und datenschutzkonform zu chatten."
-            )
-        )
-    )
+    // UI welcome copy is rendered by ChatScreen while this list is empty.
+    // It must never be sent to the model as a synthetic assistant turn.
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
 
     private val _inputText = MutableStateFlow("")
@@ -250,9 +246,7 @@ class EngineViewModel(
         inferenceJob?.cancel()
         inferenceJob = null
 
-        _chatMessages.value = listOf(
-            ChatMessage.assistant("Gespräch neu gestartet. Wie kann ich dir behilflich sein?")
-        )
+        _chatMessages.value = emptyList()
         _currentStreamingText.value = ""
         _inferenceProgress.value = null
         _inputText.value = ""

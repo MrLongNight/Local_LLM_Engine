@@ -211,6 +211,19 @@ fun ChatScreen(
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (messages.isEmpty()) {
+                item(key = "empty_chat_welcome") {
+                    Text(
+                        text = "Willkommen bei Local LLM Engine! Wähle oder importiere ein GGUF-Modell, um lokal und datenschutzkonform zu chatten.",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             items(messages) { msg ->
                 ChatBubble(message = msg)
             }
