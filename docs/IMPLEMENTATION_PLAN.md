@@ -64,12 +64,18 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 
 ## Phase 3 – Prozessisolation und zuverlässiger Abbruch
 
-**Änderungen:**
-- Die bestehende `:inference`-Service-Integration auf echte Android-Bindung, getrennte PID, Fehlerpfade und Lifecycle prüfen.
-- CPU-Inferenzabbruch über den offiziellen llama.cpp-Context-Abort-Callback absichern. Die öffentliche llama.cpp-Header-Dokumentation weist darauf hin, dass dieser Callback derzeit nur für CPU-Ausführung wirkt.
-- Für Vulkan und blockierte native Operationen Prozessabbruch über den separaten Android-Prozess verwenden.
-- Alte PID nach Abbruch überprüfen, Binder-Death/Reconnect und Modellwiederherstellung testen.
+**Bereits umgesetzt:**
+- AIDL `killProcess()` ist eine `oneway`-Transaktion. Der Client wartet nicht auf eine synchrone Antwort aus dem möglicherweise blockierten Inferenzprozess.
+- Der Service ruft vor dem Prozessende weder `engine.close()` noch JNI-Cleanup, Dateilogging oder Job-`join()` auf. Das OS gibt native Ressourcen beim Prozessende frei.
+- Der Client wartet auf das Ende der alten PID, eskaliert bei Bedarf mit eigenem Kill und protokolliert `PROCESS_ABORT_CONFIRMED` oder `PROCESS_ABORT_UNCONFIRMED`.
+- Der Reconnect verwirft den alten Binder, PID-, Modell- und Fortschrittsstatus sowie das alte `CompletableDeferred`, bevor er neu bindet. Parallele Reconnect-Callbacks werden über einen Guard zusammengeführt.
+- Der Test-Fake leitet Prozesslebendigkeit nun aus dem tatsächlichen Kill-Zustand ab, nicht aus einer manuell nachträglich umgeschalteten PID-Variable.
+
+**Noch ausstehend:**
+- Echter Android-Instrumentationstest mit zwei unterschiedlichen PIDs und realem Service-Kill/Rebind.
+- CPU-Inferenzabbruch über den offiziellen llama.cpp-Context-Abort-Callback. Die öffentliche Header-Dokumentation weist darauf hin, dass dieser Callback derzeit nur für CPU-Ausführung wirkt.
 - JNI-Aufrufe gegen C++-Ausnahmen absichern; keine C++-Ausnahme darf die JNI-Grenze überschreiten.
+- Nachgewiesene Wiederherstellung eines zuvor geladenen Modells und erfolgreiche Folgeinferenz nach echtem Prozessabbruch.
 
 **Abnahme:** Android-Instrumentationstest mit echtem Service: App-PID bleibt bestehen, Service-PID endet nach Abbruch nachweislich, Reconnect gelingt und eine neue Inferenz ist möglich.
 

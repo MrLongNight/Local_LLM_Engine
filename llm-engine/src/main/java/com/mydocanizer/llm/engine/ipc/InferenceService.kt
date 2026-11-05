@@ -274,13 +274,11 @@ class InferenceService : Service() {
         }
 
         override fun killProcess() {
-            EngineDiagnostics.info("ipc", "SELF_KILL_REQUESTED", "InferenceService self-kill initiated (PID=${Process.myPid()})")
-            Log.w(TAG, "Self-kill initiated for process PID=${Process.myPid()}")
-            try {
-                activeInferenceJob?.cancel()
-                engine?.close()
-            } catch (ignored: Exception) {}
-            Process.killProcess(Process.myPid())
+            val pid = Process.myPid()
+            // Do not perform file logging, coroutine cancellation, joins, or engine.close()
+            // before termination. Any of these can block behind a stalled native/JNI call.
+            Log.w(TAG, "Immediately terminating inference process PID=$pid without native cleanup")
+            Process.killProcess(pid)
             System.exit(0)
         }
 

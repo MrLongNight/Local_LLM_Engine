@@ -104,6 +104,7 @@ internal class InferenceClient(
     private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
 
     private val activeRequestId = AtomicReference<String?>(null)
+    private val reconnectInProgress = AtomicBoolean(false)
     private var lastLoadedSource: ModelSource? = null
     private var lastLoadedConfig: EngineConfig? = null
     private val isClosed = AtomicBoolean(false)
@@ -185,21 +186,30 @@ internal class InferenceClient(
     }
 
     private fun triggerReconnect() {
+        if (isClosed.get() || !reconnectInProgress.compareAndSet(false, true)) return
+
         clientScope.launch {
             val startNano = System.nanoTime()
             val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
             try {
                 _state.value = EngineState.Reconnecting
+
                 if (isBound) {
                     try {
                         context.unbindService(serviceConnection)
                     } catch (ignored: Exception) {}
                     isBound = false
                 }
+
+                // Invalidate old Binder-derived state before binding the replacement service.
+                // This prevents getService() from returning a stale proxy during reconnect.
+                remoteService = null
+                _remotePid.value = null
+                _currentModel.value = null
+                _modelLoadProgress.value = null
+                serviceConnectionDeferred = CompletableDeferred()
                 bindToService()
 
-                // reconnectMs bounds only service reconnection. A model reload is a separate
-                // operation and must use modelLoadMs, not the much shorter reconnect deadline.
                 val service = withTimeout(effective.reconnectMs) {
                     getService()
                 }
@@ -225,10 +235,11 @@ internal class InferenceClient(
                 val elapsedMs = (System.nanoTime() - startNano) / 1_000_000L
                 Log.e(TAG, "Service reconnection timed out after ${elapsedMs}ms", tce)
                 _state.value = EngineState.Error("Service reconnection timed out ($elapsedMs ms)")
-                // Do not kill an idle service via cancelInference(); no inference request is active.
             } catch (e: Exception) {
                 Log.e(TAG, "Reconnection failed", e)
                 _state.value = EngineState.Error("Failed to reconnect: ${e.message}")
+            } finally {
+                reconnectInProgress.set(false)
             }
         }
     }
@@ -252,11 +263,10 @@ internal class InferenceClient(
         processLivenessCheck?.let { return it(pid) }
         try {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            val procs = am?.runningAppProcesses
-            if (procs != null) {
-                return procs.any { it.pid == pid }
-            }
+            val isListed = am?.runningAppProcesses?.any { it.pid == pid } == true
+            if (isListed) return true
         } catch (ignored: Exception) {}
+        // runningAppProcesses may omit a process; check the kernel process entry too.
         return try {
             File("/proc/$pid").exists()
         } catch (ignored: Exception) {
@@ -767,17 +777,12 @@ internal class InferenceClient(
         val service = remoteService
         val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
 
-        EngineDiagnostics.info(
-            "ipc_client",
-            "PROCESS_ABORT_REQUESTED",
-            "reason=$reason, request=$requestId, remotePid=$targetPid"
-        )
-
         if (service != null && targetPid != null) {
+            // One-way Binder call: it must not wait for native cleanup in the service process.
             try {
                 service.killProcess()
             } catch (e: Exception) {
-                Log.w(TAG, "Remote process termination request completed or process exited", e)
+                Log.w(TAG, "Remote inference process may already have exited", e)
             }
         } else if (service != null && requestId != null) {
             try {
@@ -785,29 +790,50 @@ internal class InferenceClient(
             } catch (ignored: Exception) {}
         }
 
+        EngineDiagnostics.info(
+            "ipc_client",
+            "PROCESS_ABORT_REQUESTED",
+            "reason=$reason, request=$requestId, remotePid=$targetPid"
+        )
+
         if (targetPid != null && targetPid != Process.myPid()) {
             clientScope.launch {
                 var isAlive = isProcessAlive(targetPid)
-                val deadline = System.currentTimeMillis() + effective.abortGracePeriodMs
+                val gracefulDeadline = System.currentTimeMillis() + effective.abortGracePeriodMs
 
-                while (isAlive && System.currentTimeMillis() < deadline) {
+                while (isAlive && System.currentTimeMillis() < gracefulDeadline) {
                     delay(KILL_CHECK_INTERVAL_MS)
                     isAlive = isProcessAlive(targetPid)
                 }
 
                 if (isAlive) {
-                    Log.w(TAG, "Service process PID=$targetPid still alive after abort grace period. Hard killing process.")
-                    EngineDiagnostics.info("ipc_client", "HARD_KILL", "Hard killing service process PID=$targetPid")
+                    Log.w(TAG, "Inference PID=$targetPid survived self-termination grace period; issuing client-side kill")
+                    EngineDiagnostics.info("ipc_client", "HARD_KILL", "Client-side kill for inference PID=$targetPid")
                     try {
                         Process.killProcess(targetPid)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed hard kill of PID=$targetPid", e)
+                        Log.e(TAG, "Failed client-side kill of inference PID=$targetPid", e)
+                    }
+
+                    val hardKillDeadline = System.currentTimeMillis() + effective.abortGracePeriodMs
+                    while (isAlive && System.currentTimeMillis() < hardKillDeadline) {
+                        delay(KILL_CHECK_INTERVAL_MS)
+                        isAlive = isProcessAlive(targetPid)
                     }
                 }
 
-                if (mockService == null && !isClosed.get()) {
-                    _state.value = EngineState.Reconnecting
-                    triggerReconnect()
+                if (!isAlive) {
+                    EngineDiagnostics.info("ipc_client", "PROCESS_ABORT_CONFIRMED", "Inference PID=$targetPid is no longer alive")
+                    if (mockService == null && !isClosed.get()) {
+                        _state.value = EngineState.Reconnecting
+                        triggerReconnect()
+                    }
+                } else {
+                    val error = IllegalStateException(
+                        "Could not confirm termination of inference process PID=$targetPid after self-kill and client-side kill"
+                    )
+                    EngineDiagnostics.error("ipc_client", "PROCESS_ABORT_UNCONFIRMED", error)
+                    _state.value = EngineState.Error(error.message ?: "Inference process termination could not be confirmed", error)
                 }
             }
         }

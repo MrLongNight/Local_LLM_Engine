@@ -313,13 +313,12 @@ class InferenceIpcTest {
         fakeService.shouldHangInference.set(true)
 
         val initialServicePid = 99999
-        val fakePidState = AtomicBoolean(true) // true = alive, false = dead
 
         val client = InferenceClient(
             context = object : android.content.ContextWrapper(null) {},
             mockService = fakeService,
             processLivenessCheck = { pid ->
-                if (pid == initialServicePid) fakePidState.get() else false
+                pid == initialServicePid && !fakeService.isKilled.get()
             }
         )
 
@@ -348,7 +347,11 @@ class InferenceIpcTest {
         assertTrue(fakeService.isKilled.get())
 
         // 4. Verify PID of service process is no longer alive
-        fakePidState.set(false)
+        withTimeout(1_000L) {
+            while (client.isProcessAlive(initialServicePid)) {
+                delay(5L)
+            }
+        }
         org.junit.Assert.assertFalse(client.isProcessAlive(initialServicePid))
 
         // 5. Verify App Process PID is intact and unaffected
