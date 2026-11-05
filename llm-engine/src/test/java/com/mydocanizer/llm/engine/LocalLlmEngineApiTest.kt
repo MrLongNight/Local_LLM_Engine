@@ -40,6 +40,13 @@ class LocalLlmEngineApiTest {
         assertEquals(ChatRole.SYSTEM, request.messages[0].role)
         assertEquals(ChatRole.USER, request.messages[1].role)
         assertEquals(1024, request.maxPredictTokens)
+        assertEquals(false, request.enableThinking)
+
+        val thinkingRequest = InferenceRequest.single(
+            userPrompt = "Reason about this carefully",
+            enableThinking = true
+        )
+        assertEquals(true, thinkingRequest.enableThinking)
     }
 
     @Test

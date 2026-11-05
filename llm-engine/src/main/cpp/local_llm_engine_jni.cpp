@@ -549,6 +549,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         jobjectArray jroles,
         jobjectArray jcontents,
         jint max_predict,
+        jboolean enable_thinking,
         jobject progress_listener) {
     auto* engine = fromHandle(handle);
     if (!engine || !engine->model || !engine->context) return 1;
@@ -613,9 +614,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         inputs.messages = messages;
         inputs.add_generation_prompt = true;
         inputs.use_jinja = true;
+        inputs.enable_thinking = (enable_thinking == JNI_TRUE);
         full_prompt = common_chat_templates_apply(engine->chat_templates.get(), inputs).prompt;
         used_chat_template = true;
-        LOGI("Formatted prompt with llama.cpp Jinja template (%zu messages)", messages.size());
+        LOGI("Formatted prompt with llama.cpp Jinja template (%zu messages, enable_thinking=%s)",
+             messages.size(), enable_thinking == JNI_TRUE ? "true" : "false");
     } catch (const std::exception& jinja_error) {
         LOGW("Jinja chat-template rendering failed: %s", jinja_error.what());
         try {
@@ -623,6 +626,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             inputs.messages = messages;
             inputs.add_generation_prompt = true;
             inputs.use_jinja = false;
+            inputs.enable_thinking = (enable_thinking == JNI_TRUE);
             full_prompt = common_chat_templates_apply(engine->chat_templates.get(), inputs).prompt;
             used_chat_template = true;
             LOGI("Formatted prompt with llama.cpp legacy renderer");

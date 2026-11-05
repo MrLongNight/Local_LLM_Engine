@@ -82,6 +82,7 @@ internal object NativeEngineHandle {
         roles: Array<String>,
         contents: Array<String>,
         maxPredict: Int,
+        enableThinking: Boolean,
         progressCallback: NativeInferenceProgressCallback
     ): Int
 

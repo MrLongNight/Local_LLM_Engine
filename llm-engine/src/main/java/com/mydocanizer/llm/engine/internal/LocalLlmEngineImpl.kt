@@ -274,6 +274,7 @@ internal class LocalLlmEngineImpl(
             roles = roles,
             contents = contents,
             maxPredict = request.maxPredictTokens,
+            enableThinking = request.enableThinking,
             progressCallback = progressCallback
         )
 

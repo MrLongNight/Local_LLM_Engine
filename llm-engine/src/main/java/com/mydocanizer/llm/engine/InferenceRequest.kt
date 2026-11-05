@@ -16,7 +16,8 @@ data class InferenceRequest(
     val maxPredictTokens: Int = 1024,
     val temperature: Float? = null,
     val topP: Float? = null,
-    val timeoutConfig: TimeoutConfig? = null
+    val timeoutConfig: TimeoutConfig? = null,
+    val enableThinking: Boolean = false
 ) : Parcelable {
     init {
         require(messages.isNotEmpty()) { "InferenceRequest messages must not be empty" }
@@ -28,7 +29,8 @@ data class InferenceRequest(
         maxPredictTokens = parcel.readInt(),
         temperature = if (parcel.readByte() != 0.toByte()) parcel.readFloat() else null,
         topP = if (parcel.readByte() != 0.toByte()) parcel.readFloat() else null,
-        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader)
+        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader),
+        enableThinking = parcel.readInt() != 0
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -47,6 +49,7 @@ data class InferenceRequest(
             parcel.writeByte(0)
         }
         parcel.writeParcelable(timeoutConfig, flags)
+        parcel.writeInt(if (enableThinking) 1 else 0)
     }
 
     override fun describeContents(): Int = 0
@@ -58,13 +61,18 @@ data class InferenceRequest(
             override fun newArray(size: Int): Array<InferenceRequest?> = arrayOfNulls(size)
         }
 
-        fun single(userPrompt: String, systemPrompt: String? = null, maxPredictTokens: Int = 1024): InferenceRequest {
+        fun single(
+            userPrompt: String,
+            systemPrompt: String? = null,
+            maxPredictTokens: Int = 1024,
+            enableThinking: Boolean = false
+        ): InferenceRequest {
             val list = mutableListOf<ChatMessage>()
             if (!systemPrompt.isNullOrBlank()) {
                 list.add(ChatMessage.system(systemPrompt))
             }
             list.add(ChatMessage.user(userPrompt))
-            return InferenceRequest(list, maxPredictTokens)
+            return InferenceRequest(list, maxPredictTokens, enableThinking = enableThinking)
         }
     }
 }
