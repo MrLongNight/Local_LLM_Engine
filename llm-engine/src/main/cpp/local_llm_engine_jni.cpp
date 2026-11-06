@@ -369,8 +369,9 @@ static bool append_token_to_batch(
         llama_token token,
         llama_pos position,
         llama_seq_id sequence_id,
-        bool output_logits) {
-    if (batch.n_tokens < 0 || batch.n_tokens >= 0x7fffffff ||
+        bool output_logits,
+        int32_t capacity) {
+    if (capacity <= 0 || batch.n_tokens < 0 || batch.n_tokens >= capacity ||
         batch.token == nullptr || batch.pos == nullptr ||
         batch.n_seq_id == nullptr || batch.seq_id == nullptr ||
         batch.logits == nullptr || batch.seq_id[batch.n_tokens] == nullptr) {
@@ -402,7 +403,7 @@ static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, lla
             const llama_token token_id = tokens[i + j];
             const llama_pos position = start_pos + i + j;
             const bool compute_logit = want_last_logit && (i + j == (int)tokens.size() - 1);
-            if (!append_token_to_batch(engine->batch, token_id, position, 0, compute_logit)) {
+            if (!append_token_to_batch(engine->batch, token_id, position, 0, compute_logit, engine->batch_size)) {
                 return -3;
             }
         }
@@ -995,7 +996,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     common_sampler_accept(engine->sampler, new_token_id, true);
 
     engine->batch.n_tokens = 0;
-    if (!append_token_to_batch(engine->batch, new_token_id, engine->current_position, 0, true)) {
+    if (!append_token_to_batch(engine->batch, new_token_id, engine->current_position, 0, true, engine->batch_size)) {
         engine->last_finish_reason = 3; // ERROR
         return nullptr;
     }
