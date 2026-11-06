@@ -126,6 +126,7 @@ struct EngineInstance {
     std::string cached_token_chars;
     std::ostringstream assistant_ss;
     bool is_batch_allocated = false;
+    bool generation_finished = false;
 
     // Inference tracking
     int32_t last_finish_reason = 0; // 0=STOP, 1=MAX_TOKENS, 2=CANCELLED, 3=ERROR
@@ -144,6 +145,7 @@ struct EngineInstance {
     void reset_short_term() {
         stop_generation_position = 0;
         cached_token_chars.clear();
+        generation_finished = false;
         assistant_ss.str("");
         last_finish_reason = 0;
         tokens_generated = 0;
@@ -347,31 +349,130 @@ static std::string collectBackendDiagnostics() {
     return ss.str();
 }
 
-static bool is_valid_utf8(const char *string) {
-    if (!string) return true;
-    const auto *bytes = reinterpret_cast<const unsigned char*>(string);
-    int num;
-    while (*bytes != 0x00) {
-        if ((*bytes & 0x80) == 0x00) {
-            num = 1;
-        } else if ((*bytes & 0xE0) == 0xC0) {
-            num = 2;
-        } else if ((*bytes & 0xF0) == 0xE0) {
-            num = 3;
-        } else if ((*bytes & 0xF8) == 0xF0) {
-            num = 4;
-        } else {
-            return false;
+static constexpr const char* UTF8_REPLACEMENT_CHARACTER = "\\xEF\\xBF\\xBD";
+
+static std::string normalize_utf8_incremental(
+        const std::string& incoming,
+        std::string& pending) {
+    std::string input = pending;
+    input.append(incoming);
+    pending.clear();
+
+    std::string output;
+    output.reserve(input.size());
+    size_t offset = 0;
+
+    while (offset < input.size()) {
+        const auto lead = static_cast<unsigned char>(input[offset]);
+        if (lead <= 0x7F) {
+            output.push_back(static_cast<char>(lead));
+            ++offset;
+            continue;
         }
-        bytes += 1;
-        for (int i = 1; i < num; ++i) {
-            if ((*bytes & 0xC0) != 0x80) {
-                return false;
+
+        size_t sequence_length = 0;
+        if (lead >= 0xC2 && lead <= 0xDF) {
+            sequence_length = 2;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            sequence_length = 3;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            sequence_length = 4;
+        } else {
+            output.append(UTF8_REPLACEMENT_CHARACTER);
+            ++offset;
+            continue;
+        }
+
+        const size_t available = input.size() - offset;
+        const size_t checked = std::min(sequence_length, available);
+        bool malformed = false;
+        for (size_t index = 1; index < checked; ++index) {
+            const auto continuation =
+                static_cast<unsigned char>(input[offset + index]);
+            if ((continuation & 0xC0) != 0x80) {
+                malformed = true;
+                break;
             }
-            bytes += 1;
+
+            // Reject overlong encodings, UTF-16 surrogate code points and
+            // code points above U+10FFFF, not merely malformed continuation bytes.
+            if (index == 1 &&
+                ((lead == 0xE0 && continuation < 0xA0) ||
+                 (lead == 0xED && continuation > 0x9F) ||
+                 (lead == 0xF0 && continuation < 0x90) ||
+                 (lead == 0xF4 && continuation > 0x8F))) {
+                malformed = true;
+                break;
+            }
+        }
+
+        if (malformed) {
+            output.append(UTF8_REPLACEMENT_CHARACTER);
+            ++offset;
+            continue;
+        }
+
+        if (available < sequence_length) {
+            // Only a valid, incomplete trailing code point is retained.
+            // Its maximum size is three bytes, regardless of output length.
+            pending.assign(input, offset, available);
+            break;
+        }
+
+        output.append(input, offset, sequence_length);
+        offset += sequence_length;
+    }
+    return output;
+}
+
+static jstring new_java_string_from_utf8(JNIEnv* env, const std::string& utf8) {
+    if (utf8.empty()) return env->NewStringUTF("");
+
+    std::vector<jchar> utf16;
+    utf16.reserve(utf8.size());
+    size_t offset = 0;
+    while (offset < utf8.size()) {
+        const auto lead = static_cast<unsigned char>(utf8[offset]);
+        uint32_t code_point = 0;
+        size_t length = 0;
+
+        if (lead <= 0x7F) {
+            code_point = lead;
+            length = 1;
+        } else if (lead <= 0xDF) {
+            code_point = lead & 0x1F;
+            length = 2;
+        } else if (lead <= 0xEF) {
+            code_point = lead & 0x0F;
+            length = 3;
+        } else {
+            code_point = lead & 0x07;
+            length = 4;
+        }
+
+        for (size_t index = 1; index < length; ++index) {
+            code_point = (code_point << 6) |
+                (static_cast<unsigned char>(utf8[offset + index]) & 0x3F);
+        }
+        offset += length;
+
+        if (code_point <= 0xFFFF) {
+            utf16.push_back(static_cast<jchar>(code_point));
+        } else {
+            code_point -= 0x10000;
+            utf16.push_back(static_cast<jchar>(0xD800 + (code_point >> 10)));
+            utf16.push_back(static_cast<jchar>(0xDC00 + (code_point & 0x3FF)));
         }
     }
-    return true;
+    return env->NewString(utf16.data(), static_cast<jsize>(utf16.size()));
+}
+
+static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {
+    if (engine->cached_token_chars.empty()) return nullptr;
+    engine->cached_token_chars.clear();
+    const std::string replacement(UTF8_REPLACEMENT_CHARACTER);
+    engine->assistant_ss << replacement;
+    return new_java_string_from_utf8(env, replacement);
 }
 
 static bool append_token_to_batch(
@@ -1025,9 +1126,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     auto* engine = fromHandle(handle);
     if (!engine || !engine->model || !engine->context) return nullptr;
 
+    if (engine->generation_finished) return nullptr;
+
     if (engine->cancel_requested.load()) {
         LOGI("Inference cancelled cooperatively");
         engine->last_finish_reason = 2; // CANCELLED
+        engine->generation_finished = true;
         return nullptr;
     }
 
@@ -1039,7 +1143,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     if (engine->current_position >= engine->stop_generation_position) {
         LOGI("Reached stop generation token count");
         engine->last_finish_reason = 1; // MAX_TOKENS
-        return nullptr;
+        engine->generation_finished = true;
+        return flush_incomplete_utf8(env, engine);
     }
 
     if (engine->sampler == nullptr) {
@@ -1073,7 +1178,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
              new_token_id,
              static_cast<double>(stop_step_duration_us) / 1000.0);
         engine->last_finish_reason = 0; // STOP
-        return nullptr;
+        engine->generation_finished = true;
+        return flush_incomplete_utf8(env, engine);
     }
 
     // The EOG token is decoded into the native context but is not returned to the UI.
@@ -1088,17 +1194,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     }
 
     auto token_piece = common_token_to_piece(engine->context, new_token_id);
-    engine->cached_token_chars += token_piece;
-
-    if (is_valid_utf8(engine->cached_token_chars.c_str())) {
-        jstring result = env->NewStringUTF(engine->cached_token_chars.c_str());
-        engine->assistant_ss << engine->cached_token_chars;
-        engine->cached_token_chars.clear();
-        return result;
-    } else {
-        // Incomplete multibyte UTF-8 codepoint: return empty string so caller continues without breaking
+    const std::string valid_output =
+        normalize_utf8_incremental(token_piece, engine->cached_token_chars);
+    if (valid_output.empty()) {
         return env->NewStringUTF("");
     }
+
+    engine->assistant_ss << valid_output;
+    return new_java_string_from_utf8(env, valid_output);
 }
 
 JNIEXPORT jint JNICALL
