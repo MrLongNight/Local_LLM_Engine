@@ -364,12 +364,35 @@ static bool is_valid_utf8(const char *string) {
     return true;
 }
 
+static bool append_token_to_batch(
+        llama_batch& batch,
+        llama_token token,
+        llama_pos position,
+        llama_seq_id sequence_id,
+        bool output_logits) {
+    if (batch.n_tokens < 0 || batch.n_tokens >= 0x7fffffff ||
+        batch.token == nullptr || batch.pos == nullptr ||
+        batch.n_seq_id == nullptr || batch.seq_id == nullptr ||
+        batch.logits == nullptr || batch.seq_id[batch.n_tokens] == nullptr) {
+        LOGE("Invalid or exhausted llama_batch while appending token");
+        return false;
+    }
+
+    const int32_t index = batch.n_tokens++;
+    batch.token[index] = token;
+    batch.pos[index] = position;
+    batch.n_seq_id[index] = 1;
+    batch.seq_id[index][0] = sequence_id;
+    batch.logits[index] = output_logits ? 1 : 0;
+    return true;
+}
+
 static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, llama_pos start_pos, bool want_last_logit, PromptEvalProgressContext* progress_context) {
     if (!engine || !engine->context) return -1;
     for (int i = 0; i < (int)tokens.size(); i += engine->batch_size) {
         if (engine->cancel_requested.load()) return -2;
         const int cur_batch_size = std::min((int)tokens.size() - i, engine->batch_size);
-        common_batch_clear(engine->batch);
+        engine->batch.n_tokens = 0;
 
         if (start_pos + i + cur_batch_size >= engine->context_size - OVERFLOW_HEADROOM) {
             engine->shift_context();
@@ -379,7 +402,9 @@ static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, lla
             const llama_token token_id = tokens[i + j];
             const llama_pos position = start_pos + i + j;
             const bool compute_logit = want_last_logit && (i + j == (int)tokens.size() - 1);
-            common_batch_add(engine->batch, token_id, position, {0}, compute_logit);
+            if (!append_token_to_batch(engine->batch, token_id, position, 0, compute_logit)) {
+                return -3;
+            }
         }
 
         const int res = llama_decode(engine->context, engine->batch);
@@ -813,6 +838,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
 
     std::string full_prompt;
+    common_chat_prompt rendered_prompt;
     bool used_chat_template = false;
     try {
         common_chat_templates_inputs inputs;
@@ -820,7 +846,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         inputs.add_generation_prompt = true;
         inputs.use_jinja = true;
         inputs.enable_thinking = (enable_thinking == JNI_TRUE);
-        full_prompt = common_chat_templates_apply(engine->chat_templates.get(), inputs).prompt;
+        const auto rendered = common_chat_templates_apply(engine->chat_templates.get(), inputs);
+        rendered_prompt = rendered.prompt;
+        full_prompt = rendered_prompt.str();
         used_chat_template = true;
         LOGI("Formatted prompt with llama.cpp Jinja template (%zu messages, enable_thinking=%s)",
              messages.size(), enable_thinking == JNI_TRUE ? "true" : "false");
@@ -832,7 +860,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             inputs.add_generation_prompt = true;
             inputs.use_jinja = false;
             inputs.enable_thinking = (enable_thinking == JNI_TRUE);
-            full_prompt = common_chat_templates_apply(engine->chat_templates.get(), inputs).prompt;
+            const auto rendered = common_chat_templates_apply(engine->chat_templates.get(), inputs);
+            rendered_prompt = rendered.prompt;
+            full_prompt = rendered_prompt.str();
             used_chat_template = true;
             LOGI("Formatted prompt with llama.cpp legacy renderer");
         } catch (const std::exception& legacy_error) {
@@ -856,7 +886,23 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
          messages.size(), used_chat_template ? "llama.cpp" : "fallback", full_prompt.size(),
          static_cast<long long>(template_duration_ms));
     const int64_t tokenization_start_us = llama_time_us();
-    auto tokens = common_tokenize(engine->context, full_prompt, used_chat_template, used_chat_template);
+    llama_tokens tokens;
+    if (used_chat_template) {
+        bool add_special = true;
+        for (const auto& part : rendered_prompt.parts) {
+            if (part.text.empty()) continue;
+            auto part_tokens = common_tokenize(
+                engine->context,
+                part.text,
+                add_special,
+                !part.is_input
+            );
+            tokens.insert(tokens.end(), part_tokens.begin(), part_tokens.end());
+            add_special = false;
+        }
+    } else {
+        tokens = common_tokenize(engine->context, full_prompt, false, false);
+    }
     const int64_t tokenization_duration_ms = (llama_time_us() - tokenization_start_us) / 1000;
     engine->last_prompt_tokenization_us = tokenization_duration_ms * 1000;
     if (tokens.empty()) {
@@ -948,8 +994,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
     common_sampler_accept(engine->sampler, new_token_id, true);
 
-    common_batch_clear(engine->batch);
-    common_batch_add(engine->batch, new_token_id, engine->current_position, {0}, true);
+    engine->batch.n_tokens = 0;
+    if (!append_token_to_batch(engine->batch, new_token_id, engine->current_position, 0, true)) {
+        engine->last_finish_reason = 3; // ERROR
+        return nullptr;
+    }
 
     if (llama_decode(engine->context, engine->batch) != 0) {
         LOGE("llama_decode failed during token generation");

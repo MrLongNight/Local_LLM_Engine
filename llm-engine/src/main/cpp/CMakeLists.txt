@@ -114,7 +114,7 @@ static void ggml_vk_get_physical_device_features2(
     # 16-bit storage is core in Vulkan 1.1. Some Android 1.1+ drivers no longer
     # enumerate the promoted extension and reject it if requested by name.
     set(_storage_anchor "        device_extensions.push_back(\"VK_KHR_16bit_storage\");")
-    string(REGEX MATCHALL "device_extensions\\.push_back\\(\"VK_KHR_16bit_storage\"" _storage_matches "${_vulkan_contents}")
+    string(REGEX MATCHALL "device_extensions\\.push_back\\(\"VK_KHR_16bit_storage\"\\);" _storage_matches "${_vulkan_contents}")
     list(LENGTH _storage_matches _storage_count)
     if(NOT _storage_count EQUAL 1)
         message(FATAL_ERROR "LocalLLM: expected one Vulkan 16-bit-storage extension request, found ${_storage_count}. Review compatibility overlay.")
