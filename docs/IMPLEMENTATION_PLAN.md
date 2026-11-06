@@ -1,7 +1,7 @@
 # Umsetzungsplan – Local LLM Engine
 
 **Arbeitsbranch:** `main`  
-**llama.cpp-Submodule:** `e14a779719652200cec7ad58dfa4820edc347182` (Upstream-Stand vom 05.11.2026)  
+**llama.cpp-Submodule:** `669204ee2b9004845b34f26466a91d003edc98aa` (Upstream-HEAD, geprüft am 06.11.2026, 19:51 UTC)  
 **Ziel:** Eine nachweislich funktionierende lokale GGUF-Inferenz auf Android mit korrekter CPU-/GPU-Auswahl, kontrolliertem Abbruch und messbarer Performance.
 
 Dieser Plan ersetzt die frühere, widersprüchliche Aufgabenliste. Er ist die einzige zentrale Aufgabenliste dieses Repositories. Ein Punkt gilt erst als erledigt, wenn sein jeweiliger Abnahmetest bestanden ist. Ein erfolgreicher Kotlin-Test oder APK-Build allein gilt nicht als Nachweis echter Geräte-Inferenz.
@@ -29,7 +29,15 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 6. Die öffentliche `LocalLlmEngine`-API und den Library-Namespace `com.mydocanizer.llm.engine` stabil halten.
 7. Priorität: korrekte Inferenz und zuverlässiger Abbruch vor maximaler Tokenrate. Keine NPU-Implementierung ohne konkret unterstütztes Gerät und reproduzierbaren Test.
 
-## Phase 0 – llama.cpp-Upstream aktualisieren und reproduzierbar pinnen\n\n**Umgesetzt:** Der zuvor auf Juli 2026 fixierte Source-Stand wurde auf den Upstream-Commit `e14a779719652200cec7ad58dfa4820edc347182` vom 05.11.2026 aktualisiert. llama.cpp liegt jetzt als Git-Submodule vor; GitHub Actions initialisieren es rekursiv und prüfen den exakten Commit. Der Android-CMake-Overlay baut eine separate Kopie von `ggml-vulkan.cpp` mit den weiterhin erforderlichen Android-API-24-/Mali-Kompatibilitätskorrekturen. Der offizielle Mali-Subgroup-Fix ist bereits im Upstream enthalten.\n\n**Noch ausstehende Abnahme:** ARM64-/x86_64-Builds mit dem neuen Stand, LFM3-/Qwen-Modelllade-Tests und echte Mali-G57-Geräteprüfung. Das Versionsupdate allein belegt weder Vulkan-Stabilität noch Performance.\n\n## Phase 1 – Offizielle Android-Referenz und CPU-Grundlage
+## Phase 0 – llama.cpp-Upstream aktualisieren und reproduzierbar pinnen
+
+**Umgesetzt in Commit `b345a4f`:** Das Git-Submodule wurde von `67107ac34f62882d8b53ea41ad68010ea635b9be` auf den am 06.11.2026 um 19:51 UTC geprüften Upstream-HEAD `669204ee2b9004845b34f26466a91d003edc98aa` aktualisiert. Der neue Stand enthält 15 Upstream-Commits zusätzlich, darunter Vulkan-ReBAR-Erkennung und die dazugehörige Anpassung der Gerätespeicher-Allokation. Der APK-Workflow prüft exakt diesen SHA.
+
+Das Android-CMake-Overlay baut weiterhin eine separate Arbeitskopie von `ggml-vulkan.cpp`; der Upstream-Submodule-Inhalt bleibt unverändert. Die bisher benötigten Android-API-24-/Mali-Kompatibilitätsanker (drei `vkGetPhysicalDeviceFeatures2`-Aufrufe sowie Include-, Buffer-Device-Address-, 16-bit-storage- und Device-Create-Anker) sind im aktualisierten Quelltext vorhanden.
+
+**CI-Abnahme:** Unit Tests #151 für `b345a4f` sind erfolgreich. Android APK Build #112 für denselben Commit läuft noch; ARM64-/x86_64-Kompilierung, Vulkan-Compile-Entry, APK-Upload und Emulator-Prozessisolation sind bis zum Abschluss dieses Laufs noch nicht als bestanden zu werten.
+
+**Noch ausstehende Abnahme:** Den APK-Build #112 vollständig erfolgreich abschließen, anschließend GGUF-Modellladen mit explizitem Vulkan-Modus auf dem Mali-G57-Zielgerät prüfen und native Vulkan-/GGML-Logs auswerten. Das Versionsupdate und ein grüner CI-Build allein belegen weder stabile Geräte-Inferenz noch bessere Performance.
 
 **Änderung:** ARM64-CPU-Build an die offizielle llama.cpp-Android-Referenz annähern. KleidiAI wird für `arm64-v8a` aktiviert; x86_64 bleibt ohne KleidiAI. OpenMP bleibt vorerst deaktiviert.
 
