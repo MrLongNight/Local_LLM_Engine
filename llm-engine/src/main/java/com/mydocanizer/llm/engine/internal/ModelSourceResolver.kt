@@ -26,14 +26,6 @@ internal object ModelSourceResolver {
 
     suspend fun resolveToFile(context: Context, source: ModelSource): File =
         withContext(Dispatchers.IO) {
-            val targetDir = File(context.filesDir, "models")
-            if (!targetDir.exists() && !targetDir.mkdirs()) {
-                throw IllegalStateException("Could not create private model directory")
-            }
-            require(targetDir.isDirectory && targetDir.canWrite()) {
-                "Private model directory is not writable"
-            }
-
             when (source) {
                 is ModelSource.FilePath -> {
                     val file = source.file
@@ -45,6 +37,7 @@ internal object ModelSourceResolver {
                 }
 
                 is ModelSource.ContentUri -> {
+                    val targetDir = ensureModelDirectory(context)
                     val uri = Uri.parse(source.uriString)
                     val displayName = source.displayName
                         ?: queryFileName(context, uri)
@@ -55,14 +48,26 @@ internal object ModelSourceResolver {
                 }
 
                 is ModelSource.AssetPath -> {
+                    val targetDir = ensureModelDirectory(context)
                     require(source.assetName.isNotBlank()) { "Asset name must not be blank" }
                     val input = context.assets.open(source.assetName)
                     copyAndPublish(targetDir, source.assetName, input)
                 }
 
-                is ModelSource.RemoteUrl -> downloadRemoteFile(targetDir, source)
+                is ModelSource.RemoteUrl -> downloadRemoteFile(ensureModelDirectory(context), source)
             }
         }
+
+    private fun ensureModelDirectory(context: Context): File {
+        val targetDir = File(context.filesDir, "models")
+        if (!targetDir.exists() && !targetDir.mkdirs()) {
+            throw IllegalStateException("Could not create private model directory")
+        }
+        require(targetDir.isDirectory && targetDir.canWrite()) {
+            "Private model directory is not writable"
+        }
+        return targetDir
+    }
 
     private suspend fun downloadRemoteFile(targetDir: File, source: ModelSource.RemoteUrl): File {
         var currentUrl = URL(source.url)

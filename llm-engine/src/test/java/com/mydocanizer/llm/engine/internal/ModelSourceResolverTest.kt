@@ -1,6 +1,7 @@
 package com.mydocanizer.llm.engine.internal
 
 import java.io.File
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -13,6 +14,22 @@ class ModelSourceResolverTest {
             file.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x00))
             ModelSourceResolver.validateGgufMagic(file)
             assertTrue(file.length() >= 4L)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun filePathResolutionDoesNotRequireAnAndroidContext() = runBlocking {
+        val file = File.createTempFile("valid-file-path-", ".gguf")
+        try {
+            file.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x00))
+            val context = object : android.content.ContextWrapper(null) {}
+            val resolved = ModelSourceResolver.resolveToFile(
+                context,
+                com.mydocanizer.llm.engine.ModelSource.FilePath(file.absolutePath)
+            )
+            assertTrue(resolved.canonicalFile == file.canonicalFile)
         } finally {
             file.delete()
         }
