@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <cstdio>
 #include <cstring>
@@ -349,7 +350,7 @@ static std::string collectBackendDiagnostics() {
     return ss.str();
 }
 
-static constexpr const char* UTF8_REPLACEMENT_CHARACTER = "\\xEF\\xBF\\xBD";
+static constexpr const char* UTF8_REPLACEMENT_CHARACTER = "\xEF\xBF\xBD";
 
 static std::string normalize_utf8_incremental(
         const std::string& incoming,
