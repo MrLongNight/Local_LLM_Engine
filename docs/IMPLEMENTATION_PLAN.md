@@ -1,14 +1,14 @@
 # Umsetzungsplan – Local LLM Engine
 
 **Arbeitsbranch:** `main`  
-**Referenz-llama.cpp:** `2da668617612d2df773f966e3b0ee22dc2beef7b`  
+**llama.cpp-Submodule:** `e14a779719652200cec7ad58dfa4820edc347182` (Upstream-Stand vom 05.11.2026)  
 **Ziel:** Eine nachweislich funktionierende lokale GGUF-Inferenz auf Android mit korrekter CPU-/GPU-Auswahl, kontrolliertem Abbruch und messbarer Performance.
 
 Dieser Plan ersetzt die frühere, widersprüchliche Aufgabenliste. Er ist die einzige zentrale Aufgabenliste dieses Repositories. Ein Punkt gilt erst als erledigt, wenn sein jeweiliger Abnahmetest bestanden ist. Ein erfolgreicher Kotlin-Test oder APK-Build allein gilt nicht als Nachweis echter Geräte-Inferenz.
 
 ## Verbindliche technische Referenzen
 
-Die vendorte llama.cpp-Version enthält bereits eine offizielle Android-Referenzimplementierung:
+Das llama.cpp-Git-Submodule ist auf einen konkreten Upstream-Commit gepinnt und enthält die vollständige offizielle Android-Referenzimplementierung:
 
 - `examples/llama.android`: Kotlin-`InferenceEngine`, JNI, GGUF-Metadatenleser, Modellladen, Flow-Streaming und Benchmark-Einstieg.
 - `docs/android.md`: Android-Build, GGUF-Laden und Laufzeitvoraussetzungen.
@@ -24,12 +24,12 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 1. Ausschließlich `main`; vor jedem Push aktuellen Head prüfen und den erwarteten Head beim Ref-Update absichern.
 2. Änderungen in kleinen, fachlich zusammenhängenden Commits. GitHub Actions sind die Build- und Testquelle.
 3. Keine Behauptung über erfolgreiche Geräte-Inferenz ohne echten Gerätetest.
-4. Keine Änderungen am vendorten llama.cpp-Code, solange kein konkreter Upstream-Fehler oder notwendiger API-Eingriff belegt ist.
+4. Das llama.cpp-Submodule bleibt unverändert. Notwendige Android-/Mali-Kompatibilitätskorrekturen werden als überprüfte Build-Kopie im übergeordneten CMake-Projekt angewendet; Upstream-Dateien werden nicht direkt editiert.
 5. Keine parallelen Diagnose-, Statistik- oder Aufgabenlisten. Diagnoseprotokolle dürfen weder Prompts noch Antworten speichern.
 6. Die öffentliche `LocalLlmEngine`-API und den Library-Namespace `com.mydocanizer.llm.engine` stabil halten.
 7. Priorität: korrekte Inferenz und zuverlässiger Abbruch vor maximaler Tokenrate. Keine NPU-Implementierung ohne konkret unterstütztes Gerät und reproduzierbaren Test.
 
-## Phase 1 – Offizielle Android-Referenz und CPU-Grundlage
+## Phase 0 – llama.cpp-Upstream aktualisieren und reproduzierbar pinnen\n\n**Umgesetzt:** Der zuvor auf Juli 2026 fixierte Source-Stand wurde auf den Upstream-Commit `e14a779719652200cec7ad58dfa4820edc347182` vom 05.11.2026 aktualisiert. llama.cpp liegt jetzt als Git-Submodule vor; GitHub Actions initialisieren es rekursiv und prüfen den exakten Commit. Der Android-CMake-Overlay baut eine separate Kopie von `ggml-vulkan.cpp` mit den weiterhin erforderlichen Android-API-24-/Mali-Kompatibilitätskorrekturen. Der offizielle Mali-Subgroup-Fix ist bereits im Upstream enthalten.\n\n**Noch ausstehende Abnahme:** ARM64-/x86_64-Builds mit dem neuen Stand, LFM3-/Qwen-Modelllade-Tests und echte Mali-G57-Geräteprüfung. Das Versionsupdate allein belegt weder Vulkan-Stabilität noch Performance.\n\n## Phase 1 – Offizielle Android-Referenz und CPU-Grundlage
 
 **Änderung:** ARM64-CPU-Build an die offizielle llama.cpp-Android-Referenz annähern. KleidiAI wird für `arm64-v8a` aktiviert; x86_64 bleibt ohne KleidiAI. OpenMP bleibt vorerst deaktiviert.
 

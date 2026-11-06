@@ -8,13 +8,14 @@ A standalone Android application and reusable Android library for running local 
 
 - `:app` — demo Android application.
 - `:llm-engine` — reusable Android library containing the public engine API and JNI/native llama.cpp integration.
-- `:llm-engine/src/main/cpp/llama.cpp` — vendored llama.cpp source.
+- `:llm-engine/src/main/cpp/llama.cpp` — pinned Git submodule of `ggml-org/llama.cpp` at `e14a779719652200cec7ad58dfa4820edc347182` (2026-11-05).
 - `INTEGRATION_MYDOCANIZER.md` — integration notes for the intended myDocAnizer-Mobile target.
 
 ## Requirements
 
 - JDK 17 for the Android/Native APK build; JDK 21 for the Robolectric SDK 36 unit-test workflow
 - Gradle 9.3.1
+- Git with recursive submodule checkout (`git clone --recurse-submodules`)
 - Android SDK platform 36
 - Android NDK 27.2.12479018
 - CMake 3.22.1
@@ -58,6 +59,24 @@ before binding, then verify that the service PID differs from the app process,
 that killing it removes the original PID, and that the client can reconnect.
 These emulator tests do not replace a real-device test on the target phone.
 
+## Native llama.cpp source
+
+The engine pins the upstream source as a Git submodule at
+`e14a779719652200cec7ad58dfa4820edc347182` (2026-11-05). The exact revision is
+also verified in the APK workflow. To initialize or refresh a clone:
+
+```bash
+git submodule update --init --recursive
+```
+
+The upstream Mali subgroup-size matmul fix is already included in this revision.
+Android API-24 Vulkan loader and Mali extension-dispatch compatibility remain as
+a build-only overlay: CMake copies upstream `ggml-vulkan.cpp` into the build
+directory, applies checked replacements there, and compiles that copy. The
+upstream submodule working tree is never edited. The overlay fails CMake
+configuration if its expected upstream anchors change, so a future llama.cpp
+revision cannot silently bypass these fixes.
+
 ## Native Android backends
 
 - ARM64 builds configure the CPU backend with `GGML_CPU_KLEIDIAI=ON`, matching the official llama.cpp Android reference. llama.cpp fetches the pinned KleidiAI v1.24.0 source at CMake configure time and includes applicable Arm kernels. This does not imply every kernel is used on every Arm CPU; runtime CPU features and supported operations determine applicability.
@@ -67,7 +86,7 @@ These emulator tests do not replace a real-device test on the target phone.
 
 ## Local commands
 
-With Gradle 9.3.1 installed and the Android SDK/NDK/CMake versions above available:
+After cloning with `git clone --recurse-submodules` (or running `git submodule update --init --recursive` in an existing clone), and with Gradle 9.3.1 plus the Android SDK/NDK/CMake versions above available:
 
 ```bash
 gradle :app:assembleDebug
