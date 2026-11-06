@@ -57,8 +57,10 @@ class InferenceService : Service() {
     private val workerDispatcher = workerExecutor.asCoroutineDispatcher()
     private val serviceScope = CoroutineScope(workerDispatcher + SupervisorJob())
 
+    @Volatile
     private var engine: LocalLlmEngine? = null
     private val activeRequestId = AtomicReference<String?>(null)
+    @Volatile
     private var activeInferenceJob: Job? = null
     private val isShuttingDown = AtomicBoolean(false)
     private var resourceMonitor: EngineResourceMonitor? = null
@@ -87,6 +89,24 @@ class InferenceService : Service() {
         val newEngine = LocalLlmEngineImpl(applicationContext)
         engine = newEngine
         return newEngine
+    }
+
+    /**
+     * Binder entry points run outside the single-thread worker. Cancel native inference
+     * here, before enqueueing model load/unload, otherwise the queued operation cannot
+     * reach LocalLlmEngineImpl while its blocking JNI call owns the worker.
+     */
+    private fun interruptInferenceForModelOperation(operation: String) {
+        val job = activeInferenceJob ?: return
+        EngineDiagnostics.info(
+            "ipc",
+            "INFERENCE_PREEMPTED_FOR_MODEL_OPERATION",
+            "operation=$operation, requestId=${activeRequestId.get()}"
+        )
+        engine?.cancelInference()
+        job.cancel()
+        activeInferenceJob = null
+        activeRequestId.set(null)
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -141,6 +161,7 @@ class InferenceService : Service() {
         }
 
         override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
+            interruptInferenceForModelOperation("loadModel")
             resourceMonitor?.beginModelLoad(modelPath, config)
             serviceScope.launch {
                 var progressJob: Job? = null
@@ -183,6 +204,7 @@ class InferenceService : Service() {
         }
 
         override fun unloadModel(callback: IInferenceCallback?) {
+            interruptInferenceForModelOperation("unloadModel")
             resourceMonitor?.modelUnloading()
             serviceScope.launch {
                 try {

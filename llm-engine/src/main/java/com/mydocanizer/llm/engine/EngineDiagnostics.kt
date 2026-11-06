@@ -145,17 +145,51 @@ object EngineDiagnostics {
     }
 
     private fun isImportantEvent(line: String): Boolean {
-        val upper = line.uppercase(Locale.US)
-        return listOf(
-            "[ERROR]", "[WARN]", "FAILED", "FAILURE", "TIMEOUT", "CRASH", "ABORT",
-            "KILL", "BACKEND_BENCHMARK", "MODEL_LOAD", "MODEL_LOADED", "MODEL_UNLOAD",
-            "SERVICE_CREATED", "SERVICE_DESTROYED", "SERVICE_DISCONNECTED",
-            "ENGINE_INITIALIZATION", "INIT_FAILED", "INFERENCE_STARTED",
-            "INFERENCE_COMPLETED", "INFERENCE_CANCELLED", "INFERENCE_TIMEOUT",
-            "PROMPT_EVALUATION", "BACKEND_SELECTED", "BACKEND_INITIALIZED",
-            "RESOURCE_PHASE", "PROCESS_DIED", "PROCESS_RESTART",
-            "PROCESS_EXIT_INFO", "PROCESS_EXIT_INFO_UNAVAILABLE"
-        ).any(upper::contains)
+        if (line.contains("[ERROR]") || line.contains("[WARN]")) return true
+
+        // Log format is: timestamp [LEVEL] [tag] EVENT - details.
+        // Only inspect the event token; free-form detail text must not promote
+        // unrelated lines (for example a path containing the word "kill").
+        val event = line.substringAfterLast("] ")
+            .substringBefore(" - ")
+            .trim()
+            .uppercase(Locale.US)
+        if (event.isBlank()) return false
+
+        val exactEvents = setOf(
+            "BACKEND_BENCHMARK",
+            "MODEL_LOADED",
+            "MODEL_UNLOAD",
+            "SERVICE_CREATED",
+            "SERVICE_DESTROYED",
+            "SERVICE_DISCONNECTED",
+            "ENGINE_INITIALIZATION",
+            "INIT_FAILED",
+            "INFERENCE_STARTED",
+            "INFERENCE_COMPLETED",
+            "INFERENCE_CANCELLED",
+            "INFERENCE_TIMEOUT",
+            "BACKEND_SELECTED",
+            "BACKEND_INITIALIZED",
+            "RESOURCE_PHASE",
+            "PROCESS_DIED",
+            "PROCESS_RESTART",
+            "PROCESS_EXIT_INFO",
+            "PROCESS_EXIT_INFO_UNAVAILABLE",
+            "PROCESS_KILLED",
+            "KILL_PROCESS_REQUESTED"
+        )
+        return event in exactEvents ||
+            event.startsWith("MODEL_LOAD_") ||
+            event.startsWith("MODEL_UNLOAD_") ||
+            event.startsWith("PROMPT_EVALUATION_") ||
+            event.endsWith("_FAILED") ||
+            event.endsWith("_FAILURE") ||
+            event.endsWith("_TIMEOUT") ||
+            event.endsWith("_CANCELLED") ||
+            event.endsWith("_CRASH") ||
+            event.endsWith("_CRASHED") ||
+            event.endsWith("_ABORTED")
     }
 
     private fun compactLine(line: String, maxChars: Int = 300): String =

@@ -50,6 +50,38 @@ class LocalLlmEngineApiTest {
     }
 
     @Test
+    fun testInferenceRequestAcceptsSamplingOverrides() {
+        val request = InferenceRequest(
+            messages = listOf(ChatMessage.user("test")),
+            temperature = 0.25f,
+            topP = 0.8f
+        )
+        assertEquals(0.25f, request.temperature!!, 0.0001f)
+        assertEquals(0.8f, request.topP!!, 0.0001f)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun testInferenceRequestRejectsNonFiniteTemperature() {
+        InferenceRequest(
+            messages = listOf(ChatMessage.user("test")),
+            temperature = Float.NaN
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun testInferenceRequestRejectsOutOfRangeTopP() {
+        InferenceRequest(
+            messages = listOf(ChatMessage.user("test")),
+            topP = 1.01f
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun testEngineConfigRejectsOutOfRangeTopP() {
+        EngineConfig(topP = -0.1f)
+    }
+
+    @Test
     fun testModelInfoFormatting() {
         val info = ModelInfo(
             name = "qwen2.5-0.5b-instruct-q4_k_m.gguf",

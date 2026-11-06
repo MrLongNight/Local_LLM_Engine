@@ -226,11 +226,13 @@ internal class LocalLlmEngineImpl(
             val sha256 = calculateSha256(file) { percent ->
                 updateModelLoadProgress(percent)
             }
-            EngineDiagnostics.info(
-                "engine",
-                "MODEL_SHA256_COMPLETED",
-                "durationMs=${(System.nanoTime() - shaStartNano) / 1_000_000L}, fileBytes=${file.length()}"
-            )
+            if (sha256 != null) {
+                EngineDiagnostics.info(
+                    "engine",
+                    "MODEL_SHA256_COMPLETED",
+                    "durationMs=${(System.nanoTime() - shaStartNano) / 1_000_000L}, fileBytes=${file.length()}"
+                )
+            }
 
             val info = ModelInfo(
                 name = file.name,
@@ -258,17 +260,27 @@ internal class LocalLlmEngineImpl(
         }
     }
 
-    override suspend fun unloadModel(): Result<Unit> = withContext(llamaDispatcher) {
-        runCatching {
-            val handle = engineHandle.get()
-            if (handle != 0L) {
-                NativeEngineHandle.nativeUnloadModel(handle)
+    override suspend fun unloadModel(): Result<Unit> {
+        if (_state.value is EngineState.Inferring) {
+            EngineDiagnostics.info(
+                "engine",
+                "MODEL_UNLOAD_PREEMPTS_INFERENCE",
+                "Cancelling active inference before unload is queued"
+            )
+            cancelInference()
+        }
+        return withContext(llamaDispatcher) {
+            runCatching {
+                val handle = engineHandle.get()
+                if (handle != 0L) {
+                    NativeEngineHandle.nativeUnloadModel(handle)
+                }
+                _currentModel.value = null
+                _modelLoadProgress.value = null
+                _state.value = EngineState.Ready
+                Log.i(TAG, "Model unloaded successfully")
+                Unit
             }
-            _currentModel.value = null
-            _modelLoadProgress.value = null
-            _state.value = EngineState.Ready
-            Log.i(TAG, "Model unloaded successfully")
-            Unit
         }
     }
 
@@ -500,8 +512,15 @@ internal class LocalLlmEngineImpl(
     override fun close() {
         cancelInference()
         val handle = engineHandle.getAndSet(0L)
-        if (handle != 0L) {
-            NativeEngineHandle.nativeDestroyEngine(handle)
+        try {
+            if (handle != 0L) {
+                NativeEngineHandle.nativeDestroyEngine(handle)
+            }
+        } finally {
+            // Backend init is process-global, so always pair it with shutdown,
+            // including the case where engine-handle creation failed.
+            runCatching { NativeEngineHandle.shutdownBackend() }
+                .onFailure { EngineDiagnostics.error("native", "BACKEND_SHUTDOWN_FAILED", it) }
         }
         _state.value = EngineState.Closed
         Log.i(TAG, "LocalLlmEngine closed")
@@ -515,29 +534,33 @@ internal class LocalLlmEngineImpl(
         }
     }
 
-    private fun calculateSha256(file: File, onProgress: (Int) -> Unit): String = runCatching {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val totalBytes = file.length().coerceAtLeast(1L)
-        var processedBytes = 0L
-        var lastReportedPercent = 86
-        file.inputStream().use { input ->
-            val buffer = ByteArray(65536)
-            var bytesRead: Int
-            while (input.read(buffer).also { bytesRead = it } != -1) {
-                digest.update(buffer, 0, bytesRead)
-                processedBytes += bytesRead
-                val percent = (87.0 + (processedBytes.toDouble() / totalBytes.toDouble()) * 12.0)
-                    .roundToInt()
-                    .coerceIn(87, 99)
-                if (percent != lastReportedPercent) {
-                    lastReportedPercent = percent
-                    onProgress(percent)
+    private fun calculateSha256(file: File, onProgress: (Int) -> Unit): String? {
+        val result = runCatching {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val totalBytes = file.length().coerceAtLeast(1L)
+            var processedBytes = 0L
+            var lastReportedPercent = 86
+            file.inputStream().use { input ->
+                val buffer = ByteArray(65536)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    digest.update(buffer, 0, bytesRead)
+                    processedBytes += bytesRead
+                    val percent = (87.0 + (processedBytes.toDouble() / totalBytes.toDouble()) * 12.0)
+                        .roundToInt()
+                        .coerceIn(87, 99)
+                    if (percent != lastReportedPercent) {
+                        lastReportedPercent = percent
+                        onProgress(percent)
+                    }
                 }
             }
+            onProgress(99)
+            digest.digest().joinToString("") { "%02x".format(it) }
         }
-        onProgress(99)
-        digest.digest().joinToString("") { "%02x".format(it) }
-    }.getOrDefault("N/A")
+        result.onFailure { EngineDiagnostics.error("engine", "MODEL_SHA256_FAILED", it) }
+        return result.getOrNull()
+    }
 
     private fun getValidHandle(): Long {
         val h = engineHandle.get()

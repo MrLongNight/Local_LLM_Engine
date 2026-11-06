@@ -27,6 +27,19 @@ internal object NativeEngineHandle {
     private var isLoaded = false
 
     @Synchronized
+    fun shutdownBackend() {
+        if (!isLoaded) return
+        try {
+            nativeShutdownBackend()
+            isLoaded = false
+            Log.i(TAG, "llama.cpp backend shut down")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to shut down llama.cpp backend", t)
+            throw t
+        }
+    }
+
+    @Synchronized
     fun ensureLoaded(diagnosticsLogFile: File): Boolean {
         if (!isLoaded) {
             try {
