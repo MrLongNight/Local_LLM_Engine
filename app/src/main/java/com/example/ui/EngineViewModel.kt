@@ -223,9 +223,19 @@ class EngineViewModel(
     }
 
     fun importModelFromSaf(uri: Uri) {
+        // OpenDocument grants persistable read access so :inference can reopen
+        // the same original document after a process restart.
+        runCatching {
+            getApplication<Application>().contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }.onFailure { error ->
+            EngineDiagnostics.error("model_source", "SAF_PERSIST_PERMISSION_FAILED", error)
+        }
         startModelLoad(
             source = ModelSource.ContentUri(uriString = uri.toString()),
-            operationLabel = "Importiere und lade GGUF-Modell über SAF..."
+            operationLabel = "Öffne GGUF-Datei direkt am Originalspeicherort..."
         )
     }
 
@@ -276,7 +286,11 @@ class EngineViewModel(
 
         val originalConfig = _engineConfig.value
         val systemPromptSnapshot = _systemPrompt.value
-        val source = ModelSource.FilePath(model.path)
+        val source = if (model.path.startsWith("content://", ignoreCase = true)) {
+            ModelSource.ContentUri(model.path, model.name)
+        } else {
+            ModelSource.FilePath(model.path)
+        }
         val benchmarkPrompt = "wer ist Ricardo Villalobos"
         val benchmarkConfig = originalConfig.copy()
         val backends = listOf(BackendPreference.CPU, BackendPreference.VULKAN)

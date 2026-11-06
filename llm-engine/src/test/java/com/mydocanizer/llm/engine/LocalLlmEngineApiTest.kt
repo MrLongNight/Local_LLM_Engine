@@ -138,7 +138,13 @@ class LocalLlmEngineApiTest {
         val fakeService = object : com.mydocanizer.llm.engine.ipc.IInferenceService {
             override fun asBinder(): android.os.IBinder? = null
             override fun initialize() {}
-            override fun loadModel(p0: String?, p1: EngineConfig?, p2: com.mydocanizer.llm.engine.ipc.IInferenceCallback?) {}
+            override fun loadModel(
+                p0: String?,
+                p1: android.os.ParcelFileDescriptor?,
+                p2: String?,
+                p3: EngineConfig?,
+                p4: com.mydocanizer.llm.engine.ipc.IInferenceCallback?
+            ) {}
             override fun unloadModel(p0: com.mydocanizer.llm.engine.ipc.IInferenceCallback?) {}
             override fun streamChat(p0: String?, p1: InferenceRequest?, p2: com.mydocanizer.llm.engine.ipc.IInferenceCallback?) {}
             override fun cancelInference(p0: String?) {}

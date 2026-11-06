@@ -6,7 +6,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.net.Uri
 import android.os.Build
+import android.os.ParcelFileDescriptor
+import android.provider.OpenableColumns
 import android.os.IBinder
 import android.os.Process
 import android.util.Log
@@ -418,10 +421,42 @@ internal class InferenceClient(
         val effectiveTimeout = config.timeoutConfig
         val startNano = System.nanoTime()
         var registeredPendingLoad: PendingModelLoad? = null
+        var modelDescriptor: ParcelFileDescriptor? = null
 
         try {
             _state.value = EngineState.LoadingModel(source)
-            val file: File = ModelSourceResolver.resolveToFile(context, source)
+            val modelPath: String
+            val displayName: String
+            when (source) {
+                is ModelSource.ContentUri -> {
+                    val uri = Uri.parse(source.uriString)
+                    modelDescriptor = context.contentResolver.openFileDescriptor(uri, "r")
+                        ?: throw IllegalArgumentException("Android could not open the selected GGUF file directly")
+                    displayName = source.displayName ?: runCatching {
+                        context.contentResolver.query(
+                            uri,
+                            arrayOf(OpenableColumns.DISPLAY_NAME),
+                            null,
+                            null,
+                            null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else null
+                        }
+                    }.getOrNull() ?: uri.lastPathSegment ?: "model.gguf"
+                    modelPath = source.uriString
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "MODEL_SOURCE_OPENED_DIRECTLY",
+                        "source=SAF,displayName=$displayName,copy=false"
+                    )
+                }
+                else -> {
+                    val file: File = ModelSourceResolver.resolveToFile(context, source)
+                    modelDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                    modelPath = file.absolutePath
+                    displayName = file.name
+                }
+            }
             val targetPid = runCatching { service.processId }.getOrNull()
             val pending = PendingModelLoad(targetPid, deferred)
             if (!pendingModelLoad.compareAndSet(null, pending)) {
@@ -441,9 +476,14 @@ internal class InferenceClient(
                         lastLoadedConfig = config
                         _modelLoadProgress.value = 100
                         _modelLoadProgressEvents.tryEmit(100)
-                        _currentModel.value = modelInfo
-                        _state.value = EngineState.ModelLoaded(modelInfo)
-                        deferred.complete(Result.success(modelInfo))
+                        val publicInfo = if (source is ModelSource.ContentUri) {
+                            modelInfo.copy(name = displayName, path = modelPath)
+                        } else {
+                            modelInfo
+                        }
+                        _currentModel.value = publicInfo
+                        _state.value = EngineState.ModelLoaded(publicInfo)
+                        deferred.complete(Result.success(publicInfo))
                     } else {
                         _currentModel.value = null
                         lastLoadedSource = null
@@ -477,7 +517,20 @@ internal class InferenceClient(
                 override fun onError(requestId: String?, errorMessage: String?, partialText: String?) {}
             }
 
-            service.loadModel(file.absolutePath, config, callback)
+            try {
+                service.loadModel(
+                    modelPath,
+                    checkNotNull(modelDescriptor) { "Model file descriptor was not opened" },
+                    displayName,
+                    config,
+                    callback
+                )
+            } finally {
+                // Binder duplicates the descriptor into :inference. Release this
+                // process' copy; the service retains its own descriptor for mmap.
+                runCatching { modelDescriptor?.close() }
+                modelDescriptor = null
+            }
 
             return try {
                 withTimeout(effectiveTimeout.modelLoadMs) {
@@ -502,6 +555,7 @@ internal class InferenceClient(
             }
         } catch (t: Throwable) {
             registeredPendingLoad?.let { pendingModelLoad.compareAndSet(it, null) }
+            runCatching { modelDescriptor?.close() }
             _state.value = EngineState.Error(t.message ?: "Failed to initiate model load")
             return Result.failure(t)
         }

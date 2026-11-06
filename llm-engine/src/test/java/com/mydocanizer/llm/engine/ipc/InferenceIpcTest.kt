@@ -1,6 +1,7 @@
 package com.mydocanizer.llm.engine.ipc
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import com.mydocanizer.llm.engine.BackendInfo
 import com.mydocanizer.llm.engine.ChatMessage
 import com.mydocanizer.llm.engine.EngineConfig
@@ -70,14 +71,20 @@ class InferenceIpcTest {
             initialized.set(true)
         }
 
-        override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
+        override fun loadModel(
+            modelPath: String,
+            modelDescriptor: ParcelFileDescriptor,
+            displayName: String,
+            config: EngineConfig,
+            callback: IInferenceCallback?
+        ) {
             loadedModel.set(modelPath)
             replacementProcessIdOnLoad.get().takeIf { it > 0 }?.let(currentProcessId::set)
             if (hangModelLoad.get()) return
             callback?.onModelLoadProgress(23)
             callback?.onModelLoadProgress(79)
             val info = ModelInfo(
-                name = File(modelPath).name,
+                name = displayName,
                 path = modelPath,
                 sizeBytes = 1024L * 1024L,
                 parameterCount = 500_000_000L,

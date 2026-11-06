@@ -3,6 +3,7 @@ package com.mydocanizer.llm.engine.ipc
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.util.Log
 import com.mydocanizer.llm.engine.BackendInfo
@@ -64,6 +65,8 @@ class InferenceService : Service() {
     private var activeInferenceJob: Job? = null
     private val isShuttingDown = AtomicBoolean(false)
     private var resourceMonitor: EngineResourceMonitor? = null
+    @Volatile
+    private var activeModelDescriptor: ParcelFileDescriptor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -134,6 +137,8 @@ class InferenceService : Service() {
                 activeInferenceJob?.join()
                 engine?.close()
                 engine = null
+                activeModelDescriptor?.close()
+                activeModelDescriptor = null
             }
         }.onFailure { error ->
             Log.e(TAG, "Error closing inference engine on destroy", error)
@@ -160,12 +165,19 @@ class InferenceService : Service() {
             }
         }
 
-        override fun loadModel(modelPath: String, config: EngineConfig, callback: IInferenceCallback?) {
+        override fun loadModel(
+            modelPath: String,
+            modelDescriptor: ParcelFileDescriptor,
+            displayName: String,
+            config: EngineConfig,
+            callback: IInferenceCallback?
+        ) {
             interruptInferenceForModelOperation("loadModel")
             resourceMonitor?.beginModelLoad(modelPath, config)
             serviceScope.launch {
                 var progressJob: Job? = null
                 var modelLoadedSuccessfully = false
+                var descriptorTransferred = false
                 try {
                     val e = initEngine()
                     val initialization = e.initialize()
@@ -177,27 +189,49 @@ class InferenceService : Service() {
                         return@launch
                     }
                     resourceMonitor?.nativeBackendReady()
-                    EngineDiagnostics.info("ipc", "LOAD_MODEL_REQUESTED", "path=$modelPath, ctx=${config.contextSize}")
+                    val nativePath = "/proc/self/fd/${modelDescriptor.fd}"
+                    EngineDiagnostics.info(
+                        "ipc",
+                        "LOAD_MODEL_REQUESTED",
+                        "source=$modelPath,nativePath=$nativePath,directDescriptor=true,ctx=${config.contextSize}"
+                    )
                     progressJob = serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         e.modelLoadProgressEvents.collect { percent ->
                             runCatching { callback?.onModelLoadProgress(percent.coerceIn(0, 99)) }
                         }
                     }
-                    val result = e.loadModel(ModelSource.FilePath(modelPath), config)
+
+                    // Unload an old mmap before closing the descriptor it uses.
+                    activeModelDescriptor?.let { previous ->
+                        e.unloadModel().getOrThrow()
+                        activeModelDescriptor = null
+                        previous.close()
+                    }
+
+                    val result = e.loadModel(ModelSource.FilePath(nativePath), config)
                     result.onSuccess { info ->
                         modelLoadedSuccessfully = true
-                        resourceMonitor?.modelLoaded(info, config)
-                        EngineDiagnostics.info("ipc", "MODEL_LOADED", "model=${info.name}, backend=${info.activeBackend}")
-                        callback?.onModelLoaded(info)
+                        activeModelDescriptor = modelDescriptor
+                        descriptorTransferred = true
+                        val publicInfo = info.copy(name = displayName, path = modelPath)
+                        resourceMonitor?.modelLoaded(publicInfo, config)
+                        EngineDiagnostics.info(
+                            "ipc",
+                            "MODEL_LOADED",
+                            "model=${publicInfo.name},backend=${publicInfo.activeBackend},directDescriptor=true"
+                        )
+                        callback?.onModelLoaded(publicInfo)
                     }.onFailure { err ->
                         EngineDiagnostics.error("ipc", "MODEL_LOAD_FAILED", err)
                         callback?.onModelLoadFailed(err.message ?: "Model load failed")
                     }
                 } catch (t: Throwable) {
                     Log.e(TAG, "Unhandled exception in loadModel", t)
+                    EngineDiagnostics.error("ipc", "MODEL_LOAD_EXCEPTION", t)
                     callback?.onModelLoadFailed(t.message ?: t.javaClass.simpleName)
                 } finally {
                     if (!modelLoadedSuccessfully) resourceMonitor?.modelLoadFailed()
+                    if (!descriptorTransferred) runCatching { modelDescriptor.close() }
                     progressJob?.cancel()
                 }
             }
@@ -209,6 +243,8 @@ class InferenceService : Service() {
             serviceScope.launch {
                 try {
                     engine?.unloadModel()?.onSuccess {
+                        activeModelDescriptor?.close()
+                        activeModelDescriptor = null
                         resourceMonitor?.modelUnloaded()
                         callback?.onModelLoaded(null)
                     }?.onFailure { err ->

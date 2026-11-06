@@ -217,7 +217,7 @@ fun ModelImportScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "GGUF-Modell importieren (SAF)",
+                        text = "GGUF-Datei direkt öffnen (SAF)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -232,12 +232,12 @@ fun ModelImportScreen(
 
                     Column {
                         Text(
-                            text = "Sichere private Modellablage",
+                            text = "Direkter Zugriff auf Originaldatei",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            text = "Die Engine kopiert das Modell beim Import in den privaten App-Speicher, prüft die GGUF-Signatur und vergibt einen eindeutigen SHA-256-Dateinamen. Die Originaldatei bleibt unverändert.",
+                            text = "Die Engine öffnet die ausgewählte Originaldatei direkt über einen Android-Dateideskriptor im isolierten Inferenzprozess. Es wird keine zweite GGUF-Datei angelegt oder umbenannt; die Originaldatei bleibt am gewählten Speicherort.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -271,11 +271,11 @@ fun ModelImportScreen(
                                 strokeWidth = 2.dp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Importiere & berechne SHA-256...")
+                            Text("Öffne Originaldatei...")
                         } else {
                             Icon(imageVector = Icons.Default.FileOpen, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("GGUF-Datei über SAF auswählen")
+                            Text("GGUF-Datei direkt öffnen")
                         }
                     }
                 }

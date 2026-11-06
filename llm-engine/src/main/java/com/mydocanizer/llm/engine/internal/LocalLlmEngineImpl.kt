@@ -222,10 +222,21 @@ internal class LocalLlmEngineImpl(
             val sizeBytes = parts.getOrNull(3)?.toLongOrNull() ?: file.length()
             val activeBackend = parts.getOrNull(4) ?: NativeEngineHandle.nativeGetActiveBackend(handle)
 
+            val isDirectDescriptor = source is ModelSource.FilePath &&
+                source.path.startsWith("/proc/self/fd/")
             val shaStartNano = System.nanoTime()
-            val importedSha256 = trustedImportedSha256(file)
-            val sha256 = importedSha256 ?: calculateSha256(file) { percent ->
-                updateModelLoadProgress(percent)
+            val importedSha256 = if (isDirectDescriptor) null else trustedImportedSha256(file)
+            val sha256 = when {
+                isDirectDescriptor -> {
+                    EngineDiagnostics.info(
+                        "engine",
+                        "MODEL_SHA256_SKIPPED_DIRECT_SOURCE",
+                        "reason=avoid_second_full_file_read,fileBytes=${file.length()}"
+                    )
+                    null
+                }
+                importedSha256 != null -> importedSha256
+                else -> calculateSha256(file) { percent -> updateModelLoadProgress(percent) }
             }
             if (importedSha256 != null) {
                 updateModelLoadProgress(99)
