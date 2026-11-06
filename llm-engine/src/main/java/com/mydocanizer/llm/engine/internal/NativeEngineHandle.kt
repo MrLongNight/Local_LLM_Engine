@@ -91,6 +91,8 @@ internal object NativeEngineHandle {
         roles: Array<String>,
         contents: Array<String>,
         maxPredict: Int,
+        temperature: Float,
+        topP: Float,
         enableThinking: Boolean,
         progressCallback: NativeInferenceProgressCallback
     ): Int

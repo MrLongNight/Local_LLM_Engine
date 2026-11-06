@@ -124,6 +124,12 @@ internal class LocalLlmEngineImpl(
         source: ModelSource,
         config: EngineConfig
     ): Result<ModelInfo> {
+        // JNI inference is blocking. Signal the native cancellation flag before
+        // initialization/model loading queues behind the single native dispatcher.
+        if (_state.value is EngineState.Inferring) {
+            EngineDiagnostics.info("engine", "MODEL_LOAD_PREEMPTS_INFERENCE", "Cancelling active inference before model load")
+            cancelInference()
+        }
         val initializationError = initialize().exceptionOrNull()
         if (initializationError != null) return Result.failure(initializationError)
 
@@ -318,9 +324,24 @@ internal class LocalLlmEngineImpl(
             roles = roles,
             contents = contents,
             maxPredict = request.maxPredictTokens,
+            temperature = request.temperature ?: Float.NaN,
+            topP = request.topP ?: Float.NaN,
             enableThinking = request.enableThinking,
             progressCallback = progressCallback
         )
+
+        if (processRes == 6 || isCancelled.get()) {
+            val cancelledTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
+            EngineDiagnostics.info(
+                "inference",
+                "PREFILL_CANCELLED",
+                "tokensGenerated=$cancelledTokens, nativeResult=$processRes"
+            )
+            trySend(InferenceEvent.Cancelled("", cancelledTokens))
+            _state.value = EngineState.ModelLoaded(modelInfo)
+            close()
+            return@callbackFlow
+        }
 
         if (processRes != 0) {
             val message = when (processRes) {
@@ -329,6 +350,7 @@ internal class LocalLlmEngineImpl(
                 3 -> "The chat template produced no prompt tokens"
                 4 -> "llama.cpp failed while decoding the prompt"
                 5 -> "The model chat template could not be formatted"
+                7 -> "Native request sampler initialization failed"
                 else -> "Native prompt evaluation failed with code $processRes"
             }
             val err = IllegalStateException(message)

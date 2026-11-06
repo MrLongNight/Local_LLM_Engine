@@ -205,8 +205,12 @@ class InferenceService : Service() {
             request: InferenceRequest,
             callback: IInferenceCallback?
         ) {
-            // Cancel any previously active generation before starting the new request
-            activeInferenceJob?.cancel()
+            // A coroutine Job cancellation alone cannot interrupt blocking JNI prefill.
+            // Signal llama.cpp's atomic cancel flag first, then cancel the collector.
+            if (activeInferenceJob != null) {
+                engine?.cancelInference()
+                activeInferenceJob?.cancel()
+            }
             activeRequestId.set(requestId)
 
             activeInferenceJob = serviceScope.launch {

@@ -57,7 +57,12 @@ data class EngineConfig(
         require(contextSize >= 256) { "contextSize must be at least 256" }
         require(batchSize >= 64) { "batchSize must be at least 64" }
         require(threads >= 1) { "threads must be at least 1" }
-        require(temperature >= 0f) { "temperature must be non-negative" }
+        require(temperature.isFinite() && temperature >= 0f) {
+            "temperature must be finite and non-negative"
+        }
+        require(topP.isFinite() && topP in 0f..1f) {
+            "topP must be finite and between 0 and 1"
+        }
         require(maxPredictTokens >= 1) { "maxPredictTokens must be at least 1" }
     }
 

@@ -22,6 +22,12 @@ data class InferenceRequest(
     init {
         require(messages.isNotEmpty()) { "InferenceRequest messages must not be empty" }
         require(maxPredictTokens > 0) { "maxPredictTokens must be greater than zero" }
+        require(temperature == null || (temperature.isFinite() && temperature >= 0f)) {
+            "temperature must be finite and non-negative"
+        }
+        require(topP == null || (topP.isFinite() && topP in 0f..1f)) {
+            "topP must be finite and between 0 and 1"
+        }
     }
 
     constructor(parcel: Parcel) : this(

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <cstdio>
 #include <cstring>
@@ -111,6 +112,8 @@ struct EngineInstance {
     int32_t context_size = 4096;
     int32_t batch_size = BATCH_SIZE;
     int32_t n_threads = 4;
+    float default_temperature = DEFAULT_TEMP;
+    float default_top_p = 0.9f;
     std::string active_backend = "CPU";
     std::atomic<bool> cancel_requested{false};
     std::mutex mtx;
@@ -165,6 +168,13 @@ struct EngineInstance {
         llama_memory_seq_rm(llama_get_memory(context), 0, system_prompt_position, system_prompt_position + n_discard);
         llama_memory_seq_add(llama_get_memory(context), 0, system_prompt_position + n_discard, current_position, -n_discard);
         current_position -= n_discard;
+        // The generation limit is an absolute KV position too. Move it by the
+        // same amount as the retained sequence or a context shift can extend
+        // generation beyond the caller's maxPredictTokens.
+        if (stop_generation_position > system_prompt_position) {
+            stop_generation_position = std::max(
+                system_prompt_position, stop_generation_position - n_discard);
+        }
     }
 
     // Caller must hold mtx.
@@ -701,9 +711,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     try {
         engine->chat_templates = common_chat_templates_init(model, "");
 
+        engine->default_temperature =
+            std::isfinite(temperature) && temperature >= 0.0f ? temperature : DEFAULT_TEMP;
+        engine->default_top_p =
+            std::isfinite(top_p) && top_p >= 0.0f && top_p <= 1.0f ? top_p : 0.9f;
         common_params_sampling sparams;
-        sparams.temp = temperature >= 0.0f ? temperature : DEFAULT_TEMP;
-        sparams.top_p = (top_p >= 0.0f && top_p <= 1.0f) ? top_p : 0.9f;
+        sparams.temp = engine->default_temperature;
+        sparams.top_p = engine->default_top_p;
         engine->sampler = common_sampler_init(model, sparams);
     } catch (const std::exception& error) {
         LOGE("Native chat-template/sampler setup threw a C++ exception: %s", error.what());
@@ -780,6 +794,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         jobjectArray jroles,
         jobjectArray jcontents,
         jint max_predict,
+        jfloat request_temperature,
+        jfloat request_top_p,
         jboolean enable_thinking,
         jobject progress_listener) {
     auto* engine = fromHandle(handle);
@@ -794,6 +810,40 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     if (count == 0 || count != env->GetArrayLength(jcontents)) {
         return 2;
     }
+
+    // Recreate the sampler for every request so the sampler history is fresh
+    // and optional request overrides do not mutate the model's stored defaults.
+    const float effective_temperature =
+        std::isfinite(request_temperature) && request_temperature >= 0.0f
+            ? request_temperature : engine->default_temperature;
+    const float effective_top_p =
+        std::isfinite(request_top_p) && request_top_p >= 0.0f && request_top_p <= 1.0f
+            ? request_top_p : engine->default_top_p;
+    if (engine->sampler != nullptr) {
+        common_sampler_free(engine->sampler);
+        engine->sampler = nullptr;
+    }
+    try {
+        common_params_sampling request_sampling;
+        request_sampling.temp = effective_temperature;
+        request_sampling.top_p = effective_top_p;
+        engine->sampler = common_sampler_init(engine->model, request_sampling);
+    } catch (const std::exception& error) {
+        LOGE("Request sampler initialization failed: %s", error.what());
+        engine->last_finish_reason = 3;
+        return 7;
+    } catch (...) {
+        LOGE("Request sampler initialization failed with an unknown exception");
+        engine->last_finish_reason = 3;
+        return 7;
+    }
+    if (engine->sampler == nullptr) {
+        LOGE("Request sampler initialization returned null");
+        engine->last_finish_reason = 3;
+        return 7;
+    }
+    LOGI("Request sampler configured: temperature=%.3f, top_p=%.3f",
+         effective_temperature, effective_top_p);
 
     engine->last_prompt_template_us = 0;
     engine->last_prompt_tokenization_us = 0;
@@ -940,6 +990,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     const int64_t prompt_duration_ms = (llama_time_us() - prompt_start_us) / 1000;
     engine->last_prompt_decode_us = prompt_duration_ms * 1000;
     engine->last_prompt_tokens = prompt_size;
+    if (dec_res == -2) {
+        engine->last_finish_reason = 2; // CANCELLED during prompt prefill
+        LOGI("Prompt prefill cancelled cooperatively after %d of %d tokens",
+             engine->last_prompt_tokens, prompt_size);
+        return 6; // dedicated cancellation result; not a decode error
+    }
     if (dec_res != 0) {
         LOGE("Prompt decoding failed with code %d", dec_res);
         return 4;
