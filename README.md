@@ -44,6 +44,20 @@ The workflow runs automatically on pushes to `main` when Android app/engine sour
 
 The workflow builds `:app:assembleDebug`, including the native C++ build and the configured ARM64 Vulkan path, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
 
+## Inference process boundary
+
+The reusable `:llm-engine` library owns the `InferenceService` declaration in its
+library manifest. The demo app does not redeclare the service. The merged APK is
+checked to contain exactly one service registration with
+`android:process=":inference"`, `android:exported="false"` and
+`android:isolatedProcess="false"`. This is a separate process under the app's
+UID, not Android's separately sandboxed isolated-UID service mode.
+
+The Android instrumentation tests also inspect the resolved `ServiceInfo`
+before binding, then verify that the service PID differs from the app process,
+that killing it removes the original PID, and that the client can reconnect.
+These emulator tests do not replace a real-device test on the target phone.
+
 ## Native Android backends
 
 - ARM64 builds configure the CPU backend with `GGML_CPU_KLEIDIAI=ON`, matching the official llama.cpp Android reference. llama.cpp fetches the pinned KleidiAI v1.24.0 source at CMake configure time and includes applicable Arm kernels. This does not imply every kernel is used on every Arm CPU; runtime CPU features and supported operations determine applicability.

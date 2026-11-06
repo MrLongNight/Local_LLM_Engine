@@ -217,6 +217,61 @@ jobs:
           test -s app/build/outputs/apk/debug/app-debug.apk
           ls -lh app/build/outputs/apk/debug/app-debug.apk
 
+      - name: Verify merged APK service manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK_ANALYZER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name apkanalyzer -print -quit)"
+          test -n "$APK_ANALYZER"
+          "$APK_ANALYZER" manifest print app/build/outputs/apk/debug/app-debug.apk > "$RUNNER_TEMP/merged-manifest.xml"
+          python3 - "$RUNNER_TEMP/merged-manifest.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          android = "{http://schemas.android.com/apk/res/android}"
+          root = ET.parse(sys.argv[1]).getroot()
+          app = root.find("application")
+          if app is None:
+              raise SystemExit("APK manifest has no application element")
+
+          service_name = "com.mydocanizer.llm.engine.ipc.InferenceService"
+          services = [
+              item for item in app.findall("service")
+              if item.get(android + "name") == service_name
+          ]
+          if len(services) != 1:
+              raise SystemExit(
+                  f"Expected exactly one merged InferenceService declaration; found {len(services)}"
+              )
+
+          service = services[0]
+          process = service.get(android + "process", "")
+          if not process.endswith(":inference"):
+              raise SystemExit(f"InferenceService is not in :inference process: {process!r}")
+          if service.get(android + "exported", "").lower() != "false":
+              raise SystemExit("InferenceService must have android:exported=false")
+          if service.get(android + "isolatedProcess", "false").lower() != "false":
+              raise SystemExit("InferenceService must have android:isolatedProcess=false")
+
+          permissions = {
+              item.get(android + "name")
+              for item in root.findall("uses-permission")
+          }
+          required = {
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+          }
+          missing = required - permissions
+          if missing:
+              raise SystemExit(f"Missing library network permissions in merged APK: {sorted(missing)}")
+
+          print(
+              "Verified merged APK manifest: one private InferenceService, "
+              f"process={process}, exported=false, isolatedProcess=false"
+          )
+          print("Verified INTERNET and ACCESS_NETWORK_STATE permissions.")
+          PY
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

@@ -20,13 +20,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Dedicated isolated process for LLM execution protecting the app process from OOM/crashes -->
-        <service
-            android:name="com.mydocanizer.llm.engine.ipc.InferenceService"
-            android:process=":inference"
-            android:exported="false"
-            android:isolatedProcess="false" />
     </application>
 
 </manifest>

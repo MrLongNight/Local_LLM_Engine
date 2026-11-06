@@ -11,6 +11,7 @@ import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -55,6 +56,7 @@ class InferenceServiceProcessTest {
     @Test
     fun inferenceClientReconnectsAfterRemoteInferenceProcessDies() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        assertInferenceServiceManifest(context)
         val client = InferenceClient(context)
         var directBinding: BoundInferenceService? = null
         try {
@@ -100,6 +102,7 @@ class InferenceServiceProcessTest {
     @Test
     fun serviceRunsInDedicatedProcessCanBeKilledAndBoundAgain() {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        assertInferenceServiceManifest(context)
         val appPid = Process.myPid()
 
         val first = bindInferenceService(context)
@@ -134,6 +137,23 @@ class InferenceServiceProcessTest {
             )
             runCatching { context.unbindService(second.connection) }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun assertInferenceServiceManifest(context: Context) {
+        val component = ComponentName(context, InferenceService::class.java)
+        val serviceInfo = context.packageManager.getServiceInfo(component, 0)
+
+        assertEquals(
+            "Service must be registered in the app-private :inference process",
+            "${context.packageName}:inference",
+            serviceInfo.processName
+        )
+        assertFalse("Inference service must not be exported", serviceInfo.exported)
+        assertFalse(
+            "Inference service must not request Android's isolated UID sandbox",
+            serviceInfo.isolatedProcess
+        )
     }
 
     private fun bindInferenceService(context: Context): BoundInferenceService {
