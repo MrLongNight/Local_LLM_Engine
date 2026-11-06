@@ -50,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           LLAMA_DIR="llm-engine/src/main/cpp/llama.cpp"
-          EXPECTED="67107ac34f62882d8b53ea41ad68010ea635b9be"
+          EXPECTED="669204ee2b9004845b34f26466a91d003edc98aa"
           actual="$(git -C "$LLAMA_DIR" rev-parse HEAD)"
           test "$actual" = "$EXPECTED"
           echo "Verified ggml-org/llama.cpp at $actual"

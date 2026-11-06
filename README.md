@@ -1,6 +1,6 @@
 # Local LLM Engine
 
-A standalone Android application and reusable Android library for running local GGUF language models with llama.cpp.
+An Android demo application and reusable Android library for running local GGUF language models with llama.cpp.
 
 > **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. Successful Kotlin unit tests and APK compilation do not prove real-device model loading, inference, cancellation, hardware offload or performance.
 
@@ -8,7 +8,7 @@ A standalone Android application and reusable Android library for running local 
 
 - `:app` — demo Android application.
 - `:llm-engine` — reusable Android library containing the public engine API and JNI/native llama.cpp integration.
-- `:llm-engine/src/main/cpp/llama.cpp` — pinned Git submodule of `ggml-org/llama.cpp` at `e14a779719652200cec7ad58dfa4820edc347182` (2026-11-05).
+- `:llm-engine/src/main/cpp/llama.cpp` — pinned Git submodule of `ggml-org/llama.cpp` at `669204ee2b9004845b34f26466a91d003edc98aa` (2026-11-06).
 - `INTEGRATION_MYDOCANIZER.md` — integration notes for the intended myDocAnizer-Mobile target.
 
 ## Requirements
@@ -61,15 +61,22 @@ These emulator tests do not replace a real-device test on the target phone.
 
 ## Native llama.cpp source
 
-The engine pins the upstream source as a Git submodule at
-`67107ac34f62882d8b53ea41ad68010ea635b9be` (2026-11-06). The exact revision is
-also verified in the APK workflow. To initialize or refresh a clone:
+The engine pins the upstream `ggml-org/llama.cpp` source as a Git submodule at
+`669204ee2b9004845b34f26466a91d003edc98aa` (upstream HEAD checked on 2026-11-06 at
+19:51 UTC). The exact revision is also verified in the APK workflow. To initialize
+or refresh a clone:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-The upstream Mali subgroup-size matmul fix is already included in this revision. This pin is the current upstream HEAD checked on 2026-11-06. Compared with the previous pin, the only additional upstream commit improves the Hexagon backend's tensor transfer/repacking path; the CPU and Vulkan source files are unchanged by that one-commit update. Hexagon is not enabled in this Android build, so this pin update does not claim NPU acceleration.
+This revision is 15 upstream commits newer than the previous pin
+`67107ac34f62882d8b53ea41ad68010ea635b9be`. The updates include Vulkan
+ReBAR detection and corresponding device-memory allocation handling, alongside
+upstream fixes and improvements in other backends and shared code. This is a
+source update, not evidence of faster inference on the target phone. Hexagon is
+not enabled in this Android build, so this pin update does not claim NPU
+acceleration.
 Android API-24 Vulkan loader and Mali extension-dispatch compatibility remain as
 a build-only overlay: CMake copies upstream `ggml-vulkan.cpp` into the build
 directory, applies checked replacements there, and compiles that copy. The
