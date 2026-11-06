@@ -2,7 +2,6 @@ package com.mydocanizer.llm.engine.ipc
 
 import android.content.ComponentName
 import android.content.Context
-import android.content.pm.ServiceInfo
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
@@ -151,10 +150,9 @@ class InferenceServiceProcessTest {
             serviceInfo.processName
         )
         assertFalse("Inference service must not be exported", serviceInfo.exported)
-        assertEquals(
+        assertFalse(
             "Inference service must not request Android's isolated UID sandbox",
-            0,
-            serviceInfo.flags and ServiceInfo.FLAG_ISOLATED_PROCESS
+            serviceInfo.isolatedProcess
         )
     }
 

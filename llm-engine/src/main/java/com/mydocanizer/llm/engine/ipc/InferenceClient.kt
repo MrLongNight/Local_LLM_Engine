@@ -1,10 +1,12 @@
 package com.mydocanizer.llm.engine.ipc
 
 import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.os.Build
 import android.os.IBinder
 import android.os.Process
 import android.util.Log
@@ -144,6 +146,7 @@ internal class InferenceClient(
         override fun onServiceDisconnected(name: ComponentName?) {
             val disconnectedPid = _remotePid.value
             failPendingModelLoad(disconnectedPid, "SERVICE_DISCONNECTED")
+            recordRemoteProcessExit(disconnectedPid, "SERVICE_DISCONNECTED")
             remoteService = null
             _remotePid.value = null
             _currentModel.value = null
@@ -158,6 +161,7 @@ internal class InferenceClient(
         override fun onBindingDied(name: ComponentName?) {
             val disconnectedPid = _remotePid.value
             failPendingModelLoad(disconnectedPid, "BINDING_DIED")
+            recordRemoteProcessExit(disconnectedPid, "BINDING_DIED")
             remoteService = null
             _remotePid.value = null
             _currentModel.value = null
@@ -206,6 +210,81 @@ internal class InferenceClient(
         _state.value = EngineState.Error(error.message ?: "Inference process disconnected", error)
         EngineDiagnostics.error("ipc_client", event, error)
         pending.deferred.complete(Result.failure(error))
+    }
+
+    /**
+     * Reads Android's historical exit record for the exact inference PID that disconnected.
+     * This distinguishes native crashes, low-memory kills and signal termination from a
+     * normal Binder disconnect. The API is available from Android 11 (API 30).
+     */
+    private fun recordRemoteProcessExit(pid: Int?, callback: String) {
+        if (pid == null || pid <= 0) return
+
+        clientScope.launch(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "PROCESS_EXIT_INFO_UNAVAILABLE",
+                    "pid=$pid,callback=$callback,reason=requires_api_30"
+                )
+                return@launch
+            }
+
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            if (activityManager == null) {
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "PROCESS_EXIT_INFO_UNAVAILABLE",
+                    "pid=$pid,callback=$callback,reason=activity_manager_unavailable"
+                )
+                return@launch
+            }
+
+            val exitInfo = runCatching {
+                activityManager.getHistoricalProcessExitReasons(context.packageName, pid, 8)
+                    .firstOrNull { it.pid == pid }
+            }.onFailure { error ->
+                EngineDiagnostics.error("ipc_client", "PROCESS_EXIT_INFO_QUERY_FAILED", error)
+            }.getOrNull()
+
+            if (exitInfo == null) {
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "PROCESS_EXIT_INFO_UNAVAILABLE",
+                    "pid=$pid,callback=$callback,reason=no_matching_system_record"
+                )
+                return@launch
+            }
+
+            val reasonName = when (exitInfo.reason) {
+                ApplicationExitInfo.REASON_EXIT_SELF -> "EXIT_SELF"
+                ApplicationExitInfo.REASON_SIGNALED -> "SIGNALED"
+                ApplicationExitInfo.REASON_LOW_MEMORY -> "LOW_MEMORY"
+                ApplicationExitInfo.REASON_CRASH -> "CRASH"
+                ApplicationExitInfo.REASON_CRASH_NATIVE -> "CRASH_NATIVE"
+                ApplicationExitInfo.REASON_ANR -> "ANR"
+                ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "INITIALIZATION_FAILURE"
+                ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "EXCESSIVE_RESOURCE_USAGE"
+                ApplicationExitInfo.REASON_USER_REQUESTED -> "USER_REQUESTED"
+                ApplicationExitInfo.REASON_USER_STOPPED -> "USER_STOPPED"
+                ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "DEPENDENCY_DIED"
+                ApplicationExitInfo.REASON_OTHER -> "OTHER"
+                else -> "UNKNOWN"
+            }
+            val description = exitInfo.description
+                ?.replace(Regex("\\s+"), " ")
+                ?.take(320)
+                ?: "none"
+
+            EngineDiagnostics.info(
+                "ipc_client",
+                "PROCESS_EXIT_INFO",
+                "pid=$pid,callback=$callback,process=${exitInfo.processName}," +
+                    "reason=$reasonName,reasonCode=${exitInfo.reason},status=${exitInfo.status}," +
+                    "importance=${exitInfo.importance},pssKb=${exitInfo.pss},rssKb=${exitInfo.rss}," +
+                    "timestamp=${exitInfo.timestamp},description=$description"
+            )
+        }
     }
 
     private fun bindToService() {
