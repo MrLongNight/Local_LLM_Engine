@@ -330,7 +330,7 @@ class InferenceIpcTest {
     fun testMockIpcClientModelLoadingAndChat() = runBlocking {
         val fakeService = FakeInferenceService()
         val tempFile = File.createTempFile("test_model", ".gguf").apply {
-            writeBytes(ByteArray(100))
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46) + ByteArray(96))
             deleteOnExit()
         }
 
