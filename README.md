@@ -62,14 +62,14 @@ These emulator tests do not replace a real-device test on the target phone.
 ## Native llama.cpp source
 
 The engine pins the upstream source as a Git submodule at
-`e14a779719652200cec7ad58dfa4820edc347182` (2026-11-05). The exact revision is
+`67107ac34f62882d8b53ea41ad68010ea635b9be` (2026-11-06). The exact revision is
 also verified in the APK workflow. To initialize or refresh a clone:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-The upstream Mali subgroup-size matmul fix is already included in this revision.
+The upstream Mali subgroup-size matmul fix is already included in this revision. This pin is the current upstream HEAD checked on 2026-11-06. Compared with the previous pin, the only additional upstream commit improves the Hexagon backend's tensor transfer/repacking path; the CPU and Vulkan source files are unchanged by that one-commit update. Hexagon is not enabled in this Android build, so this pin update does not claim NPU acceleration.
 Android API-24 Vulkan loader and Mali extension-dispatch compatibility remain as
 a build-only overlay: CMake copies upstream `ggml-vulkan.cpp` into the build
 directory, applies checked replacements there, and compiles that copy. The
@@ -96,7 +96,7 @@ gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 ## Current limitations
 
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
-- Remote model imports are HTTPS-only and staged in app-private storage under a SHA-256-addressed filename. Downloads are not resumable yet.
+- SAF, APK-asset and HTTPS remote model imports are streamed to a hidden `.part` file, checked for the GGUF magic header, SHA-256 hashed, and atomically published in app-private storage under a SHA-256-addressed filename. HTTPS redirects are limited and cannot downgrade to HTTP. Downloads are not resumable yet.
 - Coroutine/native cancellation and the dedicated inference process are implemented, but hard-abort, PID-death confirmation, Binder recovery and real-device cancellation still require instrumentation/device verification.
 - No real-device performance result is implied by CI success.
 

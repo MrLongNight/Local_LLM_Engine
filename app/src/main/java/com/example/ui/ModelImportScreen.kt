@@ -254,7 +254,11 @@ fun ModelImportScreen(
                     }
 
                     Button(
-                        onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                        onClick = {
+                            filePickerLauncher.launch(
+                                arrayOf("application/octet-stream", "application/x-gguf", "application/x-binary")
+                            )
+                        },
                         enabled = !isImporting,
                         modifier = Modifier
                             .fillMaxWidth()

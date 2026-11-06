@@ -223,10 +223,18 @@ internal class LocalLlmEngineImpl(
             val activeBackend = parts.getOrNull(4) ?: NativeEngineHandle.nativeGetActiveBackend(handle)
 
             val shaStartNano = System.nanoTime()
-            val sha256 = calculateSha256(file) { percent ->
+            val importedSha256 = trustedImportedSha256(file)
+            val sha256 = importedSha256 ?: calculateSha256(file) { percent ->
                 updateModelLoadProgress(percent)
             }
-            if (sha256 != null) {
+            if (importedSha256 != null) {
+                updateModelLoadProgress(99)
+                EngineDiagnostics.info(
+                    "engine",
+                    "MODEL_SHA256_REUSED_IMPORT_DIGEST",
+                    "trustedPrivateImportName=true, fileBytes=${file.length()}"
+                )
+            } else if (sha256 != null) {
                 EngineDiagnostics.info(
                     "engine",
                     "MODEL_SHA256_COMPLETED",
@@ -533,6 +541,23 @@ internal class LocalLlmEngineImpl(
             _modelLoadProgressEvents.tryEmit(safePercent)
         }
     }
+
+    /**
+     * Imports created by ModelSourceResolver are stored privately as
+     * <sha256>-<display-name>.gguf. Trust that digest only inside our private models
+     * directory; arbitrary external FilePath names are never treated as hashes.
+     */
+    private fun trustedImportedSha256(file: File): String? = runCatching {
+        val privateModelsDir = File(context.filesDir, "models").canonicalFile
+        val canonicalFile = file.canonicalFile
+        if (canonicalFile.parentFile != privateModelsDir) {
+            return@runCatching null
+        }
+        val separator = canonicalFile.name.indexOf('-')
+        if (separator != 64) return@runCatching null
+        canonicalFile.name.substring(0, separator)
+            .takeIf { it.matches(Regex("[0-9a-f]{64}")) }
+    }.getOrNull()
 
     private fun calculateSha256(file: File, onProgress: (Int) -> Unit): String? {
         val result = runCatching {
