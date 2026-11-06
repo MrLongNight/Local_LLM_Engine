@@ -889,17 +889,18 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     const int64_t tokenization_start_us = llama_time_us();
     llama_tokens tokens;
     if (used_chat_template) {
-        bool add_special = true;
+        // The rendered template already contains model-specific BOS/EOS markers.
+        // Do not add a second BOS during tokenization. Parse control tokens only
+        // in template-owned parts; user input parts must remain literal text.
         for (const auto& part : rendered_prompt.parts) {
             if (part.text.empty()) continue;
             auto part_tokens = common_tokenize(
                 engine->context,
                 part.text,
-                add_special,
+                false,
                 !part.is_input
             );
             tokens.insert(tokens.end(), part_tokens.begin(), part_tokens.end());
-            add_special = false;
         }
     } else {
         tokens = common_tokenize(engine->context, full_prompt, false, false);
