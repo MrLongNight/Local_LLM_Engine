@@ -114,10 +114,16 @@ static void ggml_vk_get_physical_device_features2(
     # 16-bit storage is core in Vulkan 1.1. Some Android 1.1+ drivers no longer
     # enumerate the promoted extension and reject it if requested by name.
     set(_storage_anchor "        device_extensions.push_back(\"VK_KHR_16bit_storage\");")
-    string(REGEX MATCHALL "device_extensions\\.push_back\\(\"VK_KHR_16bit_storage\"\\);" _storage_matches "${_vulkan_contents}")
-    list(LENGTH _storage_matches _storage_count)
-    if(NOT _storage_count EQUAL 1)
-        message(FATAL_ERROR "LocalLLM: expected one Vulkan 16-bit-storage extension request, found ${_storage_count}. Review compatibility overlay.")
+    string(FIND "${_vulkan_contents}" "${_storage_anchor}" _storage_position)
+    if(_storage_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan 16-bit-storage extension request changed; review compatibility overlay.")
+    endif()
+    string(LENGTH "${_storage_anchor}" _storage_anchor_length)
+    math(EXPR _storage_after_position "${_storage_position} + ${_storage_anchor_length}")
+    string(SUBSTRING "${_vulkan_contents}" ${_storage_after_position} -1 _storage_tail)
+    string(FIND "${_storage_tail}" "${_storage_anchor}" _storage_duplicate_position)
+    if(NOT _storage_duplicate_position EQUAL -1)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan 16-bit-storage extension request is duplicated; review compatibility overlay.")
     endif()
     set(_storage_replacement [=[
         if (device->properties.apiVersion < VK_API_VERSION_1_1) {
