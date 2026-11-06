@@ -345,7 +345,7 @@ class InferenceIpcTest {
         }
 
         val loadResult = client.loadModel(ModelSource.FilePath(tempFile.absolutePath), EngineConfig())
-        assertTrue(loadResult.isSuccess)
+        assertTrue("Mock FilePath model load failed: ${loadResult.exceptionOrNull()}", loadResult.isSuccess)
         progressJob.join()
         assertEquals(listOf(0, 23, 79, 100), progressEvents)
         val modelInfo = loadResult.getOrThrow()
