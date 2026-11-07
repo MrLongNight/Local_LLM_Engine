@@ -71,3 +71,48 @@ jobs:
 
       - name: Run unit tests
         run: gradle --no-daemon :app:testDebugUnitTest :llm-engine:testDebugUnitTest
+
+      - name: Print failed JUnit assertions
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+
+          report_files = sorted(
+              glob.glob("app/build/test-results/testDebugUnitTest/TEST-*.xml")
+              + glob.glob("llm-engine/build/test-results/testDebugUnitTest/TEST-*.xml")
+          )
+          if not report_files:
+              print("No JUnit XML reports were generated.")
+          for report_file in report_files:
+              try:
+                  root = ET.parse(report_file).getroot()
+              except (ET.ParseError, OSError) as error:
+                  print(f"Could not parse {report_file}: {error}")
+                  continue
+              for case in root.findall(".//testcase"):
+                  for failure in list(case.findall("failure")) + list(case.findall("error")):
+                      name = f"{case.get('classname', 'unknown')}.{case.get('name', 'unknown')}"
+                      print(f"FAILED: {name}")
+                      print(f"Type: {failure.get('type', 'unknown')}")
+                      print(f"Message: {failure.get('message', '(no assertion message)')}")
+                      detail = (failure.text or "").strip()
+                      if detail:
+                          print("Failure detail:")
+                          print(detail[-12000:])
+          PY
+
+      - name: Upload unit-test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports-${{ github.run_number }}
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+            llm-engine/build/test-results/testDebugUnitTest/
+            llm-engine/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
