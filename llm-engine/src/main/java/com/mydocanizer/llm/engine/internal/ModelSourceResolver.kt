@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.system.Os
+import android.system.OsConstants
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -23,16 +24,26 @@ internal object ModelSourceResolver {
     private const val READ_TIMEOUT_MS = 30_000
     private const val MAX_REDIRECTS = 5
     private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
+    private val PROC_SELF_FD_PATH = Regex("^/proc/self/fd/([0-9]+)$")
 
     suspend fun resolveToFile(context: Context, source: ModelSource): File =
         withContext(Dispatchers.IO) {
             when (source) {
                 is ModelSource.FilePath -> {
                     val file = source.file
-                    require(file.isFile && file.canRead()) {
-                        "Model file does not exist or cannot be read: ${source.path}"
+                    if (PROC_SELF_FD_PATH.matches(source.path)) {
+                        // /proc/self/fd/N is a process-local descriptor path, not a
+                        // conventional filesystem path. File.isFile/canRead() are not
+                        // reliable for Binder-transferred SAF descriptors on Android.
+                        // Validate the actual descriptor with fstat/lseek/pread/mmap
+                        // and keep the original descriptor open for llama.cpp.
+                        validateSeekableMmapDescriptor(source.path)
+                    } else {
+                        require(file.isFile && file.canRead()) {
+                            "Model file does not exist or cannot be read: ${source.path}"
+                        }
+                        validateGgufMagic(file)
                     }
-                    validateGgufMagic(file)
                     file
                 }
 
@@ -178,6 +189,131 @@ internal object ModelSourceResolver {
             return destination
         } finally {
             temporaryFile?.takeIf { it.exists() }?.delete()
+        }
+    }
+
+    /**
+     * Validates a descriptor path inside the current process without copying its contents.
+     *
+     * SAF providers may return regular file descriptors or pipe-backed descriptors.
+     * llama.cpp needs random access and mmap, so only a readable, seekable regular file
+     * is accepted. All checks operate on a temporary duplicate opened through procfs;
+     * the ParcelFileDescriptor owned by InferenceService remains open for native loading.
+     */
+    private fun validateSeekableMmapDescriptor(procPath: String) {
+        val descriptorNumber = PROC_SELF_FD_PATH.matchEntire(procPath)
+            ?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: throw IllegalArgumentException("Invalid process-local model descriptor path")
+
+        val stat = try {
+            Os.stat(procPath)
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "SAF model descriptor $descriptorNumber is no longer available in :inference; " +
+                    "the provider descriptor may have been closed before model loading",
+                error
+            )
+        }
+
+        val fileType = stat.st_mode and OsConstants.S_IFMT
+        if (fileType != OsConstants.S_IFREG) {
+            val sourceType = when (fileType) {
+                OsConstants.S_IFIFO -> "pipe"
+                OsConstants.S_IFSOCK -> "socket"
+                OsConstants.S_IFCHR -> "character device"
+                OsConstants.S_IFBLK -> "block device"
+                OsConstants.S_IFDIR -> "directory"
+                else -> "non-regular source (mode=0x${stat.st_mode.toString(16)})"
+            }
+            throw IllegalArgumentException(
+                "Selected SAF provider supplied a $sourceType descriptor, not a seekable regular file. " +
+                    "llama.cpp requires a seekable, mmap-capable file descriptor. " +
+                    "The source was not copied; choose a provider that exposes the file directly."
+            )
+        }
+
+        require(stat.st_size >= GGUF_MAGIC.size) {
+            "SAF model descriptor $descriptorNumber points to a file smaller than a GGUF header"
+        }
+
+        val probeFd = try {
+            Os.open(
+                procPath,
+                OsConstants.O_RDONLY or OsConstants.O_CLOEXEC,
+                0
+            )
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "SAF model descriptor $descriptorNumber cannot be reopened read-only in :inference",
+                error
+            )
+        }
+
+        try {
+            val openedStat = Os.fstat(probeFd)
+            require((openedStat.st_mode and OsConstants.S_IFMT) == OsConstants.S_IFREG) {
+                "SAF model descriptor changed type during validation; expected a regular file"
+            }
+            require(openedStat.st_size >= GGUF_MAGIC.size) {
+                "SAF model descriptor became shorter than a GGUF header during validation"
+            }
+
+            try {
+                Os.lseek(probeFd, 0L, OsConstants.SEEK_CUR)
+            } catch (error: Exception) {
+                throw IllegalArgumentException(
+                    "Selected SAF provider returned a non-seekable descriptor. " +
+                        "llama.cpp cannot mmap this source; the source was not copied.",
+                    error
+                )
+            }
+
+            val header = ByteArray(GGUF_MAGIC.size)
+            val bytesRead = try {
+                Os.pread(probeFd, header, 0, header.size, 0L)
+            } catch (error: Exception) {
+                throw IllegalArgumentException(
+                    "Could not read the GGUF header from the SAF descriptor without changing its offset",
+                    error
+                )
+            }
+            require(bytesRead == GGUF_MAGIC.size && header.contentEquals(GGUF_MAGIC)) {
+                "Invalid GGUF file on SAF descriptor: expected GGUF magic bytes at offset 0"
+            }
+
+            // Probe the same read-only mmap operation required by llama.cpp. Mapping only
+            // the first page is sufficient to reject pipe/proxy descriptors and catches
+            // providers/filesystems that allow lseek but deny file-backed mmap.
+            val probeLength = minOf(openedStat.st_size, 4096L)
+            val mapping = try {
+                Os.mmap(
+                    0L,
+                    probeLength,
+                    OsConstants.PROT_READ,
+                    OsConstants.MAP_PRIVATE,
+                    probeFd,
+                    0L
+                )
+            } catch (error: Exception) {
+                throw IllegalArgumentException(
+                    "Selected SAF provider returned a seekable descriptor but does not support " +
+                        "read-only mmap required by llama.cpp. The source was not copied.",
+                    error
+                )
+            }
+            try {
+                // The mapping is a capability probe only. llama.cpp creates its own mappings.
+            } finally {
+                Os.munmap(mapping, probeLength)
+            }
+
+            android.util.Log.i(
+                "ModelSourceResolver",
+                "Validated direct SAF descriptor fd=$descriptorNumber size=${openedStat.st_size} " +
+                    "seekable=true mmap=true copy=false"
+            )
+        } finally {
+            runCatching { Os.close(probeFd) }
         }
     }
 

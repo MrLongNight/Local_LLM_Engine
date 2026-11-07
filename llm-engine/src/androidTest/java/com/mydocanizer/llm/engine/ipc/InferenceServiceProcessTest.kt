@@ -8,6 +8,7 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.Parcel
 import android.os.Process
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -27,6 +28,8 @@ import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.TimeoutConfig
+import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.internal.ModelSourceResolver
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -59,6 +62,52 @@ class InferenceServiceProcessTest {
             assertEquals(original.messages, restored.messages)
         } finally {
             parcel.recycle()
+        }
+    }
+
+    @Test
+    fun directSeekableProcDescriptorIsAcceptedWithoutCopying() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sourceFile = File(context.cacheDir, "direct-saf-descriptor-${System.nanoTime()}.gguf")
+        sourceFile.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x00, 0x01, 0x02, 0x03))
+        val descriptor = ParcelFileDescriptor.open(sourceFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val procPath = "/proc/self/fd/${descriptor.fd}"
+            val resolved = ModelSourceResolver.resolveToFile(
+                context,
+                ModelSource.FilePath(procPath)
+            )
+
+            assertEquals("Direct descriptor path must be preserved for native loading", procPath, resolved.absolutePath)
+            assertEquals("Descriptor must still refer to the original file", sourceFile.length(), resolved.length())
+            assertTrue("The caller-owned SAF descriptor must remain open", descriptor.fileDescriptor.valid())
+        } finally {
+            descriptor.close()
+            sourceFile.delete()
+        }
+    }
+
+    @Test
+    fun directPipeDescriptorIsRejectedWithNoCopyDiagnostic() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val pipe = ParcelFileDescriptor.createPipe()
+        try {
+            val procPath = "/proc/self/fd/${pipe[0].fd}"
+            val error = runCatching {
+                ModelSourceResolver.resolveToFile(
+                    context,
+                    ModelSource.FilePath(procPath)
+                )
+            }.exceptionOrNull()
+
+            assertTrue("A pipe-backed SAF descriptor must be rejected before native load", error is IllegalArgumentException)
+            assertTrue(
+                "Error must explain seekability/mmap requirement and confirm no copy fallback",
+                error?.message?.contains("not a seekable regular file") == true &&
+                    error.message.contains("not copied")
+            )
+        } finally {
+            pipe.forEach { runCatching { it.close() } }
         }
     }
 
