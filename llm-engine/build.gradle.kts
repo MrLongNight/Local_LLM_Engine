@@ -49,7 +49,9 @@ android {
 
     testOptions {
         unitTests {
+            isIncludeAndroidResources = true
             isReturnDefaultValues = true
+            // Robolectric supplies real ParcelFileDescriptor behavior for host JVM tests.
         }
     }
 }
@@ -61,6 +63,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
 
     androidTestImplementation(libs.androidx.core)
     androidTestImplementation(libs.androidx.junit)
