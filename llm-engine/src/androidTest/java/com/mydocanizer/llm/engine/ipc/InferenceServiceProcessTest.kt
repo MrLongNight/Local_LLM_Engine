@@ -101,10 +101,11 @@ class InferenceServiceProcessTest {
             }.exceptionOrNull()
 
             assertTrue("A pipe-backed SAF descriptor must be rejected before native load", error is IllegalArgumentException)
+            val errorMessage = error?.message.orEmpty()
             assertTrue(
                 "Error must explain seekability/mmap requirement and confirm no copy fallback",
-                error?.message?.contains("not a seekable regular file") == true &&
-                    error.message.contains("not copied")
+                errorMessage.contains("not a seekable regular file") &&
+                    errorMessage.contains("not copied")
             )
         } finally {
             pipe.forEach { runCatching { it.close() } }
