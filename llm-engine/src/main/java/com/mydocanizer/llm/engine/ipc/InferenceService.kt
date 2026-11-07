@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Android Service running in a dedicated isolated process (:inference).
+ * Android Service running in a dedicated app-private process (:inference) under the app UID.
  *
  * Hosts the native llama.cpp execution engine and exposes an AIDL-based IPC interface
  * to protect the main application process from native driver faults, Out-Of-Memory (OOM)

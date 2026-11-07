@@ -148,6 +148,7 @@ class LocalLlmEngineApiTest {
             override fun unloadModel(p0: com.mydocanizer.llm.engine.ipc.IInferenceCallback?) {}
             override fun streamChat(p0: String?, p1: InferenceRequest?, p2: com.mydocanizer.llm.engine.ipc.IInferenceCallback?) {}
             override fun cancelInference(p0: String?) {}
+            override fun armNativeInferenceBlockForTest() {}
             override fun killProcess() {}
             override fun getStatus(): String = "READY"
             override fun getBackendInfo(): BackendInfo = BackendInfo()
