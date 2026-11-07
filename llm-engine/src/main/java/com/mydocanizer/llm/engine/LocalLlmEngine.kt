@@ -60,8 +60,11 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Streams token generation as an asynchronous [Flow] of [InferenceEvent].
      *
-     * Supports cooperative cancellation via coroutine cancellation or [cancelInference].
-     * A process-level abort is used only as a fallback if native cancellation stalls.
+     * Cancellation is cooperative first. If the native call does not finish within
+     * the configured abort grace period, the client terminates the original
+     * `:inference` process and confirms PID death before reconnecting. This hard abort
+     * discards the process-local model/context and open descriptors; recovery must
+     * reload the last selected source. Real-device verification is still pending.
      *
      * @param request Multi-message chat request.
      * @return Flow emitting [InferenceEvent.Started], [InferenceEvent.Token], and completion/cancellation events.
@@ -77,9 +80,11 @@ interface LocalLlmEngine : AutoCloseable {
     suspend fun generateChat(request: InferenceRequest): Result<InferenceResult>
 
     /**
-     * Requests cooperative cancellation of the active generation. The engine escalates
-     * to terminating the original inference process only if native cancellation does not
-     * complete within the configured abort grace period.
+     * Requests native cooperative cancellation of the active generation first. If native
+     * cancellation does not finish within the configured abort grace period, the client
+     * terminates the original `:inference` process, confirms PID death and reconnects.
+     * The loaded model/context is lost with that process and must be reloaded. The
+     * timeout-driven hard-abort path still requires real-device verification.
      */
     fun cancelInference()
 
