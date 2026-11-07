@@ -51,6 +51,7 @@ class InferenceIpcTest {
 
         val initialized = AtomicBoolean(false)
         val loadedModel = AtomicReference<String?>(null)
+        val loadedDescriptorSize = AtomicLong(-1L)
         val hangModelLoad = AtomicBoolean(false)
         val lastRequestId = AtomicReference<String?>(null)
         val cancelledRequestId = AtomicReference<String?>(null)
@@ -79,6 +80,7 @@ class InferenceIpcTest {
             callback: IInferenceCallback?
         ) {
             loadedModel.set(modelPath)
+            loadedDescriptorSize.set(modelDescriptor.statSize)
             replacementProcessIdOnLoad.get().takeIf { it > 0 }?.let(currentProcessId::set)
             if (hangModelLoad.get()) return
             callback?.onModelLoadProgress(23)
@@ -357,6 +359,7 @@ class InferenceIpcTest {
         assertEquals(listOf(0, 23, 79, 100), progressEvents)
         val modelInfo = loadResult.getOrThrow()
         assertEquals(tempFile.name, modelInfo.name)
+        assertEquals("The FilePath descriptor must reach the IPC service as an open file", 100L, fakeService.loadedDescriptorSize.get())
         assertEquals("CPU (Fake)", modelInfo.activeBackend)
         assertEquals(modelInfo, client.currentModel.value)
         assertEquals(100, client.modelLoadProgress.value)

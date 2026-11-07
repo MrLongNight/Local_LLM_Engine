@@ -427,10 +427,13 @@ internal class InferenceClient(
             _state.value = EngineState.LoadingModel(source)
             val modelPath: String
             val displayName: String
-            when (source) {
+            // Hold the opened descriptor in a non-null local for the complete Binder
+            // handoff. The nullable field exists only so the outer catch can clean up
+            // if any operation between opening and the handoff fails.
+            val openedDescriptor: ParcelFileDescriptor = when (source) {
                 is ModelSource.ContentUri -> {
                     val uri = Uri.parse(source.uriString)
-                    modelDescriptor = context.contentResolver.openFileDescriptor(uri, "r")
+                    val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                         ?: throw IllegalArgumentException("Android could not open the selected GGUF file directly")
                     displayName = source.displayName ?: runCatching {
                         context.contentResolver.query(
@@ -449,14 +452,16 @@ internal class InferenceClient(
                         "MODEL_SOURCE_OPENED_DIRECTLY",
                         "source=SAF,displayName=$displayName,copy=false"
                     )
+                    descriptor
                 }
                 else -> {
                     val file: File = ModelSourceResolver.resolveToFile(context, source)
-                    modelDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
                     modelPath = file.absolutePath
                     displayName = file.name
+                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
                 }
             }
+            modelDescriptor = openedDescriptor
             val targetPid = runCatching { service.processId }.getOrNull()
             val pending = PendingModelLoad(targetPid, deferred)
             if (!pendingModelLoad.compareAndSet(null, pending)) {
@@ -520,7 +525,7 @@ internal class InferenceClient(
             try {
                 service.loadModel(
                     modelPath,
-                    checkNotNull(modelDescriptor) { "Model file descriptor was not opened" },
+                    openedDescriptor,
                     displayName,
                     config,
                     callback
@@ -528,8 +533,8 @@ internal class InferenceClient(
             } finally {
                 // Binder duplicates the descriptor into :inference. Release this
                 // process' copy; the service retains its own descriptor for mmap.
-                runCatching { modelDescriptor?.close() }
-                modelDescriptor = null
+                runCatching { openedDescriptor.close() }
+                if (modelDescriptor === openedDescriptor) modelDescriptor = null
             }
 
             return try {
