@@ -28,6 +28,7 @@ import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.TimeoutConfig
 import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.toList
@@ -145,7 +146,7 @@ class InferenceServiceProcessTest {
             directBinding.service.armNativeInferenceBlockForTest()
             val request = InferenceRequest.single("debug-only native process kill test")
                 .copy(timeoutConfig = timeoutConfig)
-            val events = async { client.streamChat(request).toList() }
+            val events = async(Dispatchers.IO) { client.streamChat(request).toList() }
 
             val blockedDeadline = SystemClock.elapsedRealtime() + timeoutConfig.prefillMs
             var blockedStatus = directBinding.service.status
