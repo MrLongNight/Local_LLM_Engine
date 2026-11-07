@@ -261,6 +261,14 @@ add_library(localllm_engine SHARED
     local_llm_engine_jni.cpp
 )
 
+option(LOCAL_LLM_ENABLE_TEST_HOOKS "Enable debug-only native inference fault injection" OFF)
+if(LOCAL_LLM_ENABLE_TEST_HOOKS)
+    target_compile_definitions(localllm_engine PRIVATE LOCAL_LLM_ENABLE_TEST_HOOKS=1)
+    message(STATUS "LocalLLM: debug-only native inference test hooks ENABLED")
+else()
+    message(STATUS "LocalLLM: native inference test hooks disabled")
+endif()
+
 target_include_directories(localllm_engine PRIVATE
     ${LLAMA_SRC}
     ${LLAMA_SRC}/common

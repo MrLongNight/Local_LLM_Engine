@@ -12,6 +12,7 @@ interface IInferenceService {
     void unloadModel(IInferenceCallback callback);
     void streamChat(String requestId, in InferenceRequest request, IInferenceCallback callback);
     void cancelInference(String requestId);
+    void armNativeInferenceBlockForTest();
     oneway void killProcess();
     String getStatus();
     BackendInfo getBackendInfo();

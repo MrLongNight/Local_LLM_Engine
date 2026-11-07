@@ -123,6 +123,15 @@ internal object NativeEngineHandle {
     external fun nativeGetTokensGenerated(handle: Long): Int
 
     @JvmStatic
+    external fun nativeArmBlockNextInferenceForTest(handle: Long)
+
+    @JvmStatic
+    external fun nativeIsBlockNextInferenceArmedForTest(handle: Long): Boolean
+
+    @JvmStatic
+    external fun nativeIsNativeInferenceBlockEnteredForTest(handle: Long): Boolean
+
+    @JvmStatic
     external fun nativeCancel(handle: Long)
 
     @JvmStatic

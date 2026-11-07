@@ -3,6 +3,7 @@ package com.mydocanizer.llm.engine.internal
 import android.content.Context
 import android.util.Log
 import com.mydocanizer.llm.engine.BackendInfo
+import com.mydocanizer.llm.engine.BuildConfig
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
@@ -305,10 +306,31 @@ internal class LocalLlmEngineImpl(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = callbackFlow {
+        val handle = getValidHandle()
+
+        // In Debug builds only, instrumentation can arm a non-cooperative block at the
+        // exact JNI entry point used by normal chat. It runs before the model-presence check
+        // so CI can verify hard process abort without bundling a large GGUF test model.
+        if (BuildConfig.DEBUG && NativeEngineHandle.nativeIsBlockNextInferenceArmedForTest(handle)) {
+            EngineDiagnostics.info(
+                "inference",
+                "DEBUG_NATIVE_INFERENCE_BLOCK_REQUESTED",
+                "Injecting a deliberate non-cooperative block inside nativeProcessChat"
+            )
+            NativeEngineHandle.nativeProcessChat(
+                handle = handle,
+                roles = emptyArray(),
+                contents = emptyArray(),
+                maxPredict = request.maxPredictTokens,
+                temperature = request.temperature ?: Float.NaN,
+                topP = request.topP ?: Float.NaN,
+                enableThinking = request.enableThinking,
+                progressCallback = NativeInferenceProgressCallback { _, _ -> }
+            )
+        }
+
         val modelInfo = _currentModel.value
             ?: throw IllegalStateException("No model loaded. Call loadModel() before chat.")
-
-        val handle = getValidHandle()
         _state.value = EngineState.Inferring(request)
         isCancelled.set(false)
 
@@ -596,6 +618,17 @@ internal class LocalLlmEngineImpl(
         }
         result.onFailure { EngineDiagnostics.error("engine", "MODEL_SHA256_FAILED", it) }
         return result.getOrNull()
+    }
+
+    internal fun armNativeInferenceBlockForTest() {
+        check(BuildConfig.DEBUG) { "Native inference test hooks are unavailable in Release builds" }
+        NativeEngineHandle.nativeArmBlockNextInferenceForTest(getValidHandle())
+    }
+
+    internal fun isNativeInferenceBlockEnteredForTest(): Boolean {
+        if (!BuildConfig.DEBUG) return false
+        val handle = engineHandle.get()
+        return handle != 0L && NativeEngineHandle.nativeIsNativeInferenceBlockEnteredForTest(handle)
     }
 
     private fun getValidHandle(): Long {

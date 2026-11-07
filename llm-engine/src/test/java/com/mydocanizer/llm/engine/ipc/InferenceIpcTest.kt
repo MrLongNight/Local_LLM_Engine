@@ -179,6 +179,8 @@ class InferenceIpcTest {
             cancelledRequestId.set(requestId)
         }
 
+        override fun armNativeInferenceBlockForTest() {}
+
         override fun killProcess() {
             isKilled.set(true)
         }

@@ -117,6 +117,11 @@ struct EngineInstance {
     float default_top_p = 0.9f;
     std::string active_backend = "CPU";
     std::atomic<bool> cancel_requested{false};
+#if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
+    // Debug-only fault injection used to prove PID-level abort while JNI is blocked.
+    std::atomic<bool> block_next_inference_for_test{false};
+    std::atomic<bool> native_inference_block_entered_for_test{false};
+#endif
     std::mutex mtx;
 
     // Chat session state
@@ -901,6 +906,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         jboolean enable_thinking,
         jobject progress_listener) {
     auto* engine = fromHandle(handle);
+#if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
+    if (engine && engine->block_next_inference_for_test.exchange(false)) {
+        engine->native_inference_block_entered_for_test.store(true);
+        LOGW("DEBUG_TEST_HOOK: nativeProcessChat is deliberately blocked in JNI (pid=%d)", getpid());
+        // Deliberately non-cooperative. The client watchdog must terminate this process;
+        // cancelling a coroutine or calling nativeCancel cannot release this JNI frame.
+        for (;;) {
+            usleep(250000);
+        }
+    }
+#endif
     if (!engine || !engine->model || !engine->context) return 1;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
@@ -1232,6 +1248,32 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetTokensGener
     auto* engine = fromHandle(handle);
     return engine ? engine->tokens_generated : 0;
 }
+
+#if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
+JNIEXPORT void JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeArmBlockNextInferenceForTest(
+        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
+    auto* engine = fromHandle(handle);
+    if (!engine) return;
+    engine->native_inference_block_entered_for_test.store(false);
+    engine->block_next_inference_for_test.store(true);
+    LOGW("DEBUG_TEST_HOOK: next nativeProcessChat will block (pid=%d)", getpid());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeIsBlockNextInferenceArmedForTest(
+        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
+    auto* engine = fromHandle(handle);
+    return engine && engine->block_next_inference_for_test.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeIsNativeInferenceBlockEnteredForTest(
+        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
+    auto* engine = fromHandle(handle);
+    return engine && engine->native_inference_block_entered_for_test.load() ? JNI_TRUE : JNI_FALSE;
+}
+#endif
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeCancel(

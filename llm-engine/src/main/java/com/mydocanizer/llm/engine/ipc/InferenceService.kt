@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.util.Log
 import com.mydocanizer.llm.engine.BackendInfo
+import com.mydocanizer.llm.engine.BuildConfig
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.EngineState
@@ -360,7 +361,24 @@ class InferenceService : Service() {
             System.exit(0)
         }
 
+        override fun armNativeInferenceBlockForTest() {
+            check(BuildConfig.DEBUG) { "Native inference test hooks are unavailable in Release builds" }
+            val localEngine = engine as? LocalLlmEngineImpl
+                ?: throw IllegalStateException("Native inference engine is not initialized")
+            localEngine.armNativeInferenceBlockForTest()
+            EngineDiagnostics.info(
+                "ipc",
+                "DEBUG_NATIVE_INFERENCE_BLOCK_ARMED",
+                "Next nativeProcessChat will block in JNI; pid=${Process.myPid()}"
+            )
+        }
+
         override fun getStatus(): String {
+            if (BuildConfig.DEBUG &&
+                (engine as? LocalLlmEngineImpl)?.isNativeInferenceBlockEnteredForTest() == true
+            ) {
+                return "DEBUG_NATIVE_INFERENCE_BLOCKED"
+            }
             return engine?.state?.value?.let { state ->
                 when (state) {
                     is EngineState.Uninitialized -> "UNINITIALIZED"

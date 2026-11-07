@@ -7,6 +7,23 @@ android {
     compileSdk { version = release(36) { minorApiLevel = 1 } }
     ndkVersion = "27.2.12479018"
 
+    buildTypes {
+        getByName("debug") {
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DLOCAL_LLM_ENABLE_TEST_HOOKS=ON")
+                }
+            }
+        }
+        getByName("release") {
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DLOCAL_LLM_ENABLE_TEST_HOOKS=OFF")
+                }
+            }
+        }
+    }
+
     buildFeatures {
         aidl = true
         buildConfig = true
