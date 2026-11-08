@@ -10,7 +10,9 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <stdexcept>
 #include <cstdio>
+#include <cerrno>
 #include <cstring>
 #include <ctime>
 #include <unistd.h>

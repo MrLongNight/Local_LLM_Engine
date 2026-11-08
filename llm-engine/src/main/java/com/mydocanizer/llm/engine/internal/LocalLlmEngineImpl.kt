@@ -140,6 +140,9 @@ internal class LocalLlmEngineImpl(
             _state.value = EngineState.LoadingModel(source)
 
             val file: File = ModelSourceResolver.resolveToFile(context, source)
+            val directDescriptorFd = (source as? ModelSource.FilePath)
+                ?.takeIf { it.descriptor != null && it.descriptorFd != null }
+                ?.descriptorFd ?: -1
             Log.i(TAG, "Loading model file: ${file.absolutePath} (${file.length()} bytes)")
             EngineDiagnostics.info(
                 "engine",
@@ -177,9 +180,6 @@ internal class LocalLlmEngineImpl(
                 }
             }
 
-            val directDescriptorFd = (source as? ModelSource.FilePath)
-                ?.takeIf { it.descriptor != null && it.descriptorFd != null }
-                ?.descriptorFd ?: -1
             val ret = NativeEngineHandle.nativeLoadModel(
                 handle = handle,
                 modelPath = file.absolutePath,
@@ -204,6 +204,9 @@ internal class LocalLlmEngineImpl(
                 )
                 105 -> throw IllegalStateException(
                     "Native chat-template or sampler setup raised a C++ exception."
+                )
+                106 -> throw IllegalStateException(
+                    "Native layer could not duplicate or wrap the borrowed SAF descriptor. See native diagnostics."
                 )
                 101 -> throw IllegalStateException(
                     "Vulkan backend was explicitly requested, but no Vulkan GPU device is available or initialization failed."
