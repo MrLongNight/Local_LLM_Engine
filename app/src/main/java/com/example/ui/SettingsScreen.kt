@@ -93,7 +93,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Das Standardprofil nutzt zunächst CPU für einen stabilen Mobilbetrieb. AUTO und VULKAN können manuell aktiviert werden; Vulkan wird wegen möglicher geräteabhängiger Treiber- und Speicherprobleme zunächst nicht automatisch verwendet.",
+                        text = "Das Standardprofil erzwingt Vulkan-GPU-Offload. CPU wird nicht stillschweigend als Ersatz verwendet: Wenn Vulkan das Modell nicht laden kann, erscheint ein klarer Fehler statt eines möglicherweise speicherintensiven CPU-Ladeversuchs. AUTO und CPU können bei Bedarf manuell gewählt werden.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

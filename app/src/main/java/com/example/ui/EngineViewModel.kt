@@ -91,7 +91,7 @@ class EngineViewModel(
             temperature = 0.7f,
             topP = 0.9f,
             maxPredictTokens = 512,
-            backendPreference = BackendPreference.CPU,
+            backendPreference = BackendPreference.VULKAN,
             gpuLayers = 16
         )
     )
