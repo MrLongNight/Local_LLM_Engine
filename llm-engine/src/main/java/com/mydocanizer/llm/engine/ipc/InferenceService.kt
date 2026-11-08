@@ -209,7 +209,14 @@ class InferenceService : Service() {
                         previous.close()
                     }
 
-                    val result = e.loadModel(ModelSource.FilePath(nativePath), config)
+                    val result = e.loadModel(
+                        ModelSource.FilePath(
+                            path = nativePath,
+                            descriptor = modelDescriptor.fileDescriptor,
+                            descriptorFd = modelDescriptor.fd
+                        ),
+                        config
+                    )
                     result.onSuccess { info ->
                         modelLoadedSuccessfully = true
                         activeModelDescriptor = modelDescriptor

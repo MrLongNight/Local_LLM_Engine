@@ -79,6 +79,7 @@ internal object NativeEngineHandle {
     external fun nativeLoadModel(
         handle: Long,
         modelPath: String,
+        modelFd: Int,
         contextSize: Int,
         batchSize: Int,
         threads: Int,

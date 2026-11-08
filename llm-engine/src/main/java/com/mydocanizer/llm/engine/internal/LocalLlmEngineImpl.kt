@@ -144,7 +144,7 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.info(
                 "engine",
                 "MODEL_LOAD_STARTED",
-                "fileBytes=${file.length()}, backendPreference=${config.backendPreference}, " +
+                "fileBytes=${file.length()}, directDescriptorFd=$directDescriptorFd, backendPreference=${config.backendPreference}, " +
                     "threads=${config.threads}, batch=${config.batchSize}, context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
             )
             val backendPreflight = runCatching {
@@ -177,9 +177,13 @@ internal class LocalLlmEngineImpl(
                 }
             }
 
+            val directDescriptorFd = (source as? ModelSource.FilePath)
+                ?.takeIf { it.descriptor != null && it.descriptorFd != null }
+                ?.descriptorFd ?: -1
             val ret = NativeEngineHandle.nativeLoadModel(
                 handle = handle,
                 modelPath = file.absolutePath,
+                modelFd = directDescriptorFd,
                 contextSize = config.contextSize,
                 batchSize = config.batchSize,
                 threads = config.threads,

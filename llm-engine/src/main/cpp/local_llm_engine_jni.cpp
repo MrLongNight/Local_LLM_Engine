@@ -14,6 +14,7 @@
 #include <cstring>
 #include <ctime>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "llama.h"
 #include "common.h"
@@ -106,6 +107,9 @@ enum BackendMode {
 struct EngineInstance {
     llama_model* model = nullptr;
     llama_context* context = nullptr;
+    // Non-owning in llama.cpp's llama_file(FILE*) wrapper. Keep this FILE* alive
+    // for the full model lifetime; it wraps a dup() of the borrowed SAF descriptor.
+    FILE* model_file_stream = nullptr;
     llama_batch batch;
     common_sampler* sampler = nullptr;
     common_chat_templates_ptr chat_templates;
@@ -205,6 +209,10 @@ struct EngineInstance {
         if (model) {
             llama_model_free(model);
             model = nullptr;
+        }
+        if (model_file_stream != nullptr) {
+            std::fclose(model_file_stream);
+            model_file_stream = nullptr;
         }
         active_backend = "None";
     }
@@ -614,6 +622,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jclass /*clazz*/,
         jlong handle,
         jstring jmodel_path,
+        jint model_fd,
         jint context_size,
         jint batch_size,
         jint threads,
@@ -698,15 +707,59 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     // Persist a stage marker before entering the native tensor-weight loader.
     report_model_load_stage(&progress_context, 0.01f);
 
+    // SAF supplies an already-open descriptor. Duplicate the descriptor number,
+    // not the GGUF bytes, and let llama.cpp consume the open FILE* interface. The
+    // pinned upstream API supports llama_model_load_from_file_ptr(FILE*, params),
+    // avoiding a second open("/proc/self/fd/N") which SAF providers may deny.
+    FILE* descriptor_stream = nullptr;
+    if (model_fd >= 0) {
+        const int duplicated_fd = dup(model_fd);
+        if (duplicated_fd < 0) {
+            LOGE("Could not duplicate borrowed SAF model descriptor fd=%d: %s", model_fd, strerror(errno));
+            env->ReleaseStringUTFChars(jmodel_path, model_path);
+            return 106;
+        }
+        descriptor_stream = fdopen(duplicated_fd, "rb");
+        if (descriptor_stream == nullptr) {
+            const int saved_errno = errno;
+            close(duplicated_fd);
+            LOGE("Could not create FILE* for borrowed SAF descriptor fd=%d: %s",
+                 model_fd, strerror(saved_errno));
+            env->ReleaseStringUTFChars(jmodel_path, model_path);
+            return 106;
+        }
+        LOGI("Loading GGUF through borrowed SAF descriptor fd=%d using llama_model_load_from_file_ptr (no path reopen, no copy)",
+             model_fd);
+    }
+
+    auto close_descriptor_stream = [&descriptor_stream]() {
+        if (descriptor_stream != nullptr) {
+            std::fclose(descriptor_stream);
+            descriptor_stream = nullptr;
+        }
+    };
+    auto load_model_from_source = [&]() -> llama_model* {
+        if (descriptor_stream != nullptr) {
+            if (std::fseek(descriptor_stream, 0, SEEK_SET) != 0) {
+                throw std::runtime_error(
+                    std::string("Could not rewind borrowed SAF descriptor stream: ") + strerror(errno));
+            }
+            return llama_model_load_from_file_ptr(descriptor_stream, model_params);
+        }
+        return llama_model_load_from_file(model_path, model_params);
+    };
+
     llama_model* model = nullptr;
     try {
-        model = llama_model_load_from_file(model_path, model_params);
+        model = load_model_from_source();
     } catch (const std::exception& error) {
-        LOGE("llama_model_load_from_file threw a C++ exception: %s", error.what());
+        LOGE("llama.cpp model load threw a C++ exception: %s", error.what());
+        close_descriptor_stream();
         env->ReleaseStringUTFChars(jmodel_path, model_path);
         return 103;
     } catch (...) {
-        LOGE("llama_model_load_from_file threw an unknown C++ exception");
+        LOGE("llama.cpp model load threw an unknown C++ exception");
+        close_descriptor_stream();
         env->ReleaseStringUTFChars(jmodel_path, model_path);
         return 103;
     }
@@ -720,13 +773,15 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         model_params.n_gpu_layers = 0;
         use_vulkan = false;
         try {
-            model = llama_model_load_from_file(model_path, model_params);
+            model = load_model_from_source();
         } catch (const std::exception& error) {
-            LOGE("AUTO CPU fallback llama_model_load_from_file threw a C++ exception: %s", error.what());
+            LOGE("AUTO CPU fallback llama.cpp model load threw a C++ exception: %s", error.what());
+            close_descriptor_stream();
             env->ReleaseStringUTFChars(jmodel_path, model_path);
             return 104;
         } catch (...) {
-            LOGE("AUTO CPU fallback llama_model_load_from_file threw an unknown C++ exception");
+            LOGE("AUTO CPU fallback llama.cpp model load threw an unknown C++ exception");
+            close_descriptor_stream();
             env->ReleaseStringUTFChars(jmodel_path, model_path);
             return 104;
         }
@@ -735,7 +790,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     env->ReleaseStringUTFChars(jmodel_path, model_path);
 
     if (!model) {
-        LOGE("llama_model_load_from_file failed on the selected backend (and CPU fallback if AUTO)");
+        LOGE("llama.cpp model load failed on the selected backend (and CPU fallback if AUTO)");
+        close_descriptor_stream();
         return 3;
     }
 
@@ -757,6 +813,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     }
 
     engine->model = model;
+    engine->model_file_stream = descriptor_stream;
+    descriptor_stream = nullptr; // EngineInstance owns the duplicate until model unload.
     report_model_load_stage(&progress_context, 0.72f); // weights complete; context setup begins
 
     int n_threads = threads;
@@ -793,6 +851,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         LOGE("llama_init_from_model threw a C++ exception: %s", error.what());
         llama_model_free(model);
         engine->model = nullptr;
+        if (engine->model_file_stream != nullptr) {
+            std::fclose(engine->model_file_stream);
+            engine->model_file_stream = nullptr;
+        }
         engine->active_backend = "None";
         return 104;
     } catch (...) {
@@ -806,6 +868,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         LOGE("Failed to create llama_context with dynamic n_ctx=%d", ctx_size);
         llama_model_free(model);
         engine->model = nullptr;
+        if (engine->model_file_stream != nullptr) {
+            std::fclose(engine->model_file_stream);
+            engine->model_file_stream = nullptr;
+        }
         return 4;
     }
     engine->context = ctx;

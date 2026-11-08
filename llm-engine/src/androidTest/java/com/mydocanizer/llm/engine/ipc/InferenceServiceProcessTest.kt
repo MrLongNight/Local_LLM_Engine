@@ -75,7 +75,7 @@ class InferenceServiceProcessTest {
             val procPath = "/proc/self/fd/${descriptor.fd}"
             val resolved = ModelSourceResolver.resolveToFile(
                 context,
-                ModelSource.FilePath(procPath)
+                ModelSource.FilePath(procPath, descriptor.fileDescriptor, descriptor.fd)
             )
 
             assertEquals("Direct descriptor path must be preserved for native loading", procPath, resolved.absolutePath)
@@ -96,7 +96,7 @@ class InferenceServiceProcessTest {
             val error = runCatching {
                 ModelSourceResolver.resolveToFile(
                     context,
-                    ModelSource.FilePath(procPath)
+                    ModelSource.FilePath(procPath, pipe[0].fileDescriptor, pipe[0].fd)
                 )
             }.exceptionOrNull()
 
