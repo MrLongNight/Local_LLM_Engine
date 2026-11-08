@@ -60,11 +60,13 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Streams token generation as an asynchronous [Flow] of [InferenceEvent].
      *
-     * Cancellation is cooperative first. If the native call does not finish within
-     * the configured abort grace period, the client terminates the original
-     * `:inference` process and confirms PID death before reconnecting. This hard abort
-     * discards the process-local model/context and open descriptors; recovery must
-     * reload the last selected source. Real-device verification is still pending.
+     * Explicit cancellation is cooperative first. The client requests native
+     * cancellation and waits for the configured abort grace period before escalating
+     * to a process kill. The inference timeout watchdog currently takes the direct
+     * hard-abort path; aligning that path with cooperative-first escalation remains
+     * open. After process death, the client reconnects and attempts to reload the last
+     * successfully loaded source/configuration. End-to-end GGUF recovery and
+     * real-device verification are still pending.
      *
      * @param request Multi-message chat request.
      * @return Flow emitting [InferenceEvent.Started], [InferenceEvent.Token], and completion/cancellation events.
@@ -82,9 +84,10 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Requests native cooperative cancellation of the active generation first. If native
      * cancellation does not finish within the configured abort grace period, the client
-     * terminates the original `:inference` process, confirms PID death and reconnects.
-     * The loaded model/context is lost with that process and must be reloaded. The
-     * timeout-driven hard-abort path still requires real-device verification.
+     * terminates the original `:inference` process and confirms PID death. The client
+     * then reconnects and attempts to reload the last successfully loaded source/config.
+     * The timeout watchdog currently bypasses this cooperative-first grace sequence;
+     * that implementation gap, model recovery, and real-device verification remain open.
      */
     fun cancelInference()
 

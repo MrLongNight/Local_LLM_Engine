@@ -54,30 +54,45 @@ checked to contain exactly one service registration with
 `android:isolatedProcess="false"`. This is a separate process under the app's
 UID, not Android's separately sandboxed isolated-UID service mode.
 
-The Android instrumentation tests also inspect the resolved `ServiceInfo`
-before binding, then verify that the service PID differs from the app process,
-that killing it removes the original PID, and that the client can reconnect.
-These CI tests currently kill an idle service: they do not load a GGUF model,
-hold a native/JNI inference call blocked, or trigger the client timeout watchdog.
-They therefore do not prove hard-abort during native inference, model recovery,
-or Vulkan-driver resource release. Emulator results do not replace a real-device
-test on the target phone.
+The Android instrumentation suite inspects the resolved `ServiceInfo` before
+binding and verifies the dedicated service PID, Binder disconnect, process death,
+idle-service rebind and automatic client reconnect. It now also contains a
+Debug-only native test hook: `nativeProcessChat` is deliberately blocked inside
+JNI, the real client's prefill watchdog expires, and the test checks that the app
+PID survives, the original `:inference` PID disappears, Binder disconnects and
+the client binds a replacement service. The hook is enabled only for Debug
+(`LOCAL_LLM_ENABLE_TEST_HOOKS=ON`) and disabled for Release.
+
+This blocked-JNI test does not load a GGUF model. It therefore does not verify
+same-source model reload, a successful follow-up inference, the persisted
+`PROCESS_ABORT_CONFIRMED` diagnostic event, or Vulkan-driver resource release.
+Emulator results do not replace a real-device test on the target phone.
 
 ### Cancellation and hard-abort sequence
 
-The client first requests cooperative cancellation through the native engine.
-If the original request does not finish within `abortGracePeriodMs`, the client
-uses the one-way AIDL `killProcess()` command. The service terminates its own
-`:inference` process immediately and deliberately does not wait for
-`engine.close()`, JNI cleanup, file logging, or coroutine joins. The client
-checks that the original PID has disappeared and can issue a same-UID
-client-side PID kill if the service did not exit in time. Once process death is
-confirmed, the client reconnects; model state and open descriptors from the
-dead process are gone, so recovery must reload the previously selected source.
+For an explicit `cancelInference()` request, the client first asks the service
+to signal native cooperative cancellation. It waits `abortGracePeriodMs`; if
+the request is still active, it sends the one-way AIDL `killProcess()` command.
+The service terminates its own `:inference` process immediately and deliberately
+does not wait for `engine.close()`, JNI cleanup, file logging, or coroutine
+joins.
 
-This is the implemented escalation path, not yet a real-device acceptance
-result. In particular, a process kill proves process termination; it does not
-by itself prove that a vendor Vulkan driver has returned all GPU allocations.
+**Current timeout-path gap:** the inference watchdog currently calls the hard
+process-abort path directly when a phase deadline expires. It does not yet send
+the cooperative cancellation request and wait the grace period first. The
+timeout path therefore still needs to be aligned with the cooperative-first
+sequence before that acceptance criterion can be marked complete.
+
+The client polls the original PID and can issue a same-UID client-side PID kill
+if the service did not exit in time. Binder disconnect or confirmed PID death
+starts reconnection. The app-side client retains the last successfully loaded
+source/configuration and attempts to reload them in the replacement service.
+That reload-and-follow-up-inference path is implemented but has not yet been
+proven end-to-end with a real GGUF model.
+
+This is the implemented process-isolation path, not a real-device acceptance
+result. Process termination alone does not prove that a vendor Vulkan driver
+has returned all GPU allocations.
 
 ## Native llama.cpp source
 
@@ -123,8 +138,8 @@ gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 ## Current limitations
 
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
-- A SAF-selected local GGUF is opened as a `ParcelFileDescriptor` and passed to `:inference`; the native loader opens the retained descriptor through `/proc/self/fd/<n>`. The normal SAF load path does not create a renamed app-private duplicate. This depends on a seekable provider descriptor: pipe-backed/cloud providers may not support the mmap access required by llama.cpp, and provider-specific detection/error messaging still needs verification. APK assets and HTTPS remote sources are still materialized in app-private storage, validated for the GGUF magic header, SHA-256 hashed, and atomically published under a SHA-256-addressed filename. HTTPS redirects are limited and cannot downgrade to HTTP. Downloads are not resumable yet.
-- Cooperative cancellation, timeout escalation, process termination, PID-death polling and reconnect are implemented in code. The current emulator test only kills an idle service; timeout-driven termination during a blocked native/JNI inference and the complete reload-and-infer recovery cycle remain unverified on a real device.
+- A SAF-selected local GGUF is opened as a `ParcelFileDescriptor` and passed to `:inference`; the service-side loader opens the retained descriptor through `/proc/self/fd/<n>`. Before native loading, the resolver checks that it is a regular file, tests seeking and positional GGUF-header reads, and probes read-only `mmap`. Pipe/non-regular sources are rejected with a no-copy diagnostic. The current instrumentation tests exercise this resolver with a regular file and a pipe in the test process; they do not yet verify a real SAF provider descriptor after the Binder handoff into `:inference` on the target device. APK assets and HTTPS remote sources are still materialized in app-private storage, validated for the GGUF magic header, SHA-256 hashed, and atomically published under a SHA-256-addressed filename. HTTPS redirects are limited and cannot downgrade to HTTP. Downloads are not resumable yet.
+- The emulator suite now tests a deliberately blocked JNI call and a real client prefill-timeout path, including app-process survival, original service-PID disappearance, Binder disconnect and replacement-service reconnect. It does not load/reload a real GGUF model or run a follow-up inference. The timeout watchdog currently bypasses the cooperative-cancel grace period; this remains an implementation gap. No five-cycle external resource check or real-device acceptance has been completed.
 - No real-device performance result is implied by CI success.
 
 ## Implementation plan

@@ -35,9 +35,9 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 
 Das Android-CMake-Overlay baut weiterhin eine separate Arbeitskopie von `ggml-vulkan.cpp`; der Upstream-Submodule-Inhalt bleibt unverändert. Die bisher benötigten Android-API-24-/Mali-Kompatibilitätsanker (drei `vkGetPhysicalDeviceFeatures2`-Aufrufe sowie Include-, Buffer-Device-Address-, 16-bit-storage- und Device-Create-Anker) sind im aktualisierten Quelltext vorhanden.
 
-**CI-Abnahme:** Unit Tests #151 für `b345a4f` sind erfolgreich. Android APK Build #112 für denselben Commit läuft noch; ARM64-/x86_64-Kompilierung, Vulkan-Compile-Entry, APK-Upload und Emulator-Prozessisolation sind bis zum Abschluss dieses Laufs noch nicht als bestanden zu werten.
+**CI-Abnahme:** Unit Tests #151 für `b345a4f` und Android APK Build #112 für denselben Commit sind erfolgreich abgeschlossen. Der APK-Workflow baute die konfigurierten ABIs und veröffentlichte sein Debug-Artefakt. Das bestätigt den damaligen Buildpfad, nicht die Ausführung auf dem Zielgerät.
 
-**Noch ausstehende Abnahme:** Den APK-Build #112 vollständig erfolgreich abschließen, anschließend GGUF-Modellladen mit explizitem Vulkan-Modus auf dem Mali-G57-Zielgerät prüfen und native Vulkan-/GGML-Logs auswerten. Das Versionsupdate und ein grüner CI-Build allein belegen weder stabile Geräte-Inferenz noch bessere Performance.
+**Noch ausstehende Abnahme:** GGUF-Modellladen mit explizitem Vulkan-Modus auf dem Mali-G57-Zielgerät prüfen und native Vulkan-/GGML-Logs auswerten. Das Versionsupdate und ein grüner CI-Build allein belegen weder stabile Geräte-Inferenz noch bessere Performance.
 
 **Änderung:** ARM64-CPU-Build an die offizielle llama.cpp-Android-Referenz annähern. KleidiAI wird für `arm64-v8a` aktiviert; x86_64 bleibt ohne KleidiAI. OpenMP bleibt vorerst deaktiviert.
 
@@ -82,13 +82,17 @@ Das Android-CMake-Overlay baut weiterhin eine separate Arbeitskopie von `ggml-vu
 - Der Reconnect verwirft den alten Binder, PID-, Modell- und Fortschrittsstatus sowie das alte `CompletableDeferred`, bevor er neu bindet. Parallele Reconnect-Callbacks werden über einen Guard zusammengeführt.
 - Der Test-Fake leitet Prozesslebendigkeit nun aus dem tatsächlichen Kill-Zustand ab, nicht aus einer manuell nachträglich umgeschalteten PID-Variable.
 
-**Prozess-Instrumentationstest ergänzt:** `InferenceServiceProcessTest` bindet den echten AIDL-Service, bestätigt eine von der App-PID getrennte Service-PID, löst den einseitigen Prozess-Kill aus, wartet auf Binder-Disconnect und das Verschwinden von `/proc/<pid>`, bindet den Dienst erneut und prüft die automatische Wiederverbindung des echten `InferenceClient` mit neuer Service-Verbindung. Zusätzlich prüft er den Parcelable-Roundtrip des `enableThinking`-Parameters. CI kompiliert/veröffentlicht das Test-APK und führt diese Tests auf einem Android-36-x86_64-Emulator aus. Der Test lädt bewusst kein GGUF-Modell und belegt daher noch keinen Kill während einer blockierten nativen Inferenz oder das Treiberverhalten des Zielgeräts.
+**Prozess-/JNI-Instrumentationstests ergänzt:** `InferenceServiceProcessTest` prüft den echten AIDL-Service, die getrennte Service-PID, Binder-Disconnect, das Verschwinden von `/proc/<pid>`, Rebind und automatische Wiederverbindung des echten `InferenceClient`. Ein zusätzlicher Debug-only JNI-Test-Hook blockiert gezielt im nativen `nativeProcessChat`-Aufruf. Der echte Client-Prefill-Watchdog läuft ab; der Test prüft die Timeout-Fehlermeldung, das Überleben der App-PID, den Tod der ursprünglichen Service-PID, Binder-Disconnect und die Verbindung zu einer Ersatz-PID. CMake/Gradle aktivieren den Hook für Debug und schalten ihn für Release aus.
+
+Zwei weitere Instrumentationstests prüfen den Descriptor-Resolver: ein seekbarer regulärer Dateideskriptor bleibt direkt erhalten, ein Pipe-Deskriptor wird mit einer Diagnose ohne Copy-Fallback abgewiesen. Diese beiden Tests rufen den Resolver jedoch direkt im Testprozess auf; der Binder-Transfer eines echten SAF-Descriptors in den `:inference`-Prozess und reale Provider bleiben offen. CI führt sechs Instrumentationstests auf einem Android-36-x86_64-Emulator aus.
+
+**Grenze dieser Emulator-Abnahme:** Der blockierte JNI-Test lädt absichtlich kein GGUF-Modell. Er prüft daher weder automatisches Reload derselben SAF-/GGUF-Quelle noch eine erfolgreiche Folgeinferenz. Außerdem prüft der Test derzeit nicht explizit, dass `PROCESS_ABORT_CONFIRMED` im App-Prozess-Diagnoselog persistiert wurde. Emulator-Ergebnisse belegen keine Treiberfreigabe oder Zielgerätefunktion.
 
 **Noch ausstehend – zwingende Abnahmelücken:**
 - **Echte Hardware:** Die bestehenden CI-Instrumentationstests laufen auf einem Android-36-x86_64-Emulator. Den Prozessabbruch und die IPC-Stabilität zusätzlich auf dem Zielgerät (nubia Z2462N, Android 16, ARM64/Mali-G57) prüfen.
-- **Harter Abbruch innerhalb nativer Inferenz:** Einen kontrollierten Testfall verwenden, der den `:inference`-Prozess nachweislich innerhalb eines blockierenden JNI-/nativen Inferenzaufrufs hält. Dann den Timeout des echten `InferenceClient` auslösen. Ein Test, der nur `killProcess()` im Leerlauf aufruft, reicht nicht. Ein dafür notwendiger JNI-Test-Hook muss ausschließlich in Debug-/Instrumentation-Builds verfügbar sein und darf nicht in Release-Builds gelangen.
-- **Kill-Nachweis:** Während der nativen Blockierung nachweisen, dass die App-PID bestehen bleibt, die ursprüngliche Service-PID verschwindet, Binder-Disconnect eintritt und der Client `PROCESS_ABORT_CONFIRMED` meldet. Damit ist belegt, dass nicht nur eine Coroutine beendet wurde.
-- **Wiederherstellung mit echtem Modell:** Nach dem automatischen Reconnect denselben ursprünglichen GGUF-Quellpfad bzw. dieselbe SAF-URI erneut laden und eine Folgeinferenz erfolgreich abschließen. Nur `EngineState.Ready` oder eine neue Service-PID reicht als Recovery-Nachweis nicht.
+- **Timeout-Eskalationsreihenfolge:** Der Timeout-Watchdog ruft derzeit direkt `abortRemoteProcess()` auf. Er muss – wie der explizite `cancelInference()`-Pfad – zuerst native kooperative Cancellation anfordern, die konfigurierte Grace Period abwarten und nur bei weiter aktiver/blockierter Original-PID den einseitigen Prozess-Kill senden. Die Emulator-Abnahme muss sowohl kooperativ erfolgreiche Cancellation ohne unnötigen Prozess-Kill als auch einen nicht-kooperativen JNI-Block mit anschließender Eskalation abdecken.
+- **Kill-Nachweis:** Der neue JNI-Blocktest prüft bereits, dass die App-PID bestehen bleibt, die ursprüngliche Service-PID verschwindet und Binder-Disconnect eintritt. Noch explizit nachzuweisen ist, dass `PROCESS_ABORT_CONFIRMED` mit der ursprünglichen PID im fortbestehenden App-Prozess-Diagnoselog persistiert und im Test ausgewertet wird.
+- **Wiederherstellung mit echtem Modell:** Nach dem automatischen Reconnect denselben ursprünglichen GGUF-Quellpfad bzw. dieselbe SAF-URI erneut laden und eine Folgeinferenz erfolgreich abschließen. Der aktuelle Test prüft nur Ersatz-PID und `EngineState.Ready`; das genügt nicht als Recovery-Nachweis.
 - **Ressourcenfreigabe unter Last:** Mindestens fünf kontrollierte Load-/Inference-/Timeout-/Kill-/Reconnect-Zyklen durchführen. App-PID, alte/neue Service-PIDs, offene Service-Prozesse, Prozess-PSS, Native-PSS, Graphics-PSS sowie – soweit der Mali-Treiber es bereitstellt – Vulkan-Heap-/Budgetwerte vor und nach den Zyklen erfassen. Alte PIDs und verwaiste Service-Prozesse dürfen nicht verbleiben; Speicherwerte müssen nach einer definierten Stabilisationsphase zum Geräte-Ruhewert zurückkehren. Treiberwerte sind separat zu bewerten und nicht aus einem erfolgreichen Prozess-Kill abzuleiten.
 - **Messgrenze des Resource-Monitors:** `EngineResourceMonitor` läuft im zu beendenden Service-Prozess und endet beim harten Kill ebenfalls. Er kann daher die Freigabe nach Prozessende nicht selbst bestätigen. Die Nachher-Messung muss von der fortbestehenden App bzw. dem externen Instrumentation-/ADB-Test-Harness kommen.
 - CPU-Inferenzabbruch über den offiziellen llama.cpp-Context-Abort-Callback prüfen. Laut öffentlicher Header-Dokumentation wirkt dieser Callback derzeit nur für CPU-Ausführung; der Prozess-Kill bleibt deshalb der backend-unabhängige Fallback.
@@ -143,7 +147,7 @@ Ausgangscommit vor diesem Plan: `ed6506302565f02c4896095c8d6f00a778f9f689`.
 - Kein erfolgreicher Realgerät-Nachweis für Modellladen, GPU-Offloading, Prozessabbruch oder Performance aus diesen CI-Läufen ableitbar.
 
 
-## Aktueller Abnahme-Snapshot – 07.11.2026
+## Historischer Baseline-Snapshot – 07.11.2026
 
 **Repository-Head:** `main` = `9b455a7471059fadb11a09cf17471afbd05cd67d`.
 
@@ -151,6 +155,21 @@ Ausgangscommit vor diesem Plan: `ed6506302565f02c4896095c8d6f00a778f9f689`.
 - **Android APK Build #113:** erfolgreich. ARM64-/x86_64-Debug-APK und Instrumentation-Test-APK wurden gebaut; die Emulator-Prozessisolationstests liefen erfolgreich. Das APK-Artefakt wurde von GitHub Actions hochgeladen.
 - **Grenze des grünen APK-Laufs:** Die vorhandenen Instrumentationstests beenden und ersetzen einen im Leerlauf gestarteten Service-Prozess. Sie führen keine reale GGUF-Inferenz aus und testen keinen Timeout-Kill aus einem blockierten nativen/JNI-Aufruf.
 - **Echte Geräteabnahme:** Für das Zielgerät liegt weiterhin kein verifizierter Testlauf vor. Modellladen, native Inferenz, Timeout-Hard-Abort, PID-Tod, Modell-Recovery nach Reconnect und Vulkan-/Treiber-Ressourcenfreigabe bleiben offen.
-- **SAF-No-Copy-Pfad:** Der aktuelle Standardpfad reicht den geöffneten SAF-Dateideskriptor an `:inference` weiter und verwendet `/proc/self/fd/<n>`; die Provider-Kompatibilität mit seekbaren/mmap-fähigen Deskriptoren und eine verständliche Fehlermeldung für Pipe-/Cloud-Provider sind noch nicht auf Zielhardware abgenommen.
+- **SAF-No-Copy-Pfad:** Der Service-Resolver prüft `fstat`/Dateityp, `lseek`, `pread` und read-only `mmap`; die Tests für reguläre Datei und Pipe bestehen. Noch offen ist ein End-to-End-Test des per Binder übertragenen echten SAF-Descriptors im `:inference`-Prozess sowie die Abnahme mit lokalen, Cloud- und Pipe-Providern auf Zielhardware.
 
 **Status:** Work in progress. Weder die erfolgreiche APK-Erstellung noch die Emulator-Tests rechtfertigen die Bezeichnung „geräteverifiziert“ oder „produktionsreif“.
+
+
+## Aktueller CI- und Abnahme-Snapshot – 08.11.2026
+
+**Repository-Head:** `main` = `fec84e66d9e03abdbe522431924fbd987877b709`.
+
+- **Unit Tests #162:** erfolgreich. Die hochgeladenen JUnit-Berichte enthalten 40 Tests, 0 Fehler und 0 übersprungene Tests (37 im Modul `:llm-engine`, 3 im Demo-Modul). Die drei Fehler aus Baseline #153 sind jetzt grün: `modelLoadTimeoutKillsHungInferenceProcessWithoutInferenceRequestId`, `modelLoadTimeoutNeverKillsReplacementInferenceProcess` und `testMockIpcClientModelLoadingAndChat`.
+- **Android APK Build #121:** erfolgreich. Native Debug-APK und Instrumentation-Test-APK wurden gebaut; ABI-/Vulkan-Compile-Prüfungen, `-O2`-Prüfung, zusammengeführtes Service-Manifest und APK-Upload waren erfolgreich. Der Emulator meldete 6/6 Instrumentationstests bestanden, 0 übersprungen, 0 fehlgeschlagen.
+- **APK-Artefakt:** `Local-LMM-Engine-debug-apk` wurde tatsächlich heruntergeladen und geprüft. Das ZIP enthält `app-debug.apk` (69.337.322 Bytes; SHA-256 `92371ca0d49ad6ed0e6ee332fed5e1ea271a2f84e13df11f2f3f4d968be01f76`). GitHub führt das Artefakt mit 14 Tagen Aufbewahrung; es ist kein Release-APK.
+- **SAF-No-Copy:** Resolver-Code und zwei Instrumentationstests prüfen reguläre seekbare/mmap-fähige Deskriptoren sowie die Ablehnung eines Pipes ohne Copy-Fallback. Der Test läuft im Testprozess, nicht als echter SAF/Binder-Provider-Test im `:inference`-Prozess.
+- **Native Hard-Abort:** Der neue Debug-Hook hält `nativeProcessChat` nicht-kooperativ in JNI fest. Der Client-Prefill-Timeout führt im Emulator zum Verschwinden der alten Service-PID, Binder-Disconnect, Fortbestand der App-PID und Reconnect zu einer Ersatz-PID. Der Test prüft weder persistiertes `PROCESS_ABORT_CONFIRMED` noch Modell-Reload und Folgeinferenz.
+- **Noch offen:** Timeout-Watchdog muss vor dem Kill kooperative Cancellation plus Grace Period versuchen; echte Modell-Recovery, mindestens fünf Ressourcenzyklen mit app-seitiger Nachher-Messung, echte Zielhardware nubia Z2462N/Android 16/ARM64/Mali-G57 und Vulkan-Layer-/Operation-Offload/Performance bleiben ohne Nachweis.
+- **Hardware-Abnahme:** In Repository und diesen Actions-Artefakten liegt kein neuer Zielgerätebericht vor. Die CI-Ergebnisse sind Emulator-/Build-Nachweise und keine Geräteverifikation.
+
+**Gesamtstatus:** Work in progress. Die Unit-Test- und Emulator-CI ist für diesen Commit grün; die verbindliche Geräte- und Ressourcenabnahme ist ausdrücklich nicht abgeschlossen.
