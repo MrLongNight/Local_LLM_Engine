@@ -8,7 +8,7 @@ An Android demo application and reusable Android library for running local GGUF 
 
 - `:app` — demo Android application.
 - `:llm-engine` — reusable Android library containing the public engine API and JNI/native llama.cpp integration.
-- `:llm-engine/src/main/cpp/llama.cpp` — pinned Git submodule of `ggml-org/llama.cpp` at `669204ee2b9004845b34f26466a91d003edc98aa` (2026-11-06).
+- `:llm-engine/src/main/cpp/llama.cpp` — pinned Git submodule of `ggml-org/llama.cpp` at `a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5` (2026-11-09).
 - `INTEGRATION_MYDOCANIZER.md` — integration notes for the intended myDocAnizer-Mobile target.
 
 ## Requirements
@@ -108,27 +108,31 @@ has returned all GPU allocations.
 ## Native llama.cpp source
 
 The engine pins the upstream `ggml-org/llama.cpp` source as a Git submodule at
-`669204ee2b9004845b34f26466a91d003edc98aa` (upstream HEAD checked on 2026-11-06 at
-19:51 UTC). The exact revision is also verified in the APK workflow. To initialize
-or refresh a clone:
+`a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5` (upstream HEAD checked on 2026-11-09 at
+13:48 UTC). This is 51 upstream commits newer than the previous repository pin
+`669204ee2b9004845b34f26466a91d003edc98aa`. The APK workflow verifies this exact submodule revision.
+
+To initialize or refresh a clone:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-This revision is 15 upstream commits newer than the previous pin
-`67107ac34f62882d8b53ea41ad68010ea635b9be`. The updates include Vulkan
-ReBAR detection and corresponding device-memory allocation handling, alongside
-upstream fixes and improvements in other backends and shared code. This is a
-source update, not evidence of faster inference on the target phone. Hexagon is
-not enabled in this Android build, so this pin update does not claim NPU
-acceleration.
-Android API-24 Vulkan loader and Mali extension-dispatch compatibility remain as
-a build-only overlay: CMake copies upstream `ggml-vulkan.cpp` into the build
+The update includes upstream fixes across llama.cpp and GGML, including Vulkan
+changes to RoPE/YARN truncation handling and Argsort pipeline selection. This
+is a source update, not evidence of faster inference on the target phone.
+Hexagon is not enabled in this Android build, so this pin update does not claim
+NPU acceleration.
+
+Android API-24 Vulkan-loader and Mali extension-dispatch compatibility remain
+as a build-only overlay: CMake copies upstream `ggml-vulkan.cpp` into the build
 directory, applies checked replacements there, and compiles that copy. The
-upstream submodule working tree is never edited. The overlay fails CMake
-configuration if its expected upstream anchors change, so a future llama.cpp
-revision cannot silently bypass these fixes.
+upstream submodule working tree is never edited. The overlay anchors were
+checked against the 2026-11-09 upstream source: all three
+`vkGetPhysicalDeviceFeatures2` calls and the include, buffer-device-address,
+16-bit-storage and device-create anchors are still present. CMake will fail
+rather than silently omit the compatibility replacements if those anchors
+change again.
 
 ## Native Android backends
 

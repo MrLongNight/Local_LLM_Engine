@@ -1,7 +1,7 @@
 # Umsetzungsplan – Local LLM Engine
 
 **Arbeitsbranch:** `main`  
-**llama.cpp-Submodule:** `669204ee2b9004845b34f26466a91d003edc98aa` (Upstream-HEAD, geprüft am 06.11.2026, 19:51 UTC)  
+**llama.cpp-Submodule:** `a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5` (Upstream-HEAD, geprüft am 09.11.2026, 13:48 UTC)  
 **Ziel:** Eine nachweislich funktionierende lokale GGUF-Inferenz auf Android mit korrekter CPU-/GPU-Auswahl, kontrolliertem Abbruch und messbarer Performance.
 
 Dieser Plan ersetzt die frühere, widersprüchliche Aufgabenliste. Er ist die einzige zentrale Aufgabenliste dieses Repositories. Ein Punkt gilt erst als erledigt, wenn sein jeweiliger Abnahmetest bestanden ist. Ein erfolgreicher Kotlin-Test oder APK-Build allein gilt nicht als Nachweis echter Geräte-Inferenz.
@@ -33,7 +33,9 @@ Die Referenzimplementierung aktiviert auf ARM64 `GGML_CPU_KLEIDIAI` und `GGML_OP
 
 **Umgesetzt in Commit `b345a4f`:** Das Git-Submodule wurde von `67107ac34f62882d8b53ea41ad68010ea635b9be` auf den am 06.11.2026 um 19:51 UTC geprüften Upstream-HEAD `669204ee2b9004845b34f26466a91d003edc98aa` aktualisiert. Der neue Stand enthält 15 Upstream-Commits zusätzlich, darunter Vulkan-ReBAR-Erkennung und die dazugehörige Anpassung der Gerätespeicher-Allokation. Der APK-Workflow prüft exakt diesen SHA.
 
-Das Android-CMake-Overlay baut weiterhin eine separate Arbeitskopie von `ggml-vulkan.cpp`; der Upstream-Submodule-Inhalt bleibt unverändert. Die bisher benötigten Android-API-24-/Mali-Kompatibilitätsanker (drei `vkGetPhysicalDeviceFeatures2`-Aufrufe sowie Include-, Buffer-Device-Address-, 16-bit-storage- und Device-Create-Anker) sind im aktualisierten Quelltext vorhanden.
+**Nachfolgendes Upstream-Refresh am 09.11.2026:** Das Submodule wurde auf den aktuellen Upstream-HEAD `a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5` (13:48 UTC) angehoben – 51 Commits neuer als der vorherige Pin. In `ggml-vulkan.cpp` wurden die Änderungen zu RoPE/YARN-Truncation und Argsort-Pipeline-Auswahl übernommen. Der APK-Workflow prüft jetzt exakt den neuen Gitlink-SHA.
+
+Das Android-CMake-Overlay baut weiterhin eine separate Arbeitskopie von `ggml-vulkan.cpp`; der Upstream-Submodule-Inhalt bleibt unverändert. Die Android-API-24-/Mali-Kompatibilitätsanker (drei `vkGetPhysicalDeviceFeatures2`-Aufrufe sowie Include-, Buffer-Device-Address-, 16-bit-storage- und Device-Create-Anker) wurden erneut gegen diesen Upstream-Quellstand geprüft und sind vorhanden. Die CMake-Ersetzungen greifen weiterhin. Der nachfolgende native APK-Build muss die Kompatibilität und Toolchain jetzt erneut bestätigen; ein neuer Upstream-Pin allein belegt noch keine funktionierende Geräte-Inferenz oder bessere Performance.
 
 **CI-Abnahme:** Unit Tests #151 für `b345a4f` und Android APK Build #112 für denselben Commit sind erfolgreich abgeschlossen. Der APK-Workflow baute die konfigurierten ABIs und veröffentlichte sein Debug-Artefakt. Das bestätigt den damaligen Buildpfad, nicht die Ausführung auf dem Zielgerät.
 
