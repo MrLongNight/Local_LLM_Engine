@@ -45,6 +45,19 @@ The workflow runs automatically on pushes to `main` when Android app/engine sour
 
 The workflow builds `:app:assembleDebug`, including the native C++ build and the configured ARM64 Vulkan path, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
 
+## Last-model restore
+
+The app stores the source and exact load-time configuration of the last model that
+loaded successfully. On the next cold app start, it attempts to load that model
+automatically. App-private GGUF files are checked for existence first. A model opened
+through Android's Storage Access Framework is remembered only after a persistent read
+grant has been obtained; if the file is moved, removed, or access is revoked, startup
+shows an actionable error and leaves the saved selection intact for recovery. Manually
+unloading a model does not clear the remembered selection.
+
+The source and settings are stored locally in app-private SharedPreferences. The GGUF
+file is not copied or uploaded by this feature.
+
 ## In-app configuration screening
 
 The Settings screen includes an opt-in on-device screening run for the loaded model and

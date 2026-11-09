@@ -137,9 +137,11 @@ class EngineViewModel(
     private var configurationSmokeJob: Job? = null
     private var inferenceJob: Job? = null
     private var generationSequence: Long = 0L
+    private val lastModelStore = LastModelStore(application)
 
     init {
         refreshModelFiles()
+        restoreLastModelOnStartup()
     }
 
     fun selectTab(tab: AppTab) {
@@ -235,6 +237,17 @@ class EngineViewModel(
             try {
                 val result = engine.loadModel(source, loadConfig)
                 result.onSuccess { info ->
+                    runCatching { lastModelStore.save(source, loadConfig, info.name) }
+                        .onSuccess {
+                            EngineDiagnostics.info(
+                                "model_restore",
+                                "LAST_MODEL_SAVED",
+                                "sourceType=${modelSourceKind(source)}, name=${info.name}, configPersisted=true"
+                            )
+                        }
+                        .onFailure { error ->
+                            EngineDiagnostics.error("model_restore", "LAST_MODEL_SAVE_FAILED", error)
+                        }
                     refreshModelFiles()
                     val hashLabel = info.sha256?.take(12)?.let { " (SHA-256: $it…)" }.orEmpty()
                     _statusMessage.value = "Modell '${info.name}' bereit (${info.activeBackend})$hashLabel"
@@ -260,20 +273,109 @@ class EngineViewModel(
     }
 
     fun importModelFromSaf(uri: Uri) {
-        // OpenDocument grants persistable read access so :inference can reopen
-        // the same original document after a process restart.
-        runCatching {
-            getApplication<Application>().contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        }.onFailure { error ->
-            EngineDiagnostics.error("model_source", "SAF_PERSIST_PERMISSION_FAILED", error)
+        // Auto-restore requires a persisted read grant, not the temporary picker grant.
+        val permissionResult = runCatching {
+            val resolver = getApplication<Application>().contentResolver
+            val alreadyPersisted = resolver.persistedUriPermissions.any {
+                it.uri.toString() == uri.toString() && it.isReadPermission
+            }
+            if (!alreadyPersisted) {
+                resolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            val persisted = resolver.persistedUriPermissions.any {
+                it.uri.toString() == uri.toString() && it.isReadPermission
+            }
+            check(persisted) { "Android did not retain a persistent read grant for this document." }
         }
+        permissionResult.onFailure { error ->
+            EngineDiagnostics.error("model_restore", "SAF_PERSIST_PERMISSION_FAILED", error)
+            _errorMessage.value =
+                "Für den automatischen Modellstart konnte Android keinen dauerhaften Lesezugriff speichern. " +
+                "Bitte wähle die GGUF-Datei über „Modell-Import“ erneut aus."
+        }
+        if (permissionResult.isFailure) return
+
         startModelLoad(
             source = ModelSource.ContentUri(uriString = uri.toString()),
             operationLabel = "Öffne GGUF-Datei direkt am Originalspeicherort..."
         )
+    }
+
+    /**
+     * Restores the last successfully loaded model once when a fresh ViewModel starts.
+     * SAF sources are reopened only when Android still holds the persisted read grant.
+     */
+    private fun restoreLastModelOnStartup() {
+        val remembered = runCatching { lastModelStore.load() }.getOrElse { error ->
+            EngineDiagnostics.error("model_restore", "LAST_MODEL_READ_FAILED", error)
+            _errorMessage.value = "Die gespeicherten Modellinformationen sind beschädigt. Bitte wähle das Modell erneut aus."
+            return
+        } ?: return
+
+        _engineConfig.value = remembered.config
+        val source = remembered.source
+        val displayName = when (source) {
+            is ModelSource.FilePath -> File(source.path).name
+            is ModelSource.ContentUri -> source.displayName ?: "zuletzt verwendete SAF-Datei"
+            else -> {
+                EngineDiagnostics.info("model_restore", "LAST_MODEL_SOURCE_UNSUPPORTED")
+                _errorMessage.value = "Das zuletzt verwendete Modell kann nicht automatisch geöffnet werden. Bitte wähle es erneut aus."
+                return
+            }
+        }
+
+        when (source) {
+            is ModelSource.FilePath -> {
+                if (!File(source.path).isFile) {
+                    EngineDiagnostics.info(
+                        "model_restore",
+                        "LAST_MODEL_FILE_MISSING",
+                        "name=$displayName"
+                    )
+                    _errorMessage.value =
+                        "Das zuletzt verwendete Modell „$displayName“ wurde nicht gefunden. Bitte wähle die GGUF-Datei erneut aus."
+                    return
+                }
+            }
+            is ModelSource.ContentUri -> {
+                val hasPersistedReadGrant = runCatching {
+                    getApplication<Application>().contentResolver.persistedUriPermissions.any {
+                        it.uri.toString() == source.uriString && it.isReadPermission
+                    }
+                }.getOrDefault(false)
+                if (!hasPersistedReadGrant) {
+                    EngineDiagnostics.info(
+                        "model_restore",
+                        "LAST_MODEL_URI_PERMISSION_MISSING",
+                        "name=$displayName"
+                    )
+                    _errorMessage.value =
+                        "Der dauerhafte Zugriff auf „$displayName“ ist nicht mehr vorhanden. Bitte wähle die GGUF-Datei erneut aus."
+                    return
+                }
+            }
+            else -> return
+        }
+
+        EngineDiagnostics.info(
+            "model_restore",
+            "LAST_MODEL_AUTO_RESTORE_STARTED",
+            "sourceType=${modelSourceKind(source)}, name=$displayName"
+        )
+        startModelLoad(
+            source = source,
+            operationLabel = "Lade zuletzt verwendetes Modell: $displayName…"
+        )
+    }
+
+    private fun modelSourceKind(source: ModelSource): String = when (source) {
+        is ModelSource.FilePath -> "APP_FILE"
+        is ModelSource.ContentUri -> "SAF_URI"
+        is ModelSource.AssetPath -> "ASSET"
+        is ModelSource.RemoteUrl -> "REMOTE_URL"
     }
 
     fun loadModelFile(file: File) {
