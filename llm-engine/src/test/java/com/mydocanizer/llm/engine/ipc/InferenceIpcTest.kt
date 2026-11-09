@@ -286,6 +286,9 @@ class InferenceIpcTest {
         val cancelled = events.filterIsInstance<InferenceEvent.Cancelled>().single()
         assertEquals("Hallo", cancelled.partialText)
         assertEquals(1, cancelled.tokensGenerated)
+        withTimeout(1_000L) {
+            while (!fakeService.isKilled.get()) delay(5L)
+        }
         assertTrue("Non-cooperative cancellation must escalate to process kill", fakeService.isKilled.get())
         client.close()
     }
@@ -569,8 +572,14 @@ class InferenceIpcTest {
         // 2. Trigger process-level cancelInference()
         client.cancelInference()
 
-        // Cooperative cancel is sent first; this fake deliberately does not acknowledge.
-        assertEquals(fakeService.lastRequestId.get(), fakeService.cancelledRequestId.get())
+        // Cooperative cancel is dispatched on the client's IO scope. Wait for the
+        // Binder call to reach the fake before asserting its request ID.
+        withTimeout(1_000L) {
+            while (fakeService.cancelledRequestId.get() != fakeService.lastRequestId.get()) {
+                delay(5L)
+            }
+        }
+        // The fake deliberately does not acknowledge, so escalation must kill it.
         withTimeout(1_000L) {
             while (!fakeService.isKilled.get()) delay(5L)
         }

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.AppTab
 import com.example.ui.EngineViewModel
+import com.mydocanizer.llm.engine.BackendPreference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -50,6 +51,8 @@ class LocalLlmEngineAppTest {
         assertEquals("", viewModel.inputText.value)
         assertTrue(viewModel.chatMessages.value.isEmpty())
         assertTrue(viewModel.systemPrompt.value.isNotBlank())
+        assertEquals(BackendPreference.VULKAN, viewModel.engineConfig.value.backendPreference)
+        assertEquals(37, viewModel.engineConfig.value.gpuLayers)
 
         viewModel.selectTab(AppTab.IMPORT)
         assertEquals(AppTab.IMPORT, viewModel.currentTab.value)
