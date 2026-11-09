@@ -24,6 +24,9 @@ class BackendBenchmarkPlanTest {
         val benchmark = BackendBenchmarkPlan.configuration(original)
 
         assertEquals(24, benchmark.maxPredictTokens)
+        assertEquals(4, BackendBenchmarkPlan.WARMUP_TOKENS)
+        assertEquals(20, BackendBenchmarkPlan.MEASURED_TOKENS)
+        assertEquals(24, BackendBenchmarkPlan.TOTAL_TOKENS)
         assertEquals(0f, benchmark.temperature, 0f)
         assertEquals(1f, benchmark.topP, 0f)
         assertEquals(original.contextSize, benchmark.contextSize)

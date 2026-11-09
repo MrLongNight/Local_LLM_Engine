@@ -406,9 +406,9 @@ class EngineViewModel(
 
 
     /**
-     * Short, reproducible comparison. Each backend gets a fresh model load, a four-token
-     * warm-up and a fixed 24-token measurement. A failed first backend never prevents
-     * trying the second one. The original load configuration is restored afterwards.
+     * Short, reproducible comparison. Each backend gets one model load and one inference
+     * request. The first four generated tokens warm the execution path; the following
+     * twenty are measured. This avoids repeating the expensive prompt prefill twice.
      */
     fun runDefaultBackendBenchmark() {
         if (_isBenchmarking.value) return
@@ -430,7 +430,8 @@ class EngineViewModel(
         } else {
             ModelSource.FilePath(model.path)
         }
-        val benchmarkPrompt = "wer ist Ricardo Villalobos"
+        val benchmarkPrompt =
+            "Gib die Zahlen 1 bis 40 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
         val benchmarkConfig = BackendBenchmarkPlan.configuration(originalConfig)
         val backends = BackendBenchmarkPlan.BACKENDS
 
@@ -443,16 +444,16 @@ class EngineViewModel(
             EngineDiagnostics.info(
                 "benchmark",
                 "BACKEND_BENCHMARK_STARTED",
-                "model=${model.name},modelBytes=${model.sizeBytes},prompt=ricardo_villalobos_fixed," +
+                "model=${model.name},modelBytes=${model.sizeBytes},prompt=fixed_counting_sequence," +
                     "backendOrder=VULKAN,CPU,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
-                    "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${benchmarkConfig.contextSize}," +
-                    "batch=${benchmarkConfig.batchSize},threads=${benchmarkConfig.threads}," +
+                    "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},totalTokens=${BackendBenchmarkPlan.TOTAL_TOKENS}," +
+                    "context=${benchmarkConfig.contextSize},batch=${benchmarkConfig.batchSize},threads=${benchmarkConfig.threads}," +
                     "batchThreads=${benchmarkConfig.batchThreads},microBatch=${benchmarkConfig.microBatchSize}," +
                     "gpuLayers=${benchmarkConfig.gpuLayers},temperature=0.0,topP=1.0"
             )
 
             try {
-                for (backend in backends) {
+                for ((index, backend) in backends.withIndex()) {
                     currentCoroutineContext().ensureActive()
                     _benchmarkReport.value = "Lade ${backend.name} für den kurzen Vergleich…"
                     try {
@@ -473,44 +474,39 @@ class EngineViewModel(
                             throw IllegalStateException("Nach dem Neuladen wurde nicht dieselbe Modelldatei bestätigt.")
                         }
 
-                        val warmup = collectBackendBenchmarkSample(
-                            backend = backend,
-                            phaseLabel = "Warm-up",
-                            maxTokens = BackendBenchmarkPlan.WARMUP_TOKENS,
-                            systemPromptSnapshot = systemPromptSnapshot,
-                            benchmarkPrompt = benchmarkPrompt
-                        )
-                        delay(BackendBenchmarkPlan.COOLDOWN_MS)
                         val measured = collectBackendBenchmarkSample(
                             backend = backend,
-                            phaseLabel = "Messung",
-                            maxTokens = BackendBenchmarkPlan.MEASURED_TOKENS,
+                            maxTokens = BackendBenchmarkPlan.TOTAL_TOKENS,
+                            warmupTokens = BackendBenchmarkPlan.WARMUP_TOKENS,
                             systemPromptSnapshot = systemPromptSnapshot,
                             benchmarkPrompt = benchmarkPrompt
                         )
-                        if (measured.result.tokensGenerated < 8) {
+                        if (measured.measuredTokens < 8) {
                             throw IllegalStateException(
-                                "Zu wenige Mess-Tokens für einen brauchbaren Vergleich: ${measured.result.tokensGenerated}"
+                                "Zu wenige Mess-Tokens nach dem Warm-up: ${measured.measuredTokens}"
                             )
                         }
 
                         val reportLine = String.format(
                             java.util.Locale.US,
-                            "%s: modelLoadMs=%d, promptTokens=%d, prefillMs=%s, TTFT=%s ms, " +
-                                "generationMs=%d, outputTokens=%d, tokensPerSecond=%.3f, streamWallMs=%d, " +
-                                "finishReason=%s, warmupTokens=%d, warmupTokensPerSecond=%.3f, activeBackend=%s",
+                            "%s: modelLoadMs=%d, promptTokens=%d, prefillMs=%s, firstTokenAfterPrefillMs=%s, " +
+                                "warmupTokens=%d, warmupWallMs=%s, measuredTokens=%d, measuredWallMs=%s, " +
+                                "measuredTokensPerSecond=%.3f, nativeGenerationMs=%d, nativeTokensPerSecond=%.3f, " +
+                                "streamWallMs=%d, finishReason=%s, activeBackend=%s",
                             backend.name,
                             modelLoadMs,
                             measured.promptTokens,
                             measured.promptEvaluationMs?.toString() ?: "n/a",
-                            measured.firstTokenMs?.toString() ?: "n/a",
+                            measured.firstTokenAfterPrefillMs?.toString() ?: "n/a",
+                            measured.warmupTokens,
+                            measured.warmupWallMs?.toString() ?: "n/a",
+                            measured.measuredTokens,
+                            measured.measuredWallMs?.toString() ?: "n/a",
+                            measured.measuredTokensPerSecond,
                             measured.result.durationMs,
-                            measured.result.tokensGenerated,
                             measured.result.tokensPerSecond,
                             measured.wallMs,
                             measured.result.finishReason.name,
-                            warmup.result.tokensGenerated,
-                            warmup.result.tokensPerSecond,
                             loaded.activeBackend
                         )
                         lines.add(reportLine)
@@ -520,7 +516,7 @@ class EngineViewModel(
                             reportLine + ",context=${backendConfig.contextSize},batch=${backendConfig.batchSize}," +
                                 "threads=${backendConfig.threads},batchThreads=${backendConfig.batchThreads}," +
                                 "microBatch=${backendConfig.microBatchSize},gpuLayers=${backendConfig.gpuLayers}," +
-                                "temperature=0.0,topP=1.0,maxPredictTokens=${BackendBenchmarkPlan.MEASURED_TOKENS}"
+                                "temperature=0.0,topP=1.0,maxPredictTokens=${BackendBenchmarkPlan.TOTAL_TOKENS}"
                         )
                     } catch (cancelled: CancellationException) {
                         throw cancelled
@@ -529,6 +525,8 @@ class EngineViewModel(
                         lines.add(failure)
                         EngineDiagnostics.error("benchmark", "BACKEND_BENCHMARK_FAILED", error)
                     }
+
+                    if (index < backends.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
                 }
             } catch (cancelled: CancellationException) {
                 lines.add("Benchmark wurde abgebrochen.")
@@ -551,10 +549,10 @@ class EngineViewModel(
 
                 _benchmarkReport.value = buildString {
                     appendLine("CPU- / Vulkan-Kurzbenchmark")
-                    appendLine("Frage: wer ist Ricardo Villalobos")
+                    appendLine("Test: Zahlenfolge 1–40")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB)")
                     appendLine(
-                        "Test: 4 Warm-up-Tokens + 24 Mess-Tokens; Temperatur 0; Top-P 1; " +
+                        "Pro Backend: eine Inferenz, 4 Warm-up-Tokens + 20 Mess-Tokens; Temperatur 0; Top-P 1; " +
                             "Kontext ${benchmarkConfig.contextSize}; Batch ${benchmarkConfig.batchSize}; " +
                             "${benchmarkConfig.threads} Threads; GPU-Layer ${benchmarkConfig.gpuLayers}."
                     )
@@ -568,16 +566,21 @@ class EngineViewModel(
 
     private data class BackendBenchmarkSample(
         val result: InferenceResult,
-        val firstTokenMs: Long?,
+        val firstTokenAfterPrefillMs: Long?,
         val promptEvaluationMs: Long?,
         val promptTokens: Int,
+        val warmupTokens: Int,
+        val warmupWallMs: Long?,
+        val measuredTokens: Int,
+        val measuredWallMs: Long?,
+        val measuredTokensPerSecond: Double,
         val wallMs: Long
     )
 
     private suspend fun collectBackendBenchmarkSample(
         backend: BackendPreference,
-        phaseLabel: String,
         maxTokens: Int,
+        warmupTokens: Int,
         systemPromptSnapshot: String,
         benchmarkPrompt: String
     ): BackendBenchmarkSample {
@@ -592,62 +595,76 @@ class EngineViewModel(
             topP = 1f
         )
 
-        var firstTokenMs: Long? = null
+        var firstTokenAfterPrefillMs: Long? = null
         var promptEvaluationMs: Long? = null
         var promptTokens = 0
         var visibleTokenCount = 0
+        var warmupWallMs: Long? = null
         var completed: InferenceResult? = null
         val started = System.nanoTime()
 
         engine.streamChat(request).collect { event ->
             when (event) {
                 is InferenceEvent.Progress -> {
-                    when (event.phase) {
-                        InferenceEvent.ProgressPhase.PROMPT_EVALUATION -> {
-                            promptEvaluationMs = event.elapsedMs
-                            promptTokens = event.promptTokensTotal
-                            _benchmarkReport.value =
-                                "${backend.name} ${phaseLabel}: Prompt ${event.promptTokensProcessed}/${event.promptTokensTotal} Tokens…"
-                        }
-                        InferenceEvent.ProgressPhase.GENERATING -> {
-                            _benchmarkReport.value =
-                                "${backend.name} ${phaseLabel}: ${event.tokensGenerated}/$maxTokens Tokens, " +
-                                String.format(java.util.Locale.US, "%.2f tok/s…", event.tokensPerSecond)
-                        }
-                        else -> Unit
+                    if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION) {
+                        promptTokens = event.promptTokensTotal
+                        _benchmarkReport.value =
+                            "${backend.name}: Prompt ${event.promptTokensProcessed}/${event.promptTokensTotal} Tokens…"
+                    } else if (event.phase == InferenceEvent.ProgressPhase.GENERATING) {
+                        _benchmarkReport.value =
+                            "${backend.name}: ${event.tokensGenerated}/$maxTokens Tokens werden erzeugt…"
                     }
+                }
+                is InferenceEvent.Started -> {
+                    promptEvaluationMs = (System.nanoTime() - started) / 1_000_000L
+                    _benchmarkReport.value = "${backend.name}: Prompt abgeschlossen – Generierung läuft…"
                 }
                 is InferenceEvent.Token -> {
                     visibleTokenCount++
-                    val elapsedMs = ((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(1L)
-                    if (firstTokenMs == null) firstTokenMs = elapsedMs
-                    val speed = visibleTokenCount * 1000.0 / elapsedMs
+                    val elapsedMs = (System.nanoTime() - started) / 1_000_000L
+                    if (firstTokenAfterPrefillMs == null) {
+                        firstTokenAfterPrefillMs =
+                            (elapsedMs - (promptEvaluationMs ?: elapsedMs)).coerceAtLeast(0L)
+                    }
+                    if (visibleTokenCount == warmupTokens) {
+                        warmupWallMs = elapsedMs
+                    }
+                    val phase = if (visibleTokenCount <= warmupTokens) "Warm-up" else "Messung"
+                    val measuredSoFar = (visibleTokenCount - warmupTokens).coerceAtLeast(0)
                     _benchmarkReport.value =
-                        "${backend.name} ${phaseLabel}: ${visibleTokenCount}/$maxTokens Tokens, " +
-                        String.format(java.util.Locale.US, "%.2f tok/s…", speed)
+                        "${backend.name}: $phase – ${visibleTokenCount}/$maxTokens Tokens " +
+                            "(${measuredSoFar}/${BackendBenchmarkPlan.MEASURED_TOKENS} gemessen)…"
                 }
                 is InferenceEvent.Completed -> completed = event.result
                 is InferenceEvent.Error -> throw event.throwable
                 is InferenceEvent.Cancelled -> throw CancellationException(
-                    "${backend.name} ${phaseLabel} wurde abgebrochen."
+                    "${backend.name} wurde abgebrochen."
                 )
-                is InferenceEvent.Started -> {
-                    // Started is emitted after native prefill has returned. This wall
-                    // duration includes the final Vulkan synchronization wait.
-                    promptEvaluationMs = (System.nanoTime() - started) / 1_000_000L
-                    _benchmarkReport.value =
-                        "${backend.name} ${phaseLabel}: Prompt fertig (${promptTokens} Tokens)…"
-                }
             }
         }
 
         val result = completed ?: throw IllegalStateException("Keine abgeschlossene Antwort für ${backend.name} erhalten.")
+        val visibleCount = visibleTokenCount.coerceAtMost(result.tokensGenerated)
+        val measuredTokens = (result.tokensGenerated - warmupTokens).coerceAtLeast(0)
+        val wallMs = (System.nanoTime() - started) / 1_000_000L
+        val measuredWallMs = if (measuredTokens > 0 && warmupWallMs != null) {
+            (wallMs - warmupWallMs!!).coerceAtLeast(1L)
+        } else null
+        val measuredSpeed = if (measuredWallMs != null) {
+            measuredTokens * 1000.0 / measuredWallMs
+        } else 0.0
+
         return BackendBenchmarkSample(
             result = result,
-            firstTokenMs = firstTokenMs,
+            firstTokenAfterPrefillMs = firstTokenAfterPrefillMs,
             promptEvaluationMs = promptEvaluationMs,
             promptTokens = promptTokens,
-            wallMs = (System.nanoTime() - started) / 1_000_000L
+            warmupTokens = minOf(result.tokensGenerated, warmupTokens),
+            warmupWallMs = warmupWallMs,
+            measuredTokens = measuredTokens,
+            measuredWallMs = measuredWallMs,
+            measuredTokensPerSecond = measuredSpeed,
+            wallMs = wallMs
         )
     }
 

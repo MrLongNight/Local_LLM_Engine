@@ -257,9 +257,9 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Vergleicht dasselbe Modell mit der Testfrage „wer ist Ricardo Villalobos“ auf Vulkan und CPU. " +
-                            "Je Backend gibt es 4 Warm-up-Tokens und 24 Mess-Tokens mit identischen Ladeparametern, Temperatur 0 und Top-P 1. " +
-                            "Der Fortschritt wird live angezeigt; danach wird deine ursprüngliche Modellkonfiguration wiederhergestellt.",
+                        text = "Vergleicht dasselbe Modell auf Vulkan und CPU mit einer festen Zahlenfolge. " +
+                            "Pro Backend läuft nur eine Inferenz: 4 Warm-up-Tokens und anschließend 20 Mess-Tokens. " +
+                            "Damit wird das teure Prompt-Prefill nicht doppelt ausgeführt. Der Fortschritt wird live angezeigt.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

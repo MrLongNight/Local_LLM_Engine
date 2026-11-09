@@ -61,12 +61,13 @@ file is not copied or uploaded by this feature.
 ## CPU / Vulkan benchmark
 
 The Settings benchmark reloads the same model explicitly on Vulkan and CPU, in that
-order. Each backend receives a four-token warm-up and a deterministic 24-token
-measurement (temperature 0, top-p 1), so a slow first backend cannot consume the
-entire 512-token chat output budget before the CPU phase begins. The screen reports
-prefill progress, generation progress, first-token time and throughput. A failed
-Vulkan run is recorded and does not suppress the CPU attempt; the original model
-configuration is restored in a non-cancellable cleanup block.
+order. Each backend receives exactly one deterministic inference request with 24 output
+tokens total: the first four warm the execution path, and the next twenty are measured
+(temperature 0, top-p 1). This avoids a second expensive prompt prefill per backend.
+The screen reports prompt progress, generation progress, time to first token after
+prefill, and post-warm-up throughput. A failed Vulkan run is recorded and does not
+suppress the CPU attempt; the original model configuration is restored in a
+non-cancellable cleanup block.
 
 Native token timing distinguishes llama.cpp decode submission from the subsequent
 GPU synchronization wait. Vulkan can enqueue compute asynchronously; timing only
