@@ -377,7 +377,7 @@ object EngineDiagnostics {
             performanceEvents.forEach(::appendLine)
             appendLine()
             appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
-            tokenMetricSummary.lineSequence().forEach(::appendLine)
+            tokenMetricSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
             appendLine("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
             if (memorySummaries.isEmpty()) appendLine("Keine RAM-Samples gefunden.")

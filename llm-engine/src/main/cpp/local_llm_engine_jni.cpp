@@ -1328,14 +1328,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const std::string valid_output =
         normalize_utf8_incremental(token_piece, engine->cached_token_chars);
     const int64_t piece_duration_us = llama_time_us() - piece_start_us;
-    const int64_t token_step_duration_us = llama_time_us() - token_step_start_us;
+    const int64_t token_total_duration_us = llama_time_us() - token_step_start_us;
     if (engine->tokens_generated <= 4 || engine->tokens_generated % 8 == 0) {
         std::ostringstream metric;
         metric << "TOKEN_STEP_METRIC - index=" << engine->tokens_generated
                << ", sampleUs=" << sample_duration_us
                << ", decodeUs=" << decode_duration_us
                << ", pieceUs=" << piece_duration_us
-               << ", totalUs=" << token_step_duration_us
+               << ", totalUs=" << token_total_duration_us
                << ", backend=" << engine->active_backend;
         log_native_info_message(metric.str());
     }
