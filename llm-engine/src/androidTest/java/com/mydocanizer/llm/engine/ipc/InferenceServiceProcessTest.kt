@@ -294,7 +294,9 @@ class InferenceServiceProcessTest {
         assertTrue("Tiny GGUF fixture must be present and non-empty", modelFile.isFile && modelFile.length() > 0L)
 
         val timeoutConfig = TimeoutConfig(
-            serviceBindMs = 5_000L,
+            // Cold Android emulator service startup is materially slower than an
+            // already-bound process. Match the process-binding helper's 15s budget.
+            serviceBindMs = 15_000L,
             modelLoadMs = 30_000L,
             prefillMs = 1_500L,
             firstTokenMs = 10_000L,
@@ -318,7 +320,13 @@ class InferenceServiceProcessTest {
         var directBinding: BoundInferenceService? = null
 
         try {
-            assertTrue("InferenceClient must initialize", client.initialize().isSuccess)
+            val initialization = client.initialize()
+            assertTrue(
+                "InferenceClient must initialize; error=${initialization.exceptionOrNull()}, " +
+                    "state=${client.state.value}, remotePid=${client.remotePid.value}, " +
+                    "recentLogs=${EngineDiagnostics.getLogs().takeLast(20).joinToString(" | ")}",
+                initialization.isSuccess
+            )
             val firstLoad = client.loadModel(ModelSource.FilePath(modelFile.absolutePath), config)
             assertTrue("Real tiny GGUF must load before fault injection: ${firstLoad.exceptionOrNull()}",
                 firstLoad.isSuccess)
