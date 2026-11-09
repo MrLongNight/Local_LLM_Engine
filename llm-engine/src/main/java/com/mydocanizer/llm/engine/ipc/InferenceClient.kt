@@ -124,8 +124,8 @@ internal class InferenceClient(
     private val activeStreamControl = AtomicReference<ActiveStreamControl?>(null)
     private val pendingModelLoad = AtomicReference<PendingModelLoad?>(null)
     private val reconnectInProgress = AtomicBoolean(false)
-    private var lastLoadedSource: ModelSource? = null
-    private var lastLoadedConfig: EngineConfig? = null
+    @Volatile private var lastLoadedSource: ModelSource? = null
+    @Volatile private var lastLoadedConfig: EngineConfig? = null
     private val isClosed = AtomicBoolean(false)
 
     private val serviceConnection = object : ServiceConnection {
@@ -327,6 +327,12 @@ internal class InferenceClient(
     private fun triggerReconnect() {
         if (isClosed.get() || !reconnectInProgress.compareAndSet(false, true)) return
 
+        // Snapshot the recovery target at disconnect time. If an explicit backend
+        // change succeeds while recovery waits for the operation mutex, it supersedes
+        // this snapshot and must not be overwritten by a stale automatic reload.
+        val sourceAtDisconnect = lastLoadedSource
+        val configAtDisconnect = lastLoadedConfig
+
         clientScope.launch {
             val startNano = System.nanoTime()
             val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
@@ -370,7 +376,7 @@ internal class InferenceClient(
                 )
                 service.initialize()
 
-                val reloadResult = restoreLastModelAfterReconnect(service)
+                val reloadResult = restoreLastModelAfterReconnect(service, sourceAtDisconnect, configAtDisconnect)
                 reloadResult?.exceptionOrNull()?.let { error ->
                     EngineDiagnostics.error("ipc_client", "MODEL_RELOAD_FAILED", error)
                 }
@@ -397,7 +403,9 @@ internal class InferenceClient(
      * explicit backend change may have completed while this recovery waited.
      */
     internal suspend fun restoreLastModelAfterReconnect(
-        connectedService: IInferenceService
+        connectedService: IInferenceService,
+        sourceAtDisconnect: ModelSource? = lastLoadedSource,
+        configAtDisconnect: EngineConfig? = lastLoadedConfig
     ): Result<ModelInfo>? {
         val waitStarted = System.nanoTime()
         return operationMutex.withLock {
@@ -410,13 +418,16 @@ internal class InferenceClient(
                 "waitMs=$lockWaitMs,hasRememberedModel=${source != null && config != null}"
             )
             val alreadyLoaded = _currentModel.value
-            if (alreadyLoaded != null) {
+            val explicitLoadSupersededRecovery =
+                alreadyLoaded != null &&
+                    (source != sourceAtDisconnect || config != configAtDisconnect)
+            if (explicitLoadSupersededRecovery) {
                 EngineDiagnostics.info(
                     "ipc_client",
                     "MODEL_RECONNECT_SKIPPED_DUPLICATE_RELOAD",
-                    "activeBackend=${alreadyLoaded.activeBackend}"
+                    "activeBackend=${alreadyLoaded?.activeBackend},reason=explicit_load_completed_while_waiting"
                 )
-                Result.success(alreadyLoaded)
+                Result.success(alreadyLoaded!!)
             } else if (source == null || config == null) {
                 _state.value = EngineState.Ready
                 null
