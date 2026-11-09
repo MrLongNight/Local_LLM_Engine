@@ -225,6 +225,14 @@ struct EngineInstance {
     }
 };
 
+// llama.cpp documents this callback as CPU-only in the pinned revision. Vulkan
+// cancellation remains process-level because the GPU backend does not guarantee
+// interruption of an in-flight decode through this callback.
+static bool llama_decode_abort_requested(void* user_data) {
+    const auto* engine = static_cast<const EngineInstance*>(user_data);
+    return engine != nullptr && engine->cancel_requested.load(std::memory_order_relaxed);
+}
+
 static inline EngineInstance* fromHandle(jlong handle) {
     return reinterpret_cast<EngineInstance*>(handle);
 }
@@ -536,6 +544,10 @@ static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, lla
         }
 
         const int res = llama_decode(engine->context, engine->batch);
+        if (res == 2) {
+            LOGI("llama_decode aborted by native cancellation callback");
+            return -2;
+        }
         if (res != 0) {
             LOGE("llama_decode failed with code %d", res);
             return res;
@@ -845,6 +857,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     ctx_params.n_ubatch = b_size;
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = n_threads;
+    if (!use_vulkan) {
+        ctx_params.abort_callback = llama_decode_abort_requested;
+        ctx_params.abort_callback_data = engine;
+    }
 
     llama_context* ctx = nullptr;
     try {
@@ -988,7 +1004,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     if (!engine || !engine->model || !engine->context) return 1;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
-    engine->cancel_requested.store(false);
+    // The request's cancellation flag is cleared by nativeResetCancellation()
+    // before entering JNI. Never clear it here: a Binder cancel racing with
+    // nativeProcessChat must not be lost.
     engine->reset_short_term();
     engine->reset_long_term(true);
 
@@ -1253,8 +1271,15 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return nullptr;
     }
 
-    if (llama_decode(engine->context, engine->batch) != 0) {
-        LOGE("llama_decode failed during token generation");
+    const int decode_result = llama_decode(engine->context, engine->batch);
+    if (decode_result == 2) {
+        LOGI("Token decode aborted by native cancellation callback");
+        engine->last_finish_reason = 2; // CANCELLED
+        engine->generation_finished = true;
+        return nullptr;
+    }
+    if (decode_result != 0) {
+        LOGE("llama_decode failed during token generation with code %d", decode_result);
         engine->last_finish_reason = 3; // ERROR
         return nullptr;
     }
@@ -1347,6 +1372,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeIsNativeInfere
     return engine && engine->native_inference_block_entered_for_test.load() ? JNI_TRUE : JNI_FALSE;
 }
 #endif
+
+JNIEXPORT void JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeResetCancellation(
+        JNIEnv* /*env*/,
+        jclass /*clazz*/,
+        jlong handle) {
+    auto* engine = fromHandle(handle);
+    if (engine) {
+        engine->cancel_requested.store(false);
+    }
+}
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeCancel(
