@@ -77,11 +77,22 @@ The service terminates its own `:inference` process immediately and deliberately
 does not wait for `engine.close()`, JNI cleanup, file logging, or coroutine
 joins.
 
-**Current timeout-path gap:** the inference watchdog currently calls the hard
-process-abort path directly when a phase deadline expires. It does not yet send
-the cooperative cancellation request and wait the grace period first. The
-timeout path therefore still needs to be aligned with the cooperative-first
-sequence before that acceptance criterion can be marked complete.
+For a phase timeout, the client now records the pending timeout, sends
+`cancelInference(requestId)` to request native cooperative cancellation, and
+keeps the request ID active while it waits up to `abortGracePeriodMs` for a
+terminal Binder callback. A cooperative terminal callback ends native execution
+without killing the process; the client still reports the original timeout as
+an error because its deadline was exceeded. If no terminal callback arrives
+within the grace period, the client escalates against the original service PID
+through the one-way `killProcess()` path, then verifies process death and
+uses the client-side same-UID kill only as a fallback. Late completion/error
+callbacks cannot turn an already-expired request into a successful result.
+
+Robolectric coverage exercises both branches: a cooperative acknowledgement
+must avoid process termination, while a non-cooperative service must not be
+hard-killed until the configured grace period has elapsed. The emulator's
+blocked-JNI instrumentation test remains the process-death/reconnect check;
+real-device behavior is still a separate acceptance requirement.
 
 The client polls the original PID and can issue a same-UID client-side PID kill
 if the service did not exit in time. Binder disconnect or confirmed PID death
@@ -139,7 +150,7 @@ gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
 - A SAF-selected local GGUF is opened as a `ParcelFileDescriptor` and passed to `:inference`; the service-side loader opens the retained descriptor through `/proc/self/fd/<n>`. Before native loading, the resolver checks that it is a regular file, tests seeking and positional GGUF-header reads, and probes read-only `mmap`. Pipe/non-regular sources are rejected with a no-copy diagnostic. The current instrumentation tests exercise this resolver with a regular file and a pipe in the test process; they do not yet verify a real SAF provider descriptor after the Binder handoff into `:inference` on the target device. APK assets and HTTPS remote sources are still materialized in app-private storage, validated for the GGUF magic header, SHA-256 hashed, and atomically published under a SHA-256-addressed filename. HTTPS redirects are limited and cannot downgrade to HTTP. Downloads are not resumable yet.
-- The emulator suite now tests a deliberately blocked JNI call and a real client prefill-timeout path, including app-process survival, original service-PID disappearance, Binder disconnect and replacement-service reconnect. It does not load/reload a real GGUF model or run a follow-up inference. The timeout watchdog currently bypasses the cooperative-cancel grace period; this remains an implementation gap. No five-cycle external resource check or real-device acceptance has been completed.
+- The emulator suite tests a deliberately blocked JNI call and a real client prefill-timeout path, including app-process survival, original service-PID disappearance, Binder disconnect and replacement-service reconnect. Robolectric tests cover the timeout's cooperative-first branch and grace-period escalation. Neither suite loads/reloads a real GGUF model or runs a successful follow-up inference after process death. No five-cycle external resource check or real-device acceptance has been completed.
 - No real-device performance result is implied by CI success.
 
 ## Implementation plan
