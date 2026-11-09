@@ -271,6 +271,19 @@ fun SettingsScreen(
                     ) {
                         Text(if (isBenchmarking) "Benchmark läuft…" else "CPU vs. Vulkan testen")
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { viewModel.runVulkanLayerSweep() },
+                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                        modifier = Modifier.fillMaxWidth().testTag("vulkan_layer_sweep_button")
+                    ) {
+                        Text(if (isBenchmarking) "Vulkan-Layer-Test läuft…" else "Vulkan-GPU-Layer vergleichen")
+                    }
+                    Text(
+                        text = "Testet 100 %, 75 %, 50 % und 25 % des nativen Layer-Offloads, mit Wiederholung von 100 % am Ende. Die ursprünglichen Einstellungen werden danach wiederhergestellt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     benchmarkReport?.let { report ->
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(

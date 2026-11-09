@@ -669,6 +669,251 @@ class EngineViewModel(
     }
 
     /**
+     * Measures Vulkan with several layer-offload levels on the same model and prompt.
+     * The first load requests the maximum (99) and reads the model's actual layer count
+     * from the native runtime string. Each following run changes only gpuLayers.
+     * A final full-offload run checks for obvious thermal/frequency drift.
+     */
+    fun runVulkanLayerSweep() {
+        if (_isBenchmarking.value) return
+        if (_isGenerating.value || _isImporting.value) {
+            _errorMessage.value = "Vulkan-Layer-Test erst starten, wenn keine Inferenz oder Modell-Operation läuft."
+            return
+        }
+
+        val model = currentModel.value
+        if (model == null) {
+            _errorMessage.value = "Bitte zuerst ein GGUF-Modell laden."
+            return
+        }
+
+        val originalConfig = _engineConfig.value
+        val systemPromptSnapshot = _systemPrompt.value
+        val source = if (model.path.startsWith("content://", ignoreCase = true)) {
+            ModelSource.ContentUri(model.path, model.name)
+        } else {
+            ModelSource.FilePath(model.path)
+        }
+        val prompt =
+            "Gib die Zahlen 1 bis 40 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
+
+        _isBenchmarking.value = true
+        _benchmarkReport.value = "Vulkan-GPU-Layer-Test wird vorbereitet…"
+        _errorMessage.value = null
+
+        viewModelScope.launch {
+            val rows = mutableListOf<String>()
+            var restoreRequired = false
+            var confirmedTotalLayers: Int? = null
+            var stoppedReason: String? = null
+            EngineDiagnostics.info(
+                "benchmark",
+                "GPU_LAYER_SWEEP_STARTED",
+                "model=${model.name},modelBytes=${model.sizeBytes},requestedMaxGpuLayers=${VulkanLayerSweepPlan.MAX_REQUESTED_GPU_LAYERS}," +
+                    "fractions=100,75,50,25,100_repeat,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
+                    "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
+                    "batch=${originalConfig.batchSize},threads=${originalConfig.threads},temperature=0.0,topP=1.0"
+            )
+
+            try {
+                val initialSafetyStop = configurationTestSafetyBlock()
+                if (initialSafetyStop != null) {
+                    throw IllegalStateException("Sicherheitsabbruch vor dem ersten GPU-Layer-Lauf: " + initialSafetyStop)
+                }
+
+                restoreRequired = true
+                _benchmarkReport.value = "Vulkan: Lade Modell mit maximalem Layer-Offload…"
+                val firstConfig = VulkanLayerSweepPlan.configuration(
+                    originalConfig,
+                    VulkanLayerSweepPlan.MAX_REQUESTED_GPU_LAYERS
+                )
+                val firstLoadStarted = System.nanoTime()
+                val firstLoaded = engine.loadModel(source, firstConfig).getOrElse { throw it }
+                val firstLoadMs = (System.nanoTime() - firstLoadStarted) / 1_000_000L
+
+                val firstBackend = backendFamily(firstLoaded.activeBackend)
+                if (firstBackend != "VULKAN") {
+                    throw IllegalStateException(
+                        "Vulkan wurde angefordert, geladen wurde aber: " + firstLoaded.activeBackend
+                    )
+                }
+                if (firstLoaded.sizeBytes != model.sizeBytes ||
+                    (!model.sha256.isNullOrBlank() && !firstLoaded.sha256.isNullOrBlank() &&
+                        model.sha256 != firstLoaded.sha256)
+                ) {
+                    throw IllegalStateException("Nach dem maximalen Vulkan-Load wurde nicht dieselbe Modelldatei bestätigt.")
+                }
+
+                val totalLayers = VulkanLayerSweepPlan.totalLayersFromBackend(firstLoaded.activeBackend)
+                    ?: throw IllegalStateException(
+                        "Die native Backend-Meldung enthält keine bestätigte Gesamtzahl der GPU-Layer: " +
+                            firstLoaded.activeBackend
+                    )
+                confirmedTotalLayers = totalLayers
+                val candidateLayers = VulkanLayerSweepPlan.layerCounts(totalLayers)
+                val runLayers = candidateLayers + candidateLayers.first()
+                EngineDiagnostics.info(
+                    "benchmark",
+                    "GPU_LAYER_SWEEP_PLAN",
+                    "totalLayers=$totalLayers,candidateLayers=" + candidateLayers.joinToString(",") +
+                        ",repeatFullOffload=true,activeBackend=${firstLoaded.activeBackend}"
+                )
+
+                for ((index, gpuLayers) in runLayers.withIndex()) {
+                    currentCoroutineContext().ensureActive()
+                    val safetyStop = if (index == 0) null else configurationTestSafetyBlock()
+                    if (safetyStop != null) {
+                        stoppedReason = safetyStop
+                        rows += "ABBRUCH vor gpuLayers=$gpuLayers: $safetyStop"
+                        EngineDiagnostics.info("benchmark", "GPU_LAYER_SWEEP_SAFETY_STOP", safetyStop)
+                        break
+                    }
+
+                    val profile = when {
+                        index == 0 -> "100% (Start)"
+                        index == runLayers.lastIndex -> "100% (Wiederholung)"
+                        else -> "${(gpuLayers * 100.0 / totalLayers).toInt()}%"
+                    }
+                    _benchmarkReport.value =
+                        "Vulkan-Layer-Test ${index + 1}/${runLayers.size}: $gpuLayers/$totalLayers Layer ($profile)…"
+
+                    val loadMs: Long
+                    val loaded: ModelInfo
+                    val configuredGpuLayers: Int
+                    if (index == 0) {
+                        loadMs = firstLoadMs
+                        loaded = firstLoaded
+                        configuredGpuLayers = VulkanLayerSweepPlan.MAX_REQUESTED_GPU_LAYERS
+                    } else {
+                        // Repeat the exact same maximum request as the opening run. The
+                        // native loader clamps both to the model's real total layer count.
+                        val requestLayers = if (index == runLayers.lastIndex) {
+                            VulkanLayerSweepPlan.MAX_REQUESTED_GPU_LAYERS
+                        } else {
+                            gpuLayers
+                        }
+                        val profileConfig = VulkanLayerSweepPlan.configuration(originalConfig, requestLayers)
+                        configuredGpuLayers = profileConfig.gpuLayers
+                        val loadStarted = System.nanoTime()
+                        loaded = engine.loadModel(source, profileConfig).getOrElse { throw it }
+                        loadMs = (System.nanoTime() - loadStarted) / 1_000_000L
+                    }
+
+                    val actualBackend = backendFamily(loaded.activeBackend)
+                    if (actualBackend != "VULKAN") {
+                        throw IllegalStateException(
+                            "Vulkan-Profil gpuLayers=$gpuLayers wechselte unerwartet auf: " + loaded.activeBackend
+                        )
+                    }
+                    if (loaded.sizeBytes != model.sizeBytes ||
+                        (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() &&
+                            model.sha256 != loaded.sha256)
+                    ) {
+                        throw IllegalStateException("Für gpuLayers=$gpuLayers wurde nicht dieselbe Modelldatei bestätigt.")
+                    }
+
+                    val measured = collectBackendBenchmarkSample(
+                        backend = BackendPreference.VULKAN,
+                        maxTokens = BackendBenchmarkPlan.TOTAL_TOKENS,
+                        warmupTokens = BackendBenchmarkPlan.WARMUP_TOKENS,
+                        systemPromptSnapshot = systemPromptSnapshot,
+                        benchmarkPrompt = prompt
+                    )
+                    if (measured.measuredTokens < 8) {
+                        throw IllegalStateException(
+                            "Zu wenige Mess-Tokens nach dem Warm-up bei gpuLayers=$gpuLayers: " +
+                                measured.measuredTokens
+                        )
+                    }
+
+                    val percent = gpuLayers * 100.0 / totalLayers
+                    val reportLine = String.format(
+                        java.util.Locale.US,
+                        "gpuLayers=%d/%d (%.0f%%): load=%dms, promptTokens=%d, prefillMs=%s, " +
+                            "TTFT=%s ms, measuredTokens=%d, measuredWallMs=%s, measured=%.3f tok/s, " +
+                            "native=%.3f tok/s, generationMs=%d, finish=%s, activeBackend=%s",
+                        gpuLayers,
+                        totalLayers,
+                        percent,
+                        loadMs,
+                        measured.promptTokens,
+                        measured.promptEvaluationMs?.toString() ?: "n/a",
+                        measured.firstTokenAfterPrefillMs?.toString() ?: "n/a",
+                        measured.measuredTokens,
+                        measured.measuredWallMs?.toString() ?: "n/a",
+                        measured.measuredTokensPerSecond,
+                        measured.result.tokensPerSecond,
+                        measured.result.durationMs,
+                        measured.result.finishReason.name,
+                        loaded.activeBackend
+                    )
+                    rows += reportLine
+                    EngineDiagnostics.info(
+                        "benchmark",
+                        "GPU_LAYER_SWEEP_RESULT",
+                        "runIndex=${index + 1},profile=$profile,configuredGpuLayers=$configuredGpuLayers," +
+                            "layerTarget=$gpuLayers,totalLayers=$totalLayers," +
+                            "modelLoadMs=$loadMs,promptTokens=${measured.promptTokens}," +
+                            "prefillMs=${measured.promptEvaluationMs ?: -1L}," +
+                            "firstTokenAfterPrefillMs=${measured.firstTokenAfterPrefillMs ?: -1L}," +
+                            "warmupTokens=${measured.warmupTokens},measuredTokens=${measured.measuredTokens}," +
+                            "measuredWallMs=${measured.measuredWallMs ?: -1L}," +
+                            "measuredTokensPerSecond=${measured.measuredTokensPerSecond}," +
+                            "nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
+                            "generationMs=${measured.result.durationMs},finishReason=${measured.result.finishReason.name}," +
+                            "context=${originalConfig.contextSize},batch=${originalConfig.batchSize}," +
+                            "threads=${originalConfig.threads},batchThreads=${originalConfig.batchThreads}," +
+                            "microBatch=${originalConfig.microBatchSize},backend=${loaded.activeBackend}"
+                    )
+                    if (index < runLayers.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
+                }
+            } catch (cancelled: CancellationException) {
+                rows += "Vulkan-Layer-Test wurde abgebrochen."
+                stoppedReason = "Vom Nutzer abgebrochen."
+                EngineDiagnostics.info("benchmark", "GPU_LAYER_SWEEP_CANCELLED")
+                throw cancelled
+            } catch (error: Throwable) {
+                stoppedReason = error.message ?: error.javaClass.simpleName
+                rows += "FEHLER: $stoppedReason"
+                EngineDiagnostics.error("benchmark", "GPU_LAYER_SWEEP_FAILED", error)
+            } finally {
+                if (restoreRequired) {
+                    _benchmarkReport.value = "Stelle ursprüngliche Modellkonfiguration wieder her…"
+                    val restore = withContext(NonCancellable) {
+                        runCatching { engine.loadModel(source, originalConfig).getOrThrow() }
+                    }
+                    restore.onSuccess { restored ->
+                        EngineDiagnostics.info(
+                            "benchmark",
+                            "GPU_LAYER_SWEEP_RESTORED",
+                            "backendPreference=${originalConfig.backendPreference},gpuLayers=${originalConfig.gpuLayers}," +
+                                "activeBackend=${restored.activeBackend}"
+                        )
+                    }.onFailure { error ->
+                        rows += "KRITISCH: Restore fehlgeschlagen: " +
+                            (error.message ?: error.javaClass.simpleName)
+                        EngineDiagnostics.error("benchmark", "GPU_LAYER_SWEEP_RESTORE_FAILED", error)
+                    }
+                }
+
+                _benchmarkReport.value = buildString {
+                    appendLine("Vulkan GPU-Layer-Vergleich")
+                    appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB)")
+                    appendLine("Native bestätigte Layer-Gesamtzahl: ${confirmedTotalLayers ?: "nicht bestätigt"}")
+                    appendLine(
+                        "Je Profil: eine Inferenz, 4 Warm-up-Tokens + 20 Mess-Tokens; Temperatur 0; Top-P 1; " +
+                            "gleiche Prompt- und Kontext-/Batch-/Thread-Einstellungen."
+                    )
+                    rows.forEach { appendLine(it) }
+                    if (stoppedReason != null) appendLine("Hinweis: $stoppedReason")
+                    append("Die ursprüngliche Modellkonfiguration wurde anschließend wiederhergestellt; Details stehen im Diagnoseexport.")
+                }
+                _isBenchmarking.value = false
+            }
+        }
+    }
+
+    /**
      * Short on-device screening of independent llama.cpp context parameters.
      * The same model/backend and fixed prompt are used for every profile. Context
      * settings require a model reload; original settings are restored in finally.

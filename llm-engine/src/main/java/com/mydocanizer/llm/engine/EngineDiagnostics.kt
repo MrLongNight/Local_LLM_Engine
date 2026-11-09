@@ -226,7 +226,7 @@ object EngineDiagnostics {
             "PREFILL_COMPLETED",
             "FIRST_TOKEN_RECEIVED",
             "GENERATION_COMPLETED"
-        ) || event.startsWith("BACKEND_BENCHMARK_")
+        ) || event.startsWith("BACKEND_BENCHMARK_") || event.startsWith("GPU_LAYER_SWEEP_")
     }
 
     private fun isImportantEvent(line: String): Boolean {
