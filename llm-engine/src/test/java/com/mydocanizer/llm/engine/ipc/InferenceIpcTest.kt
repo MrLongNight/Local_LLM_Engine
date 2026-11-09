@@ -515,7 +515,7 @@ class InferenceIpcTest {
             assertEquals(1, fakeService.modelLoadCalls.get())
 
             fakeService.blockNextModelLoad.set(true)
-            val recovery = async {
+            val recovery = async(kotlinx.coroutines.Dispatchers.IO) {
                 client.restoreLastModelAfterReconnect(fakeService)
             }
             withTimeout(1_000L) {
