@@ -400,12 +400,21 @@ internal class InferenceClient(
 
     fun isProcessAlive(pid: Int): Boolean {
         processLivenessCheck?.let { return it(pid) }
-        // A successful /proc lookup is authoritative for this same-UID child process.
-        // In particular, a missing entry means the process is gone. Do not then consult
-        // ActivityManager: its throttled process list can retain stale PIDs and turn a
-        // confirmed process exit into a false "still alive" result.
+        // /proc/<pid> can remain present briefly after exit while Linux retains a
+        // zombie entry. Read field 3 (state) from stat; Z and X are not live processes.
+        // The final ')' is used because the comm field itself may contain spaces or ')'.
         return try {
-            File("/proc/$pid").exists()
+            val processDirectory = File("/proc/$pid")
+            if (!processDirectory.exists()) {
+                false
+            } else {
+                val statFile = File(processDirectory, "stat")
+                if (!statFile.isFile || !statFile.canRead()) {
+                    true // Conservative: do not declare a process dead on an unreadable stat.
+                } else {
+                    isProcStatAlive(statFile.readText(Charsets.UTF_8))
+                }
+            }
         } catch (procError: Exception) {
             // Use ActivityManager only if the /proc check itself cannot be performed.
             try {
@@ -423,6 +432,15 @@ internal class InferenceClient(
                 false
             }
         }
+    }
+
+    internal fun isProcStatAlive(statLine: String): Boolean {
+        val closingCommandDelimiter = statLine.lastIndexOf(')')
+        if (closingCommandDelimiter < 0) return true
+        val state = statLine.substring(closingCommandDelimiter + 1)
+            .trimStart()
+            .firstOrNull() ?: return true
+        return state != 'Z' && state != 'X'
     }
 
     override suspend fun initialize(): Result<Unit> = operationMutex.withLock {
