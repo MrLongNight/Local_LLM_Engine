@@ -154,7 +154,10 @@ class InferenceIpcTest {
                     try {
                         Thread.sleep(30L)
                         callback?.onToken(requestId, " Welt", 1)
-                        Thread.sleep(100L)
+                        // Keep the fake native operation blocked beyond the configured
+                        // total-timeout + cooperative grace window so this test exercises
+                        // the hard-abort branch rather than a natural completion during grace.
+                        Thread.sleep(250L)
                         val result = InferenceResult(
                             text = "Hallo Welt",
                             tokensGenerated = 2,
