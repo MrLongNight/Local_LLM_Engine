@@ -96,6 +96,12 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
     std::fflush(g_native_log_file);
 }
 
+// Persist compact inference timings through the same native log stream consumed by
+// EngineDiagnostics. The message contains timings and backend only, never prompt text.
+static void log_native_info_message(const std::string& message) {
+    local_llm_native_log_callback(GGML_LOG_LEVEL_INFO, message.c_str(), nullptr);
+}
+
 static constexpr int OVERFLOW_HEADROOM = 8;
 static constexpr int BATCH_SIZE = 512;
 static constexpr float DEFAULT_TEMP = 0.7f;
@@ -1267,8 +1273,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     }
 
     const int64_t token_step_start_us = llama_time_us();
+    const int64_t sample_start_us = llama_time_us();
     const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
     common_sampler_accept(engine->sampler, new_token_id, true);
+    const int64_t sample_duration_us = llama_time_us() - sample_start_us;
 
     engine->batch.n_tokens = 0;
     if (!append_token_to_batch(engine->batch, new_token_id, engine->current_position, 0, true, engine->batch_size)) {
@@ -1276,7 +1284,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return nullptr;
     }
 
+    const int64_t decode_start_us = llama_time_us();
     const int decode_result = llama_decode(engine->context, engine->batch);
+    const int64_t decode_duration_us = llama_time_us() - decode_start_us;
     if (decode_result == 2) {
         LOGI("Token decode aborted by native cancellation callback");
         engine->last_finish_reason = 2; // CANCELLED
@@ -1313,9 +1323,22 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
              engine->active_backend.c_str());
     }
 
+    const int64_t piece_start_us = llama_time_us();
     auto token_piece = common_token_to_piece(engine->context, new_token_id);
     const std::string valid_output =
         normalize_utf8_incremental(token_piece, engine->cached_token_chars);
+    const int64_t piece_duration_us = llama_time_us() - piece_start_us;
+    const int64_t token_step_duration_us = llama_time_us() - token_step_start_us;
+    if (engine->tokens_generated <= 4 || engine->tokens_generated % 8 == 0) {
+        std::ostringstream metric;
+        metric << "TOKEN_STEP_METRIC - index=" << engine->tokens_generated
+               << ", sampleUs=" << sample_duration_us
+               << ", decodeUs=" << decode_duration_us
+               << ", pieceUs=" << piece_duration_us
+               << ", totalUs=" << token_step_duration_us
+               << ", backend=" << engine->active_backend;
+        log_native_info_message(metric.str());
+    }
     if (valid_output.empty()) {
         return env->NewStringUTF("");
     }

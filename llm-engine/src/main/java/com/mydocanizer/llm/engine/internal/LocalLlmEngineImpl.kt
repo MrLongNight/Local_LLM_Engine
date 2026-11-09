@@ -471,7 +471,7 @@ internal class LocalLlmEngineImpl(
             while (!isCancelled.get()) {
                 val tokenStepStartNano = System.nanoTime()
                 val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
-                val tokenStepDurationMs = (System.nanoTime() - tokenStepStartNano) / 1_000_000L
+                val tokenStepDurationUs = (System.nanoTime() - tokenStepStartNano) / 1_000L
                 if (tokenPiece == null) {
                     break
                 }
@@ -480,7 +480,7 @@ internal class LocalLlmEngineImpl(
                     EngineDiagnostics.info(
                         "inference",
                         "TOKEN_STEP_METRIC",
-                        "nativeStep=$nativeTokenSteps, durationMs=$tokenStepDurationMs, " +
+                        "nativeStep=$nativeTokenSteps, jniWallUs=$tokenStepDurationUs, " +
                             "visiblePieces=$tokenCount, backend=${modelInfo.activeBackend}"
                     )
                 }

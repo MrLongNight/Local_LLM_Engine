@@ -102,6 +102,37 @@ object EngineDiagnostics {
             .toList()
     }
 
+    private data class NativeTokenStepMetric(
+        val index: Int,
+        val sampleUs: Long,
+        val decodeUs: Long,
+        val pieceUs: Long,
+        val totalUs: Long
+    )
+
+    private fun nativeTokenStepMetric(line: String): NativeTokenStepMetric? {
+        if (!line.contains("TOKEN_STEP_METRIC")) return null
+        return NativeTokenStepMetric(
+            index = field(line, "index")?.toIntOrNull() ?: return null,
+            sampleUs = field(line, "sampleUs")?.toLongOrNull() ?: return null,
+            decodeUs = field(line, "decodeUs")?.toLongOrNull() ?: return null,
+            pieceUs = field(line, "pieceUs")?.toLongOrNull() ?: return null,
+            totalUs = field(line, "totalUs")?.toLongOrNull() ?: return null
+        )
+    }
+
+    private fun percentile(values: List<Long>, fraction: Double): Long? {
+        if (values.isEmpty()) return null
+        val sorted = values.sorted()
+        val index = kotlin.math.ceil((sorted.lastIndex * fraction).coerceIn(0.0, 1.0)).toInt()
+        return sorted[index]
+    }
+
+    private fun timingSummary(name: String, values: List<Long>): String {
+        if (values.isEmpty()) return "${name}=n/a"
+        return "${name} p50=${percentile(values, 0.50)}us p90=${percentile(values, 0.90)}us max=${values.maxOrNull()}us"
+    }
+
     private data class ResourceSample(
         val line: String,
         val timestamp: String,
@@ -156,6 +187,8 @@ object EngineDiagnostics {
             "NATIVE_BACKEND_PREFLIGHT",
             "MODEL_NATIVE_RUNTIME_READY",
             "PROMPT_STAGE_METRICS",
+            "FIRST_TOKEN_RECEIVED",
+            "TOKEN_STEP_METRIC",
             "GENERATION_COMPLETED"
         ) || event.startsWith("BACKEND_BENCHMARK_")
     }
@@ -244,7 +277,7 @@ object EngineDiagnostics {
 
         val nativeKeywords = listOf(
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
-            "MEMORY", "ALLOC", "PIPELINE", "SHADER", "FENCE", "QUEUE",
+            "TOKEN_STEP_METRIC", "MEMORY", "ALLOC", "PIPELINE", "SHADER", "FENCE", "QUEUE",
             "FAILED", "ERROR", "WARN", "UNSUPPORTED", "FALLBACK",
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST"
         )
@@ -252,9 +285,26 @@ object EngineDiagnostics {
             val upper = line.uppercase(Locale.US)
             nativeKeywords.any(upper::contains)
         }
+        val nativeTokenMetrics = nativeLines.mapNotNull(::nativeTokenStepMetric)
         val nativeSelected = (
-            relevantNative.take(12) + relevantNative.takeLast(MAX_NATIVE_LINES - 12)
+            relevantNative.take(10) + relevantNative.takeLast(4)
         ).distinct().map { compactLine(it, 360) }
+        val tokenMetricLines = nativeTokenMetrics.take(4) + nativeTokenMetrics.takeLast(6)
+        val tokenMetricSummary = buildString {
+            if (nativeTokenMetrics.isEmpty()) {
+                appendLine("Keine nativen Token-Schritt-Messwerte gefunden.")
+            } else {
+                appendLine("Stichproben=${nativeTokenMetrics.size}; Messintervalle:")
+                appendLine(timingSummary("sample", nativeTokenMetrics.map { it.sampleUs }))
+                appendLine(timingSummary("decode", nativeTokenMetrics.map { it.decodeUs }))
+                appendLine(timingSummary("tokenPiece", nativeTokenMetrics.map { it.pieceUs }))
+                appendLine(timingSummary("nativeStep", nativeTokenMetrics.map { it.totalUs }))
+                appendLine("Repräsentative Token-Schritte (index/sampleUs/decodeUs/pieceUs/totalUs):")
+                tokenMetricLines.distinctBy { it.index }.forEach { metric ->
+                    appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.pieceUs}/${metric.totalUs}")
+                }
+            }
+        }
 
         val memorySummaries = samples
             .groupBy { "${it.pid}/${it.phase}" }
@@ -325,6 +375,9 @@ object EngineDiagnostics {
                 appendLine("Keine abgeschlossenen Backend-/Inferenz-Messwerte gefunden.")
             }
             performanceEvents.forEach(::appendLine)
+            appendLine()
+            appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
+            tokenMetricSummary.lineSequence().forEach(::appendLine)
             appendLine()
             appendLine("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
             if (memorySummaries.isEmpty()) appendLine("Keine RAM-Samples gefunden.")
