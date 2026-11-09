@@ -346,9 +346,18 @@ internal class LocalLlmEngineImpl(
 
         val modelInfo = _currentModel.value
             ?: throw IllegalStateException("No model loaded. Call loadModel() before chat.")
-        _state.value = EngineState.Inferring(request)
-        isCancelled.set(false)
 
+        // A Binder cancel can arrive after the service accepted the request but before
+        // this cold Flow reaches its native lane. Do not clear that cancellation and start
+        // work that the caller has already abandoned.
+        if (isCancelled.get()) {
+            trySend(InferenceEvent.Cancelled("", 0))
+            _state.value = EngineState.ModelLoaded(modelInfo)
+            isCancelled.set(false)
+            return@callbackFlow
+        }
+
+        _state.value = EngineState.Inferring(request)
         val requestStartNano = System.nanoTime()
         val roles = request.messages.map { it.role.roleName }.toTypedArray()
         val contents = request.messages.map { it.content }.toTypedArray()
@@ -385,6 +394,17 @@ internal class LocalLlmEngineImpl(
                     estimatedRemainingMs = etaMs
                 )
             )
+        }
+
+        // Clear the previous request's native cancellation flag only after checking the
+        // Kotlin-side flag. Check it again after reset so a cancel racing with reset is
+        // either handled here or observed inside llama.cpp's CPU abort callback.
+        NativeEngineHandle.nativeResetCancellation(handle)
+        if (isCancelled.get()) {
+            trySend(InferenceEvent.Cancelled("", 0))
+            _state.value = EngineState.ModelLoaded(modelInfo)
+            isCancelled.set(false)
+            return@callbackFlow
         }
 
         val processRes = NativeEngineHandle.nativeProcessChat(
