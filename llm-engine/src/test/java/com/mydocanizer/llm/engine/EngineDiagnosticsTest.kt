@@ -43,6 +43,43 @@ class EngineDiagnosticsTest {
         assertFalse(report.contains("decode p50=9000000us"))
     }
 
+
+    @Test
+    fun percentileUsesTheFullSortedRangeForP50AndP90() {
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(
+                nativeMetric(1, 100, 300, "percentile-run", "Vulkan"),
+                nativeMetric(2, 200, 300, "percentile-run", "Vulkan"),
+                nativeMetric(3, 300, 300, "percentile-run", "Vulkan"),
+                nativeMetric(4, 400, 300, "percentile-run", "Vulkan")
+            )
+        )
+
+        assertTrue(report.contains("decode p50=300us"))
+        assertTrue(report.contains("decode p90=400us"))
+    }
+
+    @Test
+    fun benchmarkSummaryIsNotDisplacedByManyTokenStepRows() {
+        val tokenRows = (1..32).map { index ->
+            kotlinMetric(
+                index = index,
+                jniWallUs = index * 1_000L,
+                pid = 400,
+                runId = "long-chat-run",
+                backend = "Vulkan"
+            )
+        }
+        val benchmarkResult =
+            "2026-11-09 21:00:01.000 [INFO] [benchmark] BACKEND_BENCHMARK_RESULT - " +
+                "CPU: measuredTokensPerSecond=0.750,activeBackend=CPU"
+
+        val report = EngineDiagnostics.buildCompactReportForTest(tokenRows + benchmarkResult)
+
+        assertTrue(report.contains("BACKEND_BENCHMARK_RESULT"))
+        assertTrue(report.contains("measuredTokensPerSecond=0.750"))
+    }
+
     private fun nativeMetric(
         index: Int,
         decodeUs: Long,

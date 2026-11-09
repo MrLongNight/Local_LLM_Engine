@@ -158,7 +158,9 @@ object EngineDiagnostics {
     private fun percentile(values: List<Long>, fraction: Double): Long? {
         if (values.isEmpty()) return null
         val sorted = values.sorted()
-        val index = kotlin.math.ceil((sorted.lastIndex * fraction).coerceIn(0.0, 1.0)).toInt()
+        val boundedFraction = fraction.coerceIn(0.0, 1.0)
+        val rank = sorted.lastIndex * boundedFraction
+        val index = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
         return sorted[index]
     }
 
@@ -223,7 +225,6 @@ object EngineDiagnostics {
             "PROMPT_STAGE_METRICS",
             "PREFILL_COMPLETED",
             "FIRST_TOKEN_RECEIVED",
-            "TOKEN_STEP_METRIC",
             "GENERATION_COMPLETED"
         ) || event.startsWith("BACKEND_BENCHMARK_")
     }
@@ -316,7 +317,9 @@ object EngineDiagnostics {
             "FAILED", "ERROR", "WARN", "UNSUPPORTED", "FALLBACK",
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST"
         )
-        val relevantNative = nativeLines.filter { line ->
+        val relevantNative = nativeLines
+            .filterNot { it.contains("TOKEN_STEP_METRIC") }
+            .filter { line ->
             val upper = line.uppercase(Locale.US)
             nativeKeywords.any(upper::contains)
         }
@@ -345,7 +348,13 @@ object EngineDiagnostics {
                         appendLine(timingSummary("tokenPiece", metrics.map { it.pieceUs }))
                         appendLine(timingSummary("nativeStep", metrics.map { it.totalUs }))
                         appendLine("Token-Schritte (index/sampleUs/decodeUs/submitUs/gpuSyncWaitUs/pieceUs/totalUs):")
-                        metrics.sortedBy { it.index }.forEach { metric ->
+                        val orderedMetrics = metrics.sortedBy { it.index }
+                        val representativeMetrics = if (orderedMetrics.size <= 8) {
+                            orderedMetrics
+                        } else {
+                            (orderedMetrics.take(4) + orderedMetrics.takeLast(4)).distinctBy { it.index }
+                        }
+                        representativeMetrics.forEach { metric ->
                             appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.decodeSubmitUs}/${metric.gpuSyncWaitUs}/${metric.pieceUs}/${metric.totalUs}")
                         }
                     }
@@ -365,7 +374,13 @@ object EngineDiagnostics {
                         val first = metrics.first()
                         appendLine("pid=${first.pid} backend=${first.backend} runId=${first.runId} samples=${metrics.size}")
                         appendLine(timingSummary("jniWall", metrics.map { it.jniWallUs }))
-                        metrics.sortedBy { it.index }.forEach { metric ->
+                        val orderedMetrics = metrics.sortedBy { it.index }
+                        val representativeMetrics = if (orderedMetrics.size <= 8) {
+                            orderedMetrics
+                        } else {
+                            (orderedMetrics.take(4) + orderedMetrics.takeLast(4)).distinctBy { it.index }
+                        }
+                        representativeMetrics.forEach { metric ->
                             appendLine("nativeStep=${metric.index} jniWallUs=${metric.jniWallUs}")
                         }
                     }
