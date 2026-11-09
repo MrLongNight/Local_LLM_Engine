@@ -147,9 +147,8 @@ jobs:
           MODEL_URL="https://huggingface.co/shibatch/tiny1m/resolve/807ecced53a5bf80b5cdd5afcdbfc2f47c3935b1/tiny1m.Q4_K_M.gguf"
           EXPECTED_SHA256="ae0bb9b0ca9bb62ccbef04fc1dc1217bbe9b7a2f82c9cbc475c30ee65a4030fb"
           mkdir -p "$MODEL_DIR"
-          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 120 \\
-            "$MODEL_URL" --output "$MODEL_PATH"
-          printf '%s  %s\\n' "$EXPECTED_SHA256" "$MODEL_PATH" | sha256sum --check --strict
+          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 120 "$MODEL_URL" --output "$MODEL_PATH"
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$MODEL_PATH" | sha256sum --check --strict
           ls -lh "$MODEL_PATH"
 
       - name: Build APK and process-isolation test APK
