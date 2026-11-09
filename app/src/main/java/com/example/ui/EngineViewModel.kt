@@ -595,6 +595,7 @@ class EngineViewModel(
         var firstTokenMs: Long? = null
         var promptEvaluationMs: Long? = null
         var promptTokens = 0
+        var visibleTokenCount = 0
         var completed: InferenceResult? = null
         val started = System.nanoTime()
 
@@ -617,10 +618,13 @@ class EngineViewModel(
                     }
                 }
                 is InferenceEvent.Token -> {
-                    if (firstTokenMs == null) {
-                        firstTokenMs = (System.nanoTime() - started) / 1_000_000L
-                        _benchmarkReport.value = "${backend.name} ${phaseLabel}: erste Antwort erhalten…"
-                    }
+                    visibleTokenCount++
+                    val elapsedMs = ((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(1L)
+                    if (firstTokenMs == null) firstTokenMs = elapsedMs
+                    val speed = visibleTokenCount * 1000.0 / elapsedMs
+                    _benchmarkReport.value =
+                        "${backend.name} ${phaseLabel}: ${visibleTokenCount}/$maxTokens Tokens, " +
+                        String.format(java.util.Locale.US, "%.2f tok/s…", speed)
                 }
                 is InferenceEvent.Completed -> completed = event.result
                 is InferenceEvent.Error -> throw event.throwable
@@ -628,7 +632,11 @@ class EngineViewModel(
                     "${backend.name} ${phaseLabel} wurde abgebrochen."
                 )
                 is InferenceEvent.Started -> {
-                    _benchmarkReport.value = "${backend.name} ${phaseLabel}: Inferenz gestartet…"
+                    // Started is emitted after native prefill has returned. This wall
+                    // duration includes the final Vulkan synchronization wait.
+                    promptEvaluationMs = (System.nanoTime() - started) / 1_000_000L
+                    _benchmarkReport.value =
+                        "${backend.name} ${phaseLabel}: Prompt fertig (${promptTokens} Tokens)…"
                 }
             }
         }
