@@ -628,34 +628,88 @@ internal class InferenceClient(
         val lastUiProgressNano = AtomicLong(startNano)
         val streamBuilder = StringBuilder()
 
+        data class TimeoutSnapshot(val reason: FinishReason, val elapsedMs: Long)
+
+        val pendingTimeout = AtomicReference<TimeoutSnapshot?>(null)
+        val timeoutReported = AtomicBoolean(false)
+
+        fun reportTimeout(): Boolean {
+            val timeout = pendingTimeout.get() ?: return false
+            if (!timeoutReported.compareAndSet(false, true)) return true
+
+            activeRequestId.compareAndSet(requestId, null)
+            val partial = synchronized(streamBuilder) { streamBuilder.toString() }
+            // A timeout is a failure, not a successful completion carrying a TIMEOUT finish reason.
+            trySend(InferenceEvent.Error(InferenceTimeoutException(timeout.reason, timeout.elapsedMs), partial))
+            channel.close()
+            return true
+        }
+
+        fun completeTimeoutIfPending(): Boolean {
+            if (pendingTimeout.get() == null) return false
+            reportTimeout()
+            return true
+        }
+
         fun triggerTimeout(reason: FinishReason, elapsedMs: Long) {
-            if (activeRequestId.compareAndSet(requestId, null)) {
-                EngineDiagnostics.error("ipc_client", "INFERENCE_TIMEOUT", InferenceTimeoutException(reason, elapsedMs))
-                Log.w(TAG, "Inference timeout ($reason) after ${elapsedMs}ms. Executing process-kill as Ultima Ratio.")
+            if (activeRequestId.get() != requestId ||
+                !pendingTimeout.compareAndSet(null, TimeoutSnapshot(reason, elapsedMs))
+            ) return
 
-                // A timeout is a hard-abort condition. The active ID was cleared above,
-                // so call the process-abort path directly rather than the public cancel API.
-                abortRemoteProcess(requestId = requestId, reason = "inference_timeout_${reason}")
+            EngineDiagnostics.error("ipc_client", "INFERENCE_TIMEOUT", InferenceTimeoutException(reason, elapsedMs))
+            val targetPid = _remotePid.value
+            val service = remoteService
+            val serviceMatchesTarget = service != null &&
+                (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
 
-                val partial = synchronized(streamBuilder) { streamBuilder.toString() }
-                val generatedTokens = tokenCount.get()
-                val result = InferenceResult(
-                    text = partial,
-                    tokensGenerated = generatedTokens,
-                    durationMs = elapsedMs,
-                    tokensPerSecond = if (elapsedMs > 0) (generatedTokens.toDouble() * 1000.0) / elapsedMs else 0.0,
-                    finishReason = reason
-                )
-                // A timeout is a failure, not a successful completion carrying
-                // a TIMEOUT finish reason. Keep partial output on the error event.
-                trySend(InferenceEvent.Error(InferenceTimeoutException(reason, elapsedMs), partial))
-                channel.close()
+            // Cooperative-first: signal llama.cpp's abort callback and keep the request ID
+            // active while waiting for the service to report that native execution has unwound.
+            if (serviceMatchesTarget) {
+                runCatching { service?.cancelInference(requestId) }
+                    .onSuccess {
+                        EngineDiagnostics.info(
+                            "ipc_client",
+                            "TIMEOUT_COOPERATIVE_CANCEL_SENT",
+                            "reason=$reason, request=$requestId, remotePid=$targetPid"
+                        )
+                    }
+                    .onFailure {
+                        EngineDiagnostics.error("ipc_client", "TIMEOUT_COOPERATIVE_CANCEL_FAILED", it)
+                    }
+            }
+
+            val graceMs = effectiveTimeout.abortGracePeriodMs
+            clientScope.launch {
+                val deadline = System.nanoTime() + graceMs * 1_000_000L
+                while (activeRequestId.get() == requestId && System.nanoTime() < deadline) {
+                    delay(KILL_CHECK_INTERVAL_MS)
+                }
+
+                if (activeRequestId.compareAndSet(requestId, null)) {
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "TIMEOUT_COOPERATIVE_CANCEL_ESCALATED",
+                        "reason=$reason, request=$requestId did not unwind within ${graceMs}ms; killing original PID=$targetPid"
+                    )
+                    abortRemoteProcess(
+                        requestId = requestId,
+                        reason = "inference_timeout_${reason}_cooperative_cancel_timeout",
+                        targetPidOverride = targetPid
+                    )
+                } else {
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "TIMEOUT_COOPERATIVE_CANCEL_ACKNOWLEDGED",
+                        "reason=$reason, request=$requestId completed cooperative unwind within ${graceMs}ms"
+                    )
+                }
+                reportTimeout()
             }
         }
 
         // Tiered monotonic watchdog using System.nanoTime()
         val watchdogJob = launch {
-            while (isActive && activeRequestId.get() == requestId) {
+            while (isActive && activeRequestId.get() == requestId && pendingTimeout.get() == null) {
                 delay(WATCHDOG_CHECK_INTERVAL_MS)
                 val now = System.nanoTime()
                 val elapsedTotalMs = (now - startNano) / 1_000_000L
@@ -858,6 +912,7 @@ internal class InferenceClient(
 
             override fun onCompleted(reqId: String?, result: InferenceResult?) {
                 if (reqId == activeRequestId.get() && result != null) {
+                    if (completeTimeoutIfPending()) return
                     watchdogJob.cancel()
                     trySend(InferenceEvent.Completed(result))
                     activeRequestId.compareAndSet(reqId, null)
@@ -867,6 +922,7 @@ internal class InferenceClient(
 
             override fun onCancelled(reqId: String?, partialText: String?, tokensGenerated: Int) {
                 if (reqId == activeRequestId.get()) {
+                    if (completeTimeoutIfPending()) return
                     watchdogJob.cancel()
                     trySend(InferenceEvent.Cancelled(partialText ?: "", tokensGenerated))
                     activeRequestId.compareAndSet(reqId, null)
@@ -876,6 +932,7 @@ internal class InferenceClient(
 
             override fun onError(reqId: String?, errorMessage: String?, partialText: String?) {
                 if (reqId == activeRequestId.get()) {
+                    if (completeTimeoutIfPending()) return
                     watchdogJob.cancel()
                     val error = IllegalStateException(errorMessage ?: "Unknown inference error")
                     EngineDiagnostics.error("ipc_client", "REMOTE_INFERENCE_ERROR", error)
