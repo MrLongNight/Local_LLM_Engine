@@ -178,12 +178,12 @@ Ausgangscommit vor diesem Plan: `ed6506302565f02c4896095c8d6f00a778f9f689`.
 
 ## Implementierungsupdate – 09.11.2026
 
-**Repository-Head zum Zeitpunkt dieser Aktualisierung:** `main` = `47666a0ed1d3302382fcedb278292c2ffeb66b32` (README-Folgecommit; Timeout-Implementierung und Tests liegen in den vorherigen Commits).
+**Code-/Teststand zum Zeitpunkt dieser Aktualisierung:** `main` = `96694bfa405ff15fbfb9093f4d981f0ea8f05fb8` (Timeout-Implementierung plus korrigierte Timeout-Test-Fixture).
 
 - **Manifest geprüft:** `llm-engine/src/main/AndroidManifest.xml` enthält den Service mit `android:process=":inference"`, `android:exported="false"` und `android:isolatedProcess="false"`. Zusätzlich bestätigte der APK-Workflow die eindeutige Registrierung im zusammengeführten APK-Manifest. Der Audit-Hinweis „leere Manifest-Datei“ trifft auf diesen Repository-Stand nicht zu.
 - **AIDL geprüft:** `IInferenceService.aidl` ist vorhanden und enthält die aufgerufenen IPC-Methoden einschließlich `initialize`, `cancelInference`, `killProcess`, `getStatus`, `getProcessId` und `shutdown`.
 - **Timeout-Pfad:** Der bisher direkte Timeout-Hard-Kill wurde auf cooperative-first umgestellt. Der Client signalisiert kooperative Cancellation, wartet auf einen terminalen Binder-Callback bis zur konfigurierten Grace Period und eskaliert erst danach gegen die ursprüngliche Service-PID. Tests für kooperative Bestätigung ohne Kill und ausbleibende Bestätigung mit anschließendem Kill wurden ergänzt.
-- **CI-Status:** Die Unit-Tests für Commit `01f2acc16e95978d8a301cd625d8f94ae6c5b53f` und der Android-APK-Build für `47a9b6a714088e9f1f683441da9b7e1374ba1ac1` liefen bei Erstellung dieses Updates noch. Die Änderung darf erst nach grünen Läufen als CI-bestätigt gelten.
+- **CI-Status:** Unit Tests Run `42589359555` für Commit `96694bfa405ff15fbfb9093f4d981f0ea8f05fb8` sind erfolgreich abgeschlossen. Der Android-APK-Build Run `42588846000` für Commit `47a9b6a714088e9f1f683441da9b7e1374ba1ac1` läuft noch; dieser Commit enthält dieselbe `:llm-engine`-Implementierung wie der aktuelle Code-Head. Ein grüner APK-/Emulator-Lauf ist noch nicht bestätigt.
 - **Weiterhin offen:** Reale GGUF-Wiederherstellung und Folgeinferenz nach einem Timeout-Kill, fünf oder mehr externe Ressourcenzyklen, persistierter Kill-Nachweis in der App-Diagnose, reale Zielgeräteabnahme auf nubia Z2462N/Android 16/Mali-G57, Vulkan-Registry-/Layer-/Operation-Offload-Verifikation und fortsetzbare Downloads.
 - **Messgrenze:** Ein Prozess-Kill beendet den `:inference`-Prozess einschließlich seines Resource-Monitors. Vulkan-/Graphics-Ressourcenfreigabe muss deshalb vom fortbestehenden App-Prozess oder einem externen Test-Harness nach dem Kill gemessen werden.
 
