@@ -133,6 +133,9 @@ internal object NativeEngineHandle {
     external fun nativeIsNativeInferenceBlockEnteredForTest(handle: Long): Boolean
 
     @JvmStatic
+    external fun nativeResetCancellation(handle: Long)
+
+    @JvmStatic
     external fun nativeCancel(handle: Long)
 
     @JvmStatic
