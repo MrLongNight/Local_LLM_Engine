@@ -13,6 +13,7 @@ import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.take
@@ -56,6 +57,7 @@ class InferenceIpcTest {
         val loadedModel = AtomicReference<String?>(null)
         val loadedDescriptorSize = AtomicLong(-1L)
         val hangModelLoad = AtomicBoolean(false)
+        val hangUnload = AtomicBoolean(false)
         val lastRequestId = AtomicReference<String?>(null)
         val cancelledRequestId = AtomicReference<String?>(null)
         val isShutdown = AtomicBoolean(false)
@@ -103,6 +105,7 @@ class InferenceIpcTest {
         }
 
         override fun unloadModel(callback: IInferenceCallback?) {
+            if (hangUnload.get()) return
             loadedModel.set(null)
             callback?.onModelLoaded(null)
         }
@@ -230,6 +233,108 @@ class InferenceIpcTest {
 
         assertTrue("Idle cancel must preserve the inference process", !fakeService.isKilled.get())
         assertEquals(99999, client.remotePid.value)
+        client.close()
+    }
+
+    @Test
+    fun escalatedCancelTerminatesStreamAndPreservesPartialText() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterFirstToken.set(true)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 500L,
+            firstTokenMs = 1_000L,
+            interTokenMs = 500L,
+            totalInferenceMs = 2_000L,
+            abortGracePeriodMs = 20L,
+            reconnectMs = 1_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig,
+            processLivenessCheck = { !fakeService.isKilled.get() }
+        )
+        client.initialize()
+
+        val stream = async { client.streamChat(InferenceRequest.single("cancel after first token")).toList() }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) delay(5L)
+        }
+        client.cancelInference()
+
+        val events = withTimeout(1_000L) { stream.await() }
+        val cancelled = events.filterIsInstance<InferenceEvent.Cancelled>().single()
+        assertEquals("Hallo", cancelled.partialText)
+        assertEquals(1, cancelled.tokensGenerated)
+        assertTrue("Non-cooperative cancellation must escalate to process kill", fakeService.isKilled.get())
+        client.close()
+    }
+
+    @Test
+    fun cooperativeCancelCompletesStreamWithoutKillingAndKeepsPartialText() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterFirstToken.set(true)
+            acknowledgeCooperativeCancel.set(true)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 500L,
+            firstTokenMs = 1_000L,
+            interTokenMs = 500L,
+            totalInferenceMs = 2_000L,
+            abortGracePeriodMs = 100L,
+            reconnectMs = 1_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+        client.initialize()
+
+        val stream = async { client.streamChat(InferenceRequest.single("cooperative cancel")).toList() }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) delay(5L)
+        }
+        client.cancelInference()
+
+        val events = withTimeout(1_000L) { stream.await() }
+        val cancelled = events.filterIsInstance<InferenceEvent.Cancelled>().single()
+        assertEquals("Hallo", cancelled.partialText)
+        assertEquals(1, cancelled.tokensGenerated)
+        assertTrue("Acknowledged cancellation must not kill the inference process", !fakeService.isKilled.get())
+        client.close()
+    }
+
+    @Test
+    fun unloadModelTimeoutReturnsFailureInsteadOfWaitingForever() = runBlocking {
+        val fakeService = FakeInferenceService().apply { hangUnload.set(true) }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 60L,
+            prefillMs = 50L,
+            firstTokenMs = 150L,
+            interTokenMs = 50L,
+            totalInferenceMs = 300L,
+            abortGracePeriodMs = 10L,
+            reconnectMs = 1_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig,
+            processLivenessCheck = { false }
+        )
+        client.initialize()
+
+        val result = withTimeout(1_000L) { client.unloadModel() }
+        assertTrue("Missing unload callback must return a bounded failure", result.isFailure)
+        assertTrue(result.exceptionOrNull() is InferenceTimeoutException)
+        assertTrue("An unload timeout must abort the unresponsive inference process", fakeService.isKilled.get())
         client.close()
     }
 
