@@ -61,6 +61,10 @@ class InferenceIpcTest {
         val isShutdown = AtomicBoolean(false)
 
         val isKilled = AtomicBoolean(false)
+        val acknowledgeCooperativeCancel = AtomicBoolean(false)
+        val cancelRequestedAtNanos = AtomicLong(0L)
+        val killRequestedAtNanos = AtomicLong(0L)
+        val activeCallback = AtomicReference<IInferenceCallback?>(null)
         val currentProcessId = AtomicInteger(99999)
         val replacementProcessIdOnLoad = AtomicInteger(0)
         val shouldHangInference = AtomicBoolean(false)
@@ -105,6 +109,7 @@ class InferenceIpcTest {
 
         override fun streamChat(requestId: String, request: InferenceRequest, callback: IInferenceCallback?) {
             lastRequestId.set(requestId)
+            activeCallback.set(callback)
             if (hangBeforeStarted.get()) {
                 return
             }
@@ -177,11 +182,16 @@ class InferenceIpcTest {
 
         override fun cancelInference(requestId: String?) {
             cancelledRequestId.set(requestId)
+            cancelRequestedAtNanos.set(System.nanoTime())
+            if (acknowledgeCooperativeCancel.get()) {
+                activeCallback.get()?.onCancelled(requestId, "", 0)
+            }
         }
 
         override fun armNativeInferenceBlockForTest() {}
 
         override fun killProcess() {
+            killRequestedAtNanos.set(System.nanoTime())
             isKilled.set(true)
         }
 
@@ -469,11 +479,15 @@ class InferenceIpcTest {
         val fakeService = FakeInferenceService()
         fakeService.hangBeforeStarted.set(true)
 
-        val timeoutConfig = TimeoutConfig.fast(
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 5_000L,
             prefillMs = 50L,
             firstTokenMs = 150L,
             interTokenMs = 150L,
-            totalInferenceMs = 300L
+            totalInferenceMs = 300L,
+            abortGracePeriodMs = 100L,
+            reconnectMs = 1_000L
         )
 
         val client = InferenceClient(
@@ -485,8 +499,18 @@ class InferenceIpcTest {
         val request = InferenceRequest.single("Prefill test")
         val events = client.streamChat(request).toList()
 
-        // 1. Ultima ratio process kill was invoked
+        // A timeout must first signal cooperative native cancellation.
+        assertEquals(fakeService.lastRequestId.get(), fakeService.cancelledRequestId.get())
+        assertTrue(fakeService.cancelRequestedAtNanos.get() > 0L)
+
+        // Hard process termination is only permitted after the configured grace period.
         assertTrue(fakeService.isKilled.get())
+        val elapsedGraceNanos =
+            fakeService.killRequestedAtNanos.get() - fakeService.cancelRequestedAtNanos.get()
+        assertTrue(
+            "Timeout must wait abortGracePeriodMs before hard kill; elapsed=$elapsedGraceNanos ns",
+            elapsedGraceNanos >= timeoutConfig.abortGracePeriodMs * 1_000_000L
+        )
 
         // Timeout is a failure event, never a successful completion.
         assertTrue(events.none { it is InferenceEvent.Completed })
@@ -497,6 +521,43 @@ class InferenceIpcTest {
         assertTrue(errorEvent?.throwable is InferenceTimeoutException)
         val ex = errorEvent?.throwable as InferenceTimeoutException
         assertEquals(FinishReason.TIMEOUT_PREFILL, ex.reason)
+
+        client.close()
+    }
+
+    @Test
+    fun prefillTimeoutStopsAfterCooperativeCancellationAcknowledgement() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangBeforeStarted.set(true)
+            acknowledgeCooperativeCancel.set(true)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 5_000L,
+            prefillMs = 50L,
+            firstTokenMs = 150L,
+            interTokenMs = 150L,
+            totalInferenceMs = 300L,
+            abortGracePeriodMs = 150L,
+            reconnectMs = 1_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+
+        val events = client.streamChat(InferenceRequest.single("Cooperative timeout test")).toList()
+
+        assertEquals(fakeService.lastRequestId.get(), fakeService.cancelledRequestId.get())
+        assertTrue("A cooperative cancellation acknowledgement must avoid hard process kill", !fakeService.isKilled.get())
+        val errorEvent = events.filterIsInstance<InferenceEvent.Error>().firstOrNull()
+        assertNotNull(errorEvent)
+        assertTrue(errorEvent?.throwable is InferenceTimeoutException)
+        assertEquals(
+            FinishReason.TIMEOUT_PREFILL,
+            (errorEvent?.throwable as InferenceTimeoutException).reason
+        )
 
         client.close()
     }
