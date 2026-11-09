@@ -116,9 +116,9 @@ internal class InferenceClient(
     private val _remotePid = MutableStateFlow<Int?>(null)
     val remotePid: StateFlow<Int?> = _remotePid.asStateFlow()
 
-    private var remoteService: IInferenceService? = mockService
-    private var isBound = false
-    private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
+    @Volatile private var remoteService: IInferenceService? = mockService
+    @Volatile private var isBound = false
+    @Volatile private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
 
     private val activeRequestId = AtomicReference<String?>(null)
     private val activeStreamControl = AtomicReference<ActiveStreamControl?>(null)
@@ -158,11 +158,13 @@ internal class InferenceClient(
             val disconnectedPid = _remotePid.value
             failPendingModelLoad(disconnectedPid, "SERVICE_DISCONNECTED")
             recordRemoteProcessExit(disconnectedPid, "SERVICE_DISCONNECTED")
+            // Publish the new waiter before clearing the old proxy. A concurrent getService()
+            // must never observe remoteService=null together with an already-completed old waiter.
+            serviceConnectionDeferred = CompletableDeferred()
             remoteService = null
             _remotePid.value = null
             _currentModel.value = null
             _state.value = EngineState.Reconnecting
-            serviceConnectionDeferred = CompletableDeferred()
             activeStreamControl.get()
                 ?.takeIf { it.requestId == activeRequestId.get() }
                 ?.failAfterDisconnect(IllegalStateException("Inference service disconnected (PID=$disconnectedPid)"))
@@ -176,11 +178,11 @@ internal class InferenceClient(
             val disconnectedPid = _remotePid.value
             failPendingModelLoad(disconnectedPid, "BINDING_DIED")
             recordRemoteProcessExit(disconnectedPid, "BINDING_DIED")
+            serviceConnectionDeferred = CompletableDeferred()
             remoteService = null
             _remotePid.value = null
             _currentModel.value = null
             _state.value = EngineState.Reconnecting
-            serviceConnectionDeferred = CompletableDeferred()
             activeStreamControl.get()
                 ?.takeIf { it.requestId == activeRequestId.get() }
                 ?.failAfterDisconnect(IllegalStateException("Inference service binding died (PID=$disconnectedPid)"))
@@ -407,7 +409,15 @@ internal class InferenceClient(
                 "MODEL_RECONNECT_OPERATION_LOCK_ACQUIRED",
                 "waitMs=$lockWaitMs,hasRememberedModel=${source != null && config != null}"
             )
-            if (source == null || config == null) {
+            val alreadyLoaded = _currentModel.value
+            if (alreadyLoaded != null) {
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "MODEL_RECONNECT_SKIPPED_DUPLICATE_RELOAD",
+                    "activeBackend=${alreadyLoaded.activeBackend}"
+                )
+                Result.success(alreadyLoaded)
+            } else if (source == null || config == null) {
                 _state.value = EngineState.Ready
                 null
             } else {
