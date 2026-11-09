@@ -101,16 +101,15 @@ class InferenceService : Service() {
      * reach LocalLlmEngineImpl while its blocking JNI call owns the worker.
      */
     private fun interruptInferenceForModelOperation(operation: String) {
-        val job = activeInferenceJob ?: return
+        if (activeInferenceJob == null) return
         EngineDiagnostics.info(
             "ipc",
             "INFERENCE_PREEMPTED_FOR_MODEL_OPERATION",
             "operation=$operation, requestId=${activeRequestId.get()}"
         )
+        // Do not cancel the collecting Job here. The native engine emits Cancelled with
+        // its partial output after observing the signal; cancelling the Job first loses it.
         engine?.cancelInference()
-        job.cancel()
-        activeInferenceJob = null
-        activeRequestId.set(null)
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -250,18 +249,26 @@ class InferenceService : Service() {
             resourceMonitor?.modelUnloading()
             serviceScope.launch {
                 try {
-                    engine?.unloadModel()?.onSuccess {
+                    val localEngine = engine
+                    if (localEngine == null) {
+                        // Unload is idempotent: no engine means there is no model to unload.
+                        resourceMonitor?.modelUnloaded()
+                        callback?.onModelLoaded(null)
+                        return@launch
+                    }
+                    localEngine.unloadModel().onSuccess {
                         activeModelDescriptor?.close()
                         activeModelDescriptor = null
                         resourceMonitor?.modelUnloaded()
                         callback?.onModelLoaded(null)
-                    }?.onFailure { err ->
+                    }.onFailure { err ->
                         resourceMonitor?.inferenceFinished()
                         callback?.onModelLoadFailed(err.message ?: "Unload failed")
                     }
                 } catch (t: Throwable) {
                     Log.e(TAG, "Error in unloadModel", t)
-                    callback?.onModelLoadFailed(t.message ?: "Unload error")
+                    EngineDiagnostics.error("ipc", "MODEL_UNLOAD_EXCEPTION", t)
+                    runCatching { callback?.onModelLoadFailed(t.message ?: "Unload error") }
                 }
             }
         }
@@ -271,11 +278,17 @@ class InferenceService : Service() {
             request: InferenceRequest,
             callback: IInferenceCallback?
         ) {
-            // A coroutine Job cancellation alone cannot interrupt blocking JNI prefill.
-            // Signal llama.cpp's atomic cancel flag first, then cancel the collector.
+            // There is exactly one native EngineInstance per service process. Reject
+            // overlapping Binder requests instead of silently cancelling the first stream.
             if (activeInferenceJob != null) {
-                engine?.cancelInference()
-                activeInferenceJob?.cancel()
+                runCatching {
+                    callback?.onError(
+                        requestId,
+                        "Another inference request is already active",
+                        ""
+                    )
+                }
+                return
             }
             activeRequestId.set(requestId)
 
@@ -352,10 +365,9 @@ class InferenceService : Service() {
             val current = activeRequestId.get()
             if (requestId.isNullOrBlank() || requestId == current) {
                 EngineDiagnostics.info("ipc", "CANCEL_INFERENCE", "Cancelling inference request: $requestId")
+                // The engine's native cancellation signal is cooperative. Keep the
+                // request ID and collector alive until it emits Cancelled(partialText).
                 engine?.cancelInference()
-                activeInferenceJob?.cancel()
-                activeInferenceJob = null
-                activeRequestId.set(null)
             }
         }
 
