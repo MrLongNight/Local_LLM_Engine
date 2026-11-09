@@ -16,6 +16,9 @@ import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -45,6 +48,10 @@ internal class LocalLlmEngineImpl(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
+    // Native handle destruction is queued on the same single-lane dispatcher as every
+    // load/prefill/token operation. This prevents close() from freeing llama_context
+    // while nativeGenerateNextToken() is still using it.
+    private val cleanupScope = CoroutineScope(SupervisorJob() + llamaDispatcher)
     private val initializationMutex = Mutex()
 
     private val _state = MutableStateFlow<EngineState>(EngineState.Uninitialized)
@@ -558,20 +565,34 @@ internal class LocalLlmEngineImpl(
     }
 
     override fun close() {
-        cancelInference()
+        isCancelled.set(true)
         val handle = engineHandle.getAndSet(0L)
-        try {
-            if (handle != 0L) {
-                NativeEngineHandle.nativeDestroyEngine(handle)
+        // nativeCancel only flips the EngineInstance atomic flag; it deliberately does
+        // not acquire the model mutex, so it can interrupt an in-flight decode.
+        if (handle != 0L) {
+            runCatching { NativeEngineHandle.nativeCancel(handle) }
+                .onFailure { EngineDiagnostics.error("native", "NATIVE_CANCEL_DURING_CLOSE_FAILED", it) }
+        }
+
+        // AutoCloseable cannot suspend. Queue destruction behind any in-flight JNI work
+        // on llamaDispatcher rather than freeing a context from the caller/UI/service thread.
+        cleanupScope.launch {
+            try {
+                if (handle != 0L) {
+                    NativeEngineHandle.nativeDestroyEngine(handle)
+                }
+            } catch (error: Throwable) {
+                EngineDiagnostics.error("native", "NATIVE_ENGINE_DESTROY_FAILED", error)
+            } finally {
+                // Backend init is process-global, so pair it with shutdown after the
+                // handle has been destroyed on the same serialized dispatcher.
+                runCatching { NativeEngineHandle.shutdownBackend() }
+                    .onFailure { EngineDiagnostics.error("native", "BACKEND_SHUTDOWN_FAILED", it) }
+                cleanupScope.cancel()
             }
-        } finally {
-            // Backend init is process-global, so always pair it with shutdown,
-            // including the case where engine-handle creation failed.
-            runCatching { NativeEngineHandle.shutdownBackend() }
-                .onFailure { EngineDiagnostics.error("native", "BACKEND_SHUTDOWN_FAILED", it) }
         }
         _state.value = EngineState.Closed
-        Log.i(TAG, "LocalLlmEngine closed")
+        Log.i(TAG, "LocalLlmEngine close queued on llamaDispatcher")
     }
 
     private fun updateModelLoadProgress(percent: Int) {
