@@ -125,6 +125,8 @@ struct EngineInstance {
     int32_t context_size = 4096;
     int32_t batch_size = BATCH_SIZE;
     int32_t n_threads = 4;
+    int32_t n_threads_batch = 4;
+    int32_t micro_batch_size = BATCH_SIZE;
     float default_temperature = DEFAULT_TEMP;
     float default_top_p = 0.9f;
     std::string active_backend = "CPU";
@@ -650,6 +652,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jfloat top_p,
         jint backend_mode,
         jint gpu_layers,
+        jint batch_threads,
+        jint micro_batch_size,
         jobject progress_listener) {
     auto* engine = fromHandle(handle);
     if (!engine) return 1;
@@ -856,13 +860,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     int b_size = batch_size > 0 ? batch_size : BATCH_SIZE;
     engine->batch_size = b_size;
+    const int resolved_batch_threads = batch_threads > 0 ? batch_threads : n_threads;
+    const int resolved_micro_batch = micro_batch_size > 0
+        ? std::min(micro_batch_size, b_size)
+        : b_size;
+    engine->n_threads_batch = resolved_batch_threads;
+    engine->micro_batch_size = resolved_micro_batch;
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = ctx_size;
     ctx_params.n_batch = b_size;
-    ctx_params.n_ubatch = b_size;
+    ctx_params.n_ubatch = resolved_micro_batch;
     ctx_params.n_threads = n_threads;
-    ctx_params.n_threads_batch = n_threads;
+    ctx_params.n_threads_batch = resolved_batch_threads;
     if (!use_vulkan) {
         ctx_params.abort_callback = llama_decode_abort_requested;
         ctx_params.abort_callback_data = engine;
@@ -936,8 +946,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     engine->reset_long_term(true);
     engine->cancel_requested.store(false);
 
-    LOGI("Model loaded: n_ctx=%d, batch=%d, threads=%d, active_backend=%s",
-         ctx_size, b_size, n_threads, engine->active_backend.c_str());
+    LOGI("Model loaded: n_ctx=%d, n_batch=%d, n_ubatch=%d, n_threads=%d, n_threads_batch=%d, active_backend=%s",
+         ctx_size, b_size, resolved_micro_batch, n_threads, resolved_batch_threads,
+         engine->active_backend.c_str());
     return 0;
 }
 
@@ -955,6 +966,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptM
        << ";promptTokens=" << engine->last_prompt_tokens
        << ";batchSize=" << engine->last_prompt_batch_size
        << ";threads=" << engine->last_prompt_threads
+       << ";batchThreads=" << engine->n_threads_batch
+       << ";microBatchSize=" << engine->micro_batch_size
        << ";backend=" << engine->active_backend;
     return env->NewStringUTF(ss.str().c_str());
 }

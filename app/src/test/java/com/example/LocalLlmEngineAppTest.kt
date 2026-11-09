@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Application
+import android.os.Parcel
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.AppTab
 import com.example.ui.EngineViewModel
@@ -44,6 +45,10 @@ class LocalLlmEngineAppTest {
         assertNotNull(viewModel.engineConfig)
         assertNotNull(viewModel.systemPrompt)
         assertNotNull(viewModel.importedModelEntries)
+        assertNotNull(viewModel.isConfigSmokeTesting)
+        assertNotNull(viewModel.configSmokeReport)
+        assertEquals(false, viewModel.isConfigSmokeTesting.value)
+        assertEquals(null, viewModel.configSmokeReport.value)
 
 
         assertEquals(AppTab.CHAT, viewModel.currentTab.value)
@@ -62,6 +67,28 @@ class LocalLlmEngineAppTest {
         assertEquals(AppTab.CHAT, viewModel.currentTab.value)
         viewModel.updateInputText("Testnachricht")
         assertEquals("Testnachricht", viewModel.inputText.value)
+    }
+
+    @Test
+    fun `3 - EngineConfig parcel retains independent llama.cpp batch settings`() {
+        val original = com.mydocanizer.llm.engine.EngineConfig(
+            contextSize = 2048,
+            batchSize = 128,
+            threads = 6,
+            backendPreference = BackendPreference.VULKAN,
+            gpuLayers = 37,
+            batchThreads = 2,
+            microBatchSize = 32
+        )
+        val parcel = Parcel.obtain()
+        try {
+            original.writeToParcel(parcel, 0)
+            parcel.setDataPosition(0)
+            val restored = com.mydocanizer.llm.engine.EngineConfig.CREATOR.createFromParcel(parcel)
+            assertEquals(original, restored)
+        } finally {
+            parcel.recycle()
+        }
     }
 
     @Test

@@ -36,6 +36,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         val contextTokens: Int,
         val batchSize: Int,
         val threads: Int,
+        val batchThreads: Int,
+        val microBatchSize: Int,
         val gpuLayers: Int,
         val backendPreference: String,
         val activeBackend: String
@@ -80,6 +82,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 contextTokens = config.contextSize,
                 batchSize = config.batchSize,
                 threads = config.threads,
+                batchThreads = config.batchThreads.takeIf { it > 0 } ?: config.threads,
+                microBatchSize = config.microBatchSize.takeIf { it > 0 } ?: config.batchSize,
                 gpuLayers = config.gpuLayers,
                 backendPreference = config.backendPreference.name,
                 activeBackend = "loading"
@@ -97,6 +101,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 contextTokens = config.contextSize,
                 batchSize = config.batchSize,
                 threads = config.threads,
+                batchThreads = config.batchThreads.takeIf { it > 0 } ?: config.threads,
+                microBatchSize = config.microBatchSize.takeIf { it > 0 } ?: config.batchSize,
                 gpuLayers = config.gpuLayers,
                 backendPreference = config.backendPreference.name,
                 activeBackend = info.activeBackend
@@ -197,6 +203,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                     append(",contextTokens=${snapshot.contextTokens}")
                     append(",batchSize=${snapshot.batchSize}")
                     append(",threads=${snapshot.threads}")
+                    append(",batchThreads=${snapshot.batchThreads}")
+                    append(",microBatchSize=${snapshot.microBatchSize}")
                     append(",gpuLayersRequested=${snapshot.gpuLayers}")
                     append(",backendPreference=${snapshot.backendPreference}")
                     append(",backendActive=${snapshot.activeBackend}")

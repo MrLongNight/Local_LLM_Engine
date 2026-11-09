@@ -87,6 +87,8 @@ internal object NativeEngineHandle {
         topP: Float,
         backendMode: Int,
         gpuLayers: Int,
+        batchThreads: Int,
+        microBatchSize: Int,
         progressCallback: NativeModelLoadProgressCallback
     ): Int
 

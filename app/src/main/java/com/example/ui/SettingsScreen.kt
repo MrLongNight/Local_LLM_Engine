@@ -41,6 +41,8 @@ fun SettingsScreen(
     val currentModel: ModelInfo? by viewModel.currentModel.collectAsState()
     val isBenchmarking: Boolean by viewModel.isBenchmarking.collectAsState()
     val benchmarkReport: String? by viewModel.benchmarkReport.collectAsState()
+    val isConfigSmokeTesting: Boolean by viewModel.isConfigSmokeTesting.collectAsState()
+    val configSmokeReport: String? by viewModel.configSmokeReport.collectAsState()
     val isGenerating: Boolean by viewModel.isGenerating.collectAsState()
     val isImporting: Boolean by viewModel.isImporting.collectAsState()
     LaunchedEffect(Unit) {
@@ -280,6 +282,64 @@ fun SettingsScreen(
                     Text(
                         text = "RAM-Verlauf und native Vulkan-Meldungen werden automatisch im Diagnoseprotokoll erfasst. " +
                             "Die Ausgabe des Modells selbst wird nicht protokolliert.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        // Controlled in-app screening for independent llama.cpp context parameters.
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Automatischer Konfigurationstest",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Prüft n_threads (Token-Generierung), n_threads_batch (Prompt-Verarbeitung) " +
+                            "und n_batch/n_ubatch getrennt. Das Modell lädt je Profil neu; ein Warmup " +
+                            "und eine Messung verwenden denselben langen Testprompt. Temperatur 0 und " +
+                            "Top-P 1 reduzieren Sampling-Schwankungen. Deine gespeicherten Einstellungen " +
+                            "bleiben unverändert; am Ende wird die ursprüngliche Modellkonfiguration wiederhergestellt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Vor jedem Profil werden verfügbarer RAM und thermischer Status geprüft. " +
+                            "Bei zu wenig freiem RAM, hoher Temperatur, Backend-Wechsel oder Messfehler wird abgebrochen. " +
+                            "Prompt-Zeit, Time-to-first-token, Decode-Zeit, Tokens/s und geladene Parameter werden protokolliert.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = { viewModel.runConfigurationSmokeTest() },
+                        enabled = currentModel != null && !isBenchmarking && !isConfigSmokeTesting && !isGenerating && !isImporting,
+                        modifier = Modifier.fillMaxWidth().testTag("configuration_smoke_test_button")
+                    ) {
+                        Text(if (isConfigSmokeTesting) "Konfigurationstest läuft…" else "Konfiguration automatisch testen")
+                    }
+                    if (isConfigSmokeTesting) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { viewModel.cancelConfigurationSmokeTest() },
+                            modifier = Modifier.fillMaxWidth().testTag("configuration_smoke_test_cancel_button")
+                        ) {
+                            Text("Test abbrechen")
+                        }
+                    }
+                    configSmokeReport?.let { report ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(text = report, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Die Testausgabe und Modellantwort werden nicht protokolliert. " +
+                            "Die Messwerte erscheinen im Diagnoseexport unter CONFIG_SMOKE_RESULT.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

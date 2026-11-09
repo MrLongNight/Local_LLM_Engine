@@ -156,7 +156,9 @@ internal class LocalLlmEngineImpl(
                 "engine",
                 "MODEL_LOAD_STARTED",
                 "fileBytes=${file.length()}, directDescriptorFd=$directDescriptorFd, backendPreference=${config.backendPreference}, " +
-                    "threads=${config.threads}, batch=${config.batchSize}, context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
+                    "threads=${config.threads}, batchThreads=${config.batchThreads.takeIf { it > 0 } ?: config.threads}, " +
+                    "batch=${config.batchSize}, microBatch=${config.microBatchSize.takeIf { it > 0 } ?: config.batchSize}, " +
+                    "context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
             )
             val backendPreflight = runCatching {
                 NativeEngineHandle.nativeGetBackendDiagnostics()
@@ -199,6 +201,8 @@ internal class LocalLlmEngineImpl(
                 topP = config.topP,
                 backendMode = config.backendPreference.modeId,
                 gpuLayers = config.gpuLayers,
+                batchThreads = config.batchThreads,
+                microBatchSize = config.microBatchSize,
                 progressCallback = progressCallback
             )
 
@@ -227,7 +231,9 @@ internal class LocalLlmEngineImpl(
                 "engine",
                 "MODEL_NATIVE_RUNTIME_READY",
                 "durationMs=$nativeLoadDurationMs, backend=${NativeEngineHandle.nativeGetActiveBackend(handle)}, " +
-                    "threads=${config.threads}, batch=${config.batchSize}, context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
+                    "threads=${config.threads}, batchThreads=${config.batchThreads.takeIf { it > 0 } ?: config.threads}, " +
+                    "batch=${config.batchSize}, microBatch=${config.microBatchSize.takeIf { it > 0 } ?: config.batchSize}, " +
+                    "context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
             )
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)
             updateModelLoadProgress(87) // native runtime ready; metadata has been read

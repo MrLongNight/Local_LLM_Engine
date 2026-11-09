@@ -41,6 +41,8 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property maxPredictTokens Default token generation limit.
  * @property backendPreference Target execution backend (AUTO, VULKAN, CPU).
  * @property gpuLayers Number of layers offloaded to GPU VRAM (e.g. 99 for full offload).
+ * @property batchThreads llama.cpp n_threads_batch; 0 follows n_threads.
+ * @property microBatchSize llama.cpp n_ubatch; 0 follows n_batch.
  */
 data class EngineConfig(
     val contextSize: Int = 4096,
@@ -51,12 +53,19 @@ data class EngineConfig(
     val maxPredictTokens: Int = 1024,
     val backendPreference: BackendPreference = BackendPreference.AUTO,
     val gpuLayers: Int = 99,
-    val timeoutConfig: TimeoutConfig = TimeoutConfig()
+    val timeoutConfig: TimeoutConfig = TimeoutConfig(),
+    val batchThreads: Int = 0,
+    val microBatchSize: Int = 0
 ) : Parcelable {
     init {
         require(contextSize >= 256) { "contextSize must be at least 256" }
         require(batchSize >= 64) { "batchSize must be at least 64" }
         require(threads >= 1) { "threads must be at least 1" }
+        require(batchThreads >= 0) { "batchThreads must be zero (follow threads) or greater" }
+        require(microBatchSize >= 0) { "microBatchSize must be zero (follow batchSize) or greater" }
+        require(microBatchSize == 0 || microBatchSize <= batchSize) {
+            "microBatchSize must not exceed batchSize"
+        }
         require(temperature.isFinite() && temperature >= 0f) {
             "temperature must be finite and non-negative"
         }
@@ -75,7 +84,9 @@ data class EngineConfig(
         maxPredictTokens = parcel.readInt(),
         backendPreference = BackendPreference.valueOf(parcel.readString() ?: BackendPreference.AUTO.name),
         gpuLayers = parcel.readInt(),
-        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader) ?: TimeoutConfig()
+        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader) ?: TimeoutConfig(),
+        batchThreads = parcel.readInt(),
+        microBatchSize = parcel.readInt()
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -88,6 +99,8 @@ data class EngineConfig(
         parcel.writeString(backendPreference.name)
         parcel.writeInt(gpuLayers)
         parcel.writeParcelable(timeoutConfig, flags)
+        parcel.writeInt(batchThreads)
+        parcel.writeInt(microBatchSize)
     }
 
     override fun describeContents(): Int = 0

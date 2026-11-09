@@ -1,0 +1,57 @@
+package com.example.ui
+
+import com.mydocanizer.llm.engine.BackendPreference
+import com.mydocanizer.llm.engine.EngineConfig
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class InferenceConfigSmokePlanTest {
+
+    @Test
+    fun createsBaselineAndSingleParameterVariants() {
+        val base = EngineConfig(
+            contextSize = 2048,
+            batchSize = 128,
+            threads = 6,
+            backendPreference = BackendPreference.VULKAN,
+            gpuLayers = 37
+        )
+        val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 8)
+
+        assertEquals("baseline", profiles.first().id)
+        assertTrue(profiles.size >= 5)
+        assertTrue(profiles.any { it.config.threads == 4 && it.config.batchThreads == 6 })
+        assertTrue(profiles.any { it.config.threads == 8 && it.config.batchThreads == 6 })
+        assertTrue(profiles.any { it.config.threads == 6 && it.config.batchThreads == 4 })
+        assertTrue(profiles.any { it.config.threads == 6 && it.config.batchSize == 512 })
+        assertTrue(profiles.any { it.config.threads == 6 && it.config.microBatchSize == 32 })
+
+        val baseline = profiles.first().config
+        profiles.drop(1).forEach { profile ->
+            val changed = listOf(
+                profile.config.threads != baseline.threads,
+                profile.config.batchThreads != baseline.batchThreads,
+                profile.config.batchSize != baseline.batchSize,
+                profile.config.microBatchSize != baseline.microBatchSize
+            ).count { it }
+            assertEquals("Profile " + profile.id + " must change exactly one axis", 1, changed)
+            assertEquals(baseline.contextSize, profile.config.contextSize)
+            assertEquals(baseline.backendPreference, profile.config.backendPreference)
+            assertEquals(baseline.gpuLayers, profile.config.gpuLayers)
+            assertEquals(0f, profile.config.temperature, 0f)
+            assertEquals(1f, profile.config.topP, 0f)
+        }
+    }
+
+    @Test
+    fun removesProfilesThatDuplicateCurrentValues() {
+        val base = EngineConfig(threads = 4, batchSize = 128)
+        val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 4)
+        val signatures = profiles.map {
+            it.config.threads.toString() + ":" + it.config.batchThreads +
+                ":" + it.config.batchSize + ":" + it.config.microBatchSize
+        }
+        assertEquals(signatures.size, signatures.distinct().size)
+    }
+}

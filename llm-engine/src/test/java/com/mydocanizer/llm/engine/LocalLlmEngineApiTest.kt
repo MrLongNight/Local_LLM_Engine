@@ -18,6 +18,31 @@ class LocalLlmEngineApiTest {
         assertEquals(1024, config.maxPredictTokens)
         assertEquals(BackendPreference.AUTO, config.backendPreference)
         assertEquals(99, config.gpuLayers)
+        assertEquals(0, config.batchThreads) // follows n_threads
+        assertEquals(0, config.microBatchSize) // follows n_batch
+    }
+
+    @Test
+    fun testIndependentBatchParameters() {
+        val config = EngineConfig(batchSize = 128, threads = 6, batchThreads = 2, microBatchSize = 32)
+        assertEquals(6, config.threads)
+        assertEquals(2, config.batchThreads)
+        assertEquals(32, config.microBatchSize)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectNegativeBatchThreads() {
+        EngineConfig(batchThreads = -1)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectNegativeMicroBatchSize() {
+        EngineConfig(microBatchSize = -1)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectMicroBatchLargerThanBatchSize() {
+        EngineConfig(batchSize = 64, microBatchSize = 128)
     }
 
 

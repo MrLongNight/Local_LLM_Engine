@@ -45,6 +45,23 @@ The workflow runs automatically on pushes to `main` when Android app/engine sour
 
 The workflow builds `:app:assembleDebug`, including the native C++ build and the configured ARM64 Vulkan path, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
 
+## In-app configuration screening
+
+The Settings screen includes an opt-in on-device screening run for the loaded model and
+selected backend. It compares `n_threads`, `n_threads_batch`, `n_batch` and `n_ubatch`
+one setting at a time, keeping model, context size, GPU-layer request and backend fixed.
+Each profile reloads the model because these llama.cpp context settings are applied at
+context creation. A short warm-up precedes a fixed longer prompt at temperature 0 and
+top-p 1. The report records prompt-processing time, time-to-first-token, generation
+duration, generated token count, throughput and the selected context settings.
+
+The run stops when available system RAM is below its safety threshold, thermal status is
+severe, the backend changes unexpectedly, or inference fails. It reloads the user's
+original model configuration in a non-cancellable cleanup block. Prompt and response
+contents are never written to diagnostics. This is a short configuration smoke test,
+not a statistically rigorous benchmark or proof that each operation ran on the GPU.
+Interpret prompt processing separately from autoregressive token generation.
+
 ## Inference process boundary
 
 The reusable `:llm-engine` library owns the `InferenceService` declaration in its
