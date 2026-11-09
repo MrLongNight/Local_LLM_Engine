@@ -32,6 +32,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
@@ -512,7 +513,30 @@ internal class InferenceClient(
             _modelLoadProgress.value = 0
             _modelLoadProgressEvents.tryEmit(0)
 
-            val callback = object : IInferenceCallback.Stub() {
+            val control = ActiveStreamControl(
+            requestId = requestId,
+            cancelAfterAbort = {
+                if (pendingTimeout.get() != null) {
+                    reportTimeout()
+                } else {
+                    _state.value = EngineState.Reconnecting
+                    val partial = synchronized(streamBuilder) { streamBuilder.toString() }
+                    finishStream(InferenceEvent.Cancelled(partial, tokenCount.get()))
+                }
+            },
+            failAfterDisconnect = { error ->
+                if (pendingTimeout.get() != null) {
+                    reportTimeout()
+                } else {
+                    val partial = synchronized(streamBuilder) { streamBuilder.toString() }
+                    finishStream(InferenceEvent.Error(error, partial))
+                }
+            }
+        )
+        streamControl = control
+        activeStreamControl.set(control)
+
+        val callback = object : IInferenceCallback.Stub() {
                 override fun onModelLoaded(modelInfo: ModelInfo?) {
                     if (!pendingModelLoad.compareAndSet(pending, null)) return
                     if (modelInfo != null) {
@@ -682,21 +706,34 @@ internal class InferenceClient(
         val promptDecodeStartNano = AtomicLong(0L)
         val lastUiProgressNano = AtomicLong(startNano)
         val streamBuilder = StringBuilder()
+        val terminalSent = AtomicBoolean(false)
+        var watchdogJob: Job? = null
+        var streamControl: ActiveStreamControl? = null
 
         data class TimeoutSnapshot(val reason: FinishReason, val elapsedMs: Long)
 
         val pendingTimeout = AtomicReference<TimeoutSnapshot?>(null)
         val timeoutReported = AtomicBoolean(false)
 
+        fun finishStream(event: InferenceEvent): Boolean {
+            if (!terminalSent.compareAndSet(false, true)) return false
+            watchdogJob?.cancel()
+            activeRequestId.compareAndSet(requestId, null)
+            streamControl?.let { activeStreamControl.compareAndSet(it, null) }
+            trySend(event)
+            channel.close()
+            return true
+        }
+
         fun reportTimeout(): Boolean {
             val timeout = pendingTimeout.get() ?: return false
             if (!timeoutReported.compareAndSet(false, true)) return true
-
-            activeRequestId.compareAndSet(requestId, null)
             val partial = synchronized(streamBuilder) { streamBuilder.toString() }
             // A timeout is a failure, not a successful completion carrying a TIMEOUT finish reason.
-            trySend(InferenceEvent.Error(InferenceTimeoutException(timeout.reason, timeout.elapsedMs), partial))
-            channel.close()
+            finishStream(InferenceEvent.Error(
+                InferenceTimeoutException(timeout.reason, timeout.elapsedMs),
+                partial
+            ))
             return true
         }
 
@@ -741,6 +778,7 @@ internal class InferenceClient(
                 }
 
                 if (activeRequestId.compareAndSet(requestId, null)) {
+                    _state.value = EngineState.Reconnecting
                     EngineDiagnostics.info(
                         "ipc_client",
                         "TIMEOUT_COOPERATIVE_CANCEL_ESCALATED",
@@ -763,7 +801,7 @@ internal class InferenceClient(
         }
 
         // Tiered monotonic watchdog using System.nanoTime()
-        val watchdogJob = launch {
+        watchdogJob = launch {
             while (isActive && activeRequestId.get() == requestId && pendingTimeout.get() == null) {
                 delay(WATCHDOG_CHECK_INTERVAL_MS)
                 val now = System.nanoTime()
@@ -966,34 +1004,42 @@ internal class InferenceClient(
             }
 
             override fun onCompleted(reqId: String?, result: InferenceResult?) {
-                if (reqId == activeRequestId.get() && result != null) {
+                if (reqId == activeRequestId.get()) {
                     if (completeTimeoutIfPending()) return
-                    watchdogJob.cancel()
-                    trySend(InferenceEvent.Completed(result))
-                    activeRequestId.compareAndSet(reqId, null)
-                    channel.close()
+                    if (result == null) {
+                        finishStream(InferenceEvent.Error(
+                            IllegalStateException("Inference service completed request $reqId without a result"),
+                            synchronized(streamBuilder) { streamBuilder.toString() }
+                        ))
+                    } else {
+                        finishStream(InferenceEvent.Completed(result))
+                    }
                 }
             }
 
             override fun onCancelled(reqId: String?, partialText: String?, tokensGenerated: Int) {
                 if (reqId == activeRequestId.get()) {
                     if (completeTimeoutIfPending()) return
-                    watchdogJob.cancel()
-                    trySend(InferenceEvent.Cancelled(partialText ?: "", tokensGenerated))
-                    activeRequestId.compareAndSet(reqId, null)
-                    channel.close()
+                    val localPartial = synchronized(streamBuilder) { streamBuilder.toString() }
+                    finishStream(
+                        InferenceEvent.Cancelled(
+                            partialText?.takeIf { it.isNotEmpty() } ?: localPartial,
+                            maxOf(tokensGenerated, tokenCount.get())
+                        )
+                    )
                 }
             }
 
             override fun onError(reqId: String?, errorMessage: String?, partialText: String?) {
                 if (reqId == activeRequestId.get()) {
                     if (completeTimeoutIfPending()) return
-                    watchdogJob.cancel()
                     val error = IllegalStateException(errorMessage ?: "Unknown inference error")
                     EngineDiagnostics.error("ipc_client", "REMOTE_INFERENCE_ERROR", error)
-                    trySend(InferenceEvent.Error(error, partialText ?: ""))
-                    activeRequestId.compareAndSet(reqId, null)
-                    channel.close()
+                    val localPartial = synchronized(streamBuilder) { streamBuilder.toString() }
+                    finishStream(InferenceEvent.Error(
+                        error,
+                        partialText?.takeIf { it.isNotEmpty() } ?: localPartial
+                    ))
                 }
             }
 
@@ -1006,22 +1052,28 @@ internal class InferenceClient(
             val service = getService()
             service.streamChat(requestId, request, callback)
         } catch (e: Exception) {
-            watchdogJob.cancel()
-            trySend(InferenceEvent.Error(e))
-            channel.close()
+            val partial = synchronized(streamBuilder) { streamBuilder.toString() }
+            finishStream(InferenceEvent.Error(e, partial))
         }
 
         awaitClose {
-            watchdogJob.cancel()
+            watchdogJob?.cancel()
+            streamControl?.let { activeStreamControl.compareAndSet(it, null) }
             if (activeRequestId.compareAndSet(requestId, null)) {
-                try {
-                    remoteService?.cancelInference(requestId)
-                } catch (ignored: Exception) {}
+                val service = remoteService
+                clientScope.launch(Dispatchers.IO) {
+                    runCatching { service?.cancelInference(requestId) }
+                }
             }
-            if (currentModelInfo != null) {
-                _state.value = EngineState.ModelLoaded(currentModelInfo)
-            } else {
-                _state.value = EngineState.Ready
+            // A disconnect/abort may already have moved the state to Reconnecting or Error.
+            // Never overwrite that newer lifecycle state with the model snapshot captured
+            // when this stream began.
+            if (_state.value is EngineState.Inferring) {
+                if (currentModelInfo != null) {
+                    _state.value = EngineState.ModelLoaded(currentModelInfo)
+                } else {
+                    _state.value = EngineState.Ready
+                }
             }
         }
     }
@@ -1071,24 +1123,32 @@ internal class InferenceClient(
             "Cooperative cancellation requested for request=$requestId, remotePid=$targetPid"
         )
         val service = remoteService
-        val matchingService = service != null &&
-            (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
-        if (matchingService) {
-            runCatching { service?.cancelInference(requestId) }
-                .onFailure { EngineDiagnostics.error("ipc_client", "COOPERATIVE_CANCEL_FAILED", it) }
+        // Binder calls (including processId) are never made on the caller/UI thread.
+        clientScope.launch(Dispatchers.IO) {
+            val matchingService = service != null &&
+                (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
+            if (matchingService) {
+                runCatching { service?.cancelInference(requestId) }
+                    .onFailure { EngineDiagnostics.error("ipc_client", "COOPERATIVE_CANCEL_FAILED", it) }
+            }
         }
 
-        // Give JNI/native cancellation a chance to finish cleanly. Kill only the
-        // original process if it has not acknowledged cancellation by the deadline.
+        // If the service acknowledges cancellation, its onCancelled callback completes
+        // the stream with the partial text. Otherwise the client kills the original PID
+        // and also completes the local stream so generateChat cannot wait forever.
         val graceMs = (lastLoadedConfig?.timeoutConfig ?: timeoutConfig).abortGracePeriodMs
         clientScope.launch {
             delay(graceMs)
             if (activeRequestId.compareAndSet(requestId, null)) {
+                _state.value = EngineState.Reconnecting
                 EngineDiagnostics.info(
                     "ipc_client",
                     "COOPERATIVE_CANCEL_ESCALATED",
                     "request=$requestId did not finish within ${graceMs}ms; aborting original PID=$targetPid"
                 )
+                activeStreamControl.get()
+                    ?.takeIf { it.requestId == requestId }
+                    ?.cancelAfterAbort?.invoke()
                 abortRemoteProcess(
                     requestId = requestId,
                     reason = "cooperative_cancel_timeout",
