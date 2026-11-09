@@ -392,7 +392,8 @@ internal class InferenceClient(
         } catch (tce: TimeoutCancellationException) {
             val elapsedMs = (System.nanoTime() - startNano) / 1_000_000L
             Log.e(TAG, "Service bind timed out after ${elapsedMs}ms")
-            cancelInference()
+            // A bind failure does not identify or authorize cancellation of an
+            // unrelated active request. Report the bind timeout to this operation only.
             throw InferenceTimeoutException(FinishReason.TIMEOUT_SERVICE_BIND, elapsedMs)
         }
     }
