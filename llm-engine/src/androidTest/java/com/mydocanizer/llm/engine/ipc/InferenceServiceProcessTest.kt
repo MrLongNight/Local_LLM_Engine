@@ -251,7 +251,8 @@ class InferenceServiceProcessTest {
             assertTrue(
                 "Surviving app-process log must persist PROCESS_ABORT_CONFIRMED for original PID=$originalPid; " +
                     "fileExists=${appDiagnosticsFile.isFile}, fileBytes=${appDiagnosticsFile.length()}, " +
-                    "inMemory=${EngineDiagnostics.getLogs().lastOrNull { it.contains("PROCESS_ABORT_CONFIRMED") }}",
+                    "inMemory=${EngineDiagnostics.getLogs().lastOrNull { it.contains("PROCESS_ABORT_CONFIRMED") }}, " +
+                    "fileTail=${appDiagnosticsFile.takeIf { it.isFile }?.readLines(Charsets.UTF_8)?.takeLast(30)?.joinToString(" | ")}",
                 abortConfirmedLine != null
             )
 
