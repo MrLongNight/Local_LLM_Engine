@@ -166,8 +166,10 @@ class InferenceServiceProcessTest {
     fun inferenceClientHardAbortsWhileNativeProcessChatIsBlockedAndReconnects() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertInferenceServiceManifest(context)
-        // Persist the surviving app process's log separately from the service PID.
-        EngineDiagnostics.initialize(context)
+        // Start with a fresh app-process file so a reused PID cannot satisfy this test
+        // with a stale confirmation from an earlier instrumentation execution.
+        val appPid = Process.myPid()
+        val appDiagnosticsFile = resetAppProcessDiagnostics(context, appPid)
 
         val timeoutConfig = TimeoutConfig(
             serviceBindMs = 5_000L,
@@ -179,7 +181,6 @@ class InferenceServiceProcessTest {
             abortGracePeriodMs = 150L,
             reconnectMs = 5_000L
         )
-        val appPid = Process.myPid()
         val client = InferenceClient(context, timeoutConfig = timeoutConfig)
         var directBinding: BoundInferenceService? = null
         try {
@@ -235,7 +236,6 @@ class InferenceServiceProcessTest {
             // PROCESS_ABORT_CONFIRMED is emitted by the surviving client process after
             // it observes the old service PID disappear. Verify the event is persisted
             // in the app PID's file (not only held in the in-memory diagnostics queue).
-            val appDiagnosticsFile = File(context.filesDir, "diagnostics/engine-$appPid.log")
             val diagnosticsDeadline = SystemClock.elapsedRealtime() + PROCESS_EXIT_TIMEOUT_MS
             var abortConfirmedLine: String? = null
             while (SystemClock.elapsedRealtime() < diagnosticsDeadline && abortConfirmedLine == null) {
@@ -249,7 +249,9 @@ class InferenceServiceProcessTest {
                 if (abortConfirmedLine == null) delay(PROCESS_POLL_INTERVAL_MS)
             }
             assertTrue(
-                "Surviving app-process log must persist PROCESS_ABORT_CONFIRMED for original PID=$originalPid",
+                "Surviving app-process log must persist PROCESS_ABORT_CONFIRMED for original PID=$originalPid; " +
+                    "fileExists=${appDiagnosticsFile.isFile}, fileBytes=${appDiagnosticsFile.length()}, " +
+                    "inMemory=${EngineDiagnostics.getLogs().lastOrNull { it.contains("PROCESS_ABORT_CONFIRMED") }}",
                 abortConfirmedLine != null
             )
 
@@ -279,7 +281,8 @@ class InferenceServiceProcessTest {
     fun realGgufIsReloadedAndFollowupInferenceSucceedsAfterTimeoutKill() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertInferenceServiceManifest(context)
-        EngineDiagnostics.initialize(context)
+        val appPid = Process.myPid()
+        val appDiagnosticsFile = resetAppProcessDiagnostics(context, appPid)
 
         // The workflow downloads this pinned 731 kB Q4_K_M fixture into androidTest/assets.
         // It is a real Llama GGUF used only for load/reload/inference lifecycle verification.
@@ -311,7 +314,6 @@ class InferenceServiceProcessTest {
             gpuLayers = 0,
             timeoutConfig = timeoutConfig
         )
-        val appPid = Process.myPid()
         val client = InferenceClient(context, timeoutConfig = timeoutConfig)
         var directBinding: BoundInferenceService? = null
 
@@ -370,7 +372,6 @@ class InferenceServiceProcessTest {
                 awaitProcessExit(originalPid, PROCESS_EXIT_TIMEOUT_MS))
             assertEquals("App process must survive native process termination", appPid, Process.myPid())
 
-            val appDiagnosticsFile = File(context.filesDir, "diagnostics/engine-$appPid.log")
             val diagnosticsDeadline = SystemClock.elapsedRealtime() + PROCESS_EXIT_TIMEOUT_MS
             var abortConfirmed = false
             while (SystemClock.elapsedRealtime() < diagnosticsDeadline && !abortConfirmed) {
@@ -383,7 +384,12 @@ class InferenceServiceProcessTest {
                 }.getOrDefault(false)
                 if (!abortConfirmed) delay(PROCESS_POLL_INTERVAL_MS)
             }
-            assertTrue("App-process log must persist kill confirmation for PID=$originalPid", abortConfirmed)
+            assertTrue(
+                "App-process log must persist kill confirmation for PID=$originalPid; " +
+                    "fileExists=${appDiagnosticsFile.isFile}, fileBytes=${appDiagnosticsFile.length()}, " +
+                    "inMemory=${EngineDiagnostics.getLogs().lastOrNull { it.contains("PROCESS_ABORT_CONFIRMED") }}",
+                abortConfirmed
+            )
 
             // The client must automatically reopen the same source/config in a fresh process.
             val recoveryDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
@@ -533,6 +539,26 @@ class InferenceServiceProcessTest {
             pid = service.processId,
             disconnected = disconnected
         )
+    }
+
+    private fun resetAppProcessDiagnostics(context: Context, appPid: Int): File {
+        val directory = File(context.applicationContext.filesDir, "diagnostics")
+        check(directory.exists() || directory.mkdirs()) {
+            "Could not create app-process diagnostics directory: ${directory.absolutePath}"
+        }
+        val logFile = File(directory, "engine-$appPid.log")
+        if (logFile.exists()) {
+            check(logFile.delete()) { "Could not clear stale app-process log: ${logFile.absolutePath}" }
+        }
+        EngineDiagnostics.initialize(context.applicationContext)
+        EngineDiagnostics.info("ipc_test", "APP_PROCESS_LOG_PERSISTENCE_PROBE", "appPid=$appPid")
+        check(
+            logFile.isFile &&
+                logFile.readText(Charsets.UTF_8).contains("[ipc_test] APP_PROCESS_LOG_PERSISTENCE_PROBE")
+        ) {
+            "EngineDiagnostics did not persist the initial app-process probe to ${logFile.absolutePath}"
+        }
+        return logFile
     }
 
     private fun awaitProcessExit(pid: Int, timeoutMs: Long): Boolean {
