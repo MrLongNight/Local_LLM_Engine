@@ -1265,15 +1265,16 @@ internal class InferenceClient(
                 if (!isAlive) {
                     EngineDiagnostics.info("ipc_client", "PROCESS_ABORT_CONFIRMED", "Inference PID=$targetPid is no longer alive")
                     if (mockService == null && !isClosed.get()) {
-                        // onServiceDisconnected clears remotePid before its reconnect
-                        // callback is guaranteed to finish. Retry the recovery trigger while
-                        // no replacement PID has been published; the atomic guard prevents
-                        // duplicate binds when a reconnect is already running.
-                        val currentPid = _remotePid.value
-                        if (currentPid == null || currentPid == targetPid) {
-                            _state.value = EngineState.Reconnecting
-                            triggerReconnect()
-                        }
+                        // Keep the existing Android service binding after a process exit.
+                        // Android will deliver onServiceDisconnected and automatically reconnect
+                        // that binding. The disconnect callback is the single owner of rebind.
+                        // Starting a second bind here races with that delayed callback: the stale
+                        // callback can invalidate the replacement connection's deferred.
+                        EngineDiagnostics.info(
+                            "ipc_client",
+                            "PROCESS_ABORT_CONFIRMED",
+                            "Inference PID=$targetPid is no longer alive; reconnect deferred to ServiceConnection callback"
+                        )
                     }
                 } else {
                     val error = IllegalStateException(
