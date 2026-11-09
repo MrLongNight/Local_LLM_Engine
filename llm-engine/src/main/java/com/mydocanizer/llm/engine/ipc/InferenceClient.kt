@@ -178,6 +178,9 @@ internal class InferenceClient(
     }
 
     init {
+        // The library client owns its app-process diagnostics lifecycle. Do not rely
+        // on a demo Activity having initialized the process log before embedding IPC.
+        EngineDiagnostics.initialize(context.applicationContext)
         if (mockService != null) {
             remoteService = mockService
             serviceConnectionDeferred.complete(mockService)
@@ -377,16 +380,28 @@ internal class InferenceClient(
 
     fun isProcessAlive(pid: Int): Boolean {
         processLivenessCheck?.let { return it(pid) }
-        // /proc is the primary same-device liveness signal. ActivityManager's
-        // runningAppProcesses list is throttled/filtered on modern Android releases.
-        try {
-            if (File("/proc/$pid").exists()) return true
-        } catch (ignored: Exception) {}
+        // A successful /proc lookup is authoritative for this same-UID child process.
+        // In particular, a missing entry means the process is gone. Do not then consult
+        // ActivityManager: its throttled process list can retain stale PIDs and turn a
+        // confirmed process exit into a false "still alive" result.
         return try {
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            am?.runningAppProcesses?.any { it.pid == pid } == true
-        } catch (ignored: Exception) {
-            false
+            File("/proc/$pid").exists()
+        } catch (procError: Exception) {
+            // Use ActivityManager only if the /proc check itself cannot be performed.
+            try {
+                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                am?.runningAppProcesses?.any { it.pid == pid } == true
+            } catch (activityManagerError: Exception) {
+                EngineDiagnostics.error(
+                    "ipc_client",
+                    "PROCESS_LIVENESS_CHECK_FAILED",
+                    IllegalStateException(
+                        "Could not inspect /proc/$pid or ActivityManager",
+                        activityManagerError
+                    )
+                )
+                false
+            }
         }
     }
 
@@ -662,7 +677,7 @@ internal class InferenceClient(
             val serviceMatchesTarget = service != null &&
                 (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
 
-            // Cooperative-first: signal llama.cpp's abort callback and keep the request ID
+            // Cooperative-first: signal the native cancellation flag and keep the request ID
             // active while waiting for the service to report that native execution has unwound.
             if (serviceMatchesTarget) {
                 runCatching { service?.cancelInference(requestId) }
