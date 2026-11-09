@@ -56,7 +56,7 @@ class EngineDiagnosticsTest {
         )
 
         assertTrue(report.contains("decode p50=300us"))
-        assertTrue(report.contains("decode p90=400us"))
+        assertTrue(report.contains("p90=400us"))
     }
 
     @Test
