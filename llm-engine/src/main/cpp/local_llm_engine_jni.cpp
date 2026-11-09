@@ -792,7 +792,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
             LOGE("AUTO CPU fallback llama.cpp model load threw a C++ exception: %s", error.what());
             close_descriptor_stream();
             env->ReleaseStringUTFChars(jmodel_path, model_path);
-            return 104;
+            return 103;
         } catch (...) {
             LOGE("AUTO CPU fallback llama.cpp model load threw an unknown C++ exception");
             close_descriptor_stream();
@@ -879,6 +879,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         LOGE("llama_init_from_model threw an unknown C++ exception");
         llama_model_free(model);
         engine->model = nullptr;
+        if (engine->model_file_stream != nullptr) {
+            std::fclose(engine->model_file_stream);
+            engine->model_file_stream = nullptr;
+        }
         engine->active_backend = "None";
         return 104;
     }
@@ -890,6 +894,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
             std::fclose(engine->model_file_stream);
             engine->model_file_stream = nullptr;
         }
+        engine->active_backend = "None";
         return 4;
     }
     engine->context = ctx;
