@@ -27,17 +27,21 @@ internal object InferenceConfigSmokePlan {
         )
         val deviceThreads = availableProcessors.coerceIn(2, 8)
         val smallerMicroBatch = minOf(32, baseline.batchSize)
-        val candidates = listOf(
+        val candidates = mutableListOf(
             Profile("threads-default", "n_threads=4 (Standardwert)", baseline.copy(threads = 4)),
             Profile("threads-device", "n_threads=$deviceThreads (Geräte-Kerne)", baseline.copy(threads = deviceThreads)),
             Profile("batch-threads-default", "n_threads_batch=4 (Standardwert)", baseline.copy(batchThreads = 4)),
-            Profile("batch-default", "n_batch=512 (Standardwert)", baseline.copy(batchSize = 512)),
             Profile(
                 "micro-batch-32",
                 "n_ubatch=$smallerMicroBatch (kleiner Microbatch)",
                 baseline.copy(microBatchSize = smallerMicroBatch)
             )
         )
+        // Keep n_ubatch fixed while testing n_batch. Skip this profile when
+        // the existing micro-batch would exceed the candidate batch size.
+        if (baseline.microBatchSize <= 512) {
+            candidates += Profile("batch-default", "n_batch=512 (Standardwert)", baseline.copy(batchSize = 512))
+        }
 
         val result = mutableListOf(Profile("baseline", "Ausgangskonfiguration", baseline))
         val seen = mutableSetOf(signature(baseline))

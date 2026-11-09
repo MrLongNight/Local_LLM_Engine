@@ -45,6 +45,16 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
+    fun omitsNBatchCandidateWhenItWouldMakeMicroBatchInvalid() {
+        val base = EngineConfig(batchSize = 1024, threads = 6)
+        val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 8)
+        assertTrue(profiles.none { it.id == "batch-default" })
+        profiles.forEach { profile ->
+            assertTrue(profile.config.microBatchSize <= profile.config.batchSize)
+        }
+    }
+
+    @Test
     fun removesProfilesThatDuplicateCurrentValues() {
         val base = EngineConfig(threads = 4, batchSize = 128)
         val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 4)

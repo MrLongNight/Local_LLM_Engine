@@ -70,7 +70,7 @@ class LocalLlmEngineAppTest {
     }
 
     @Test
-    fun `3 - EngineConfig parcel retains independent llama.cpp batch settings`() {
+    fun `3 - EngineConfig parcel retains independent batch settings`() {
         val original = com.mydocanizer.llm.engine.EngineConfig(
             contextSize = 2048,
             batchSize = 128,
