@@ -348,8 +348,9 @@ internal class InferenceClient(
                 remoteService = null
                 _remotePid.value = null
                 _currentModel.value = null
+                // onServiceDisconnected/onBindingDied already created the fresh deferred.
+                // Replacing it here would orphan callers that began waiting after disconnect.
                 _modelLoadProgress.value = null
-                serviceConnectionDeferred = CompletableDeferred()
                 bindToService()
                 EngineDiagnostics.info(
                     "ipc_client",
@@ -367,16 +368,9 @@ internal class InferenceClient(
                 )
                 service.initialize()
 
-                val lastSource = lastLoadedSource
-                val lastConfig = lastLoadedConfig
-                if (lastSource != null && lastConfig != null) {
-                    _state.value = EngineState.LoadingModel(lastSource)
-                    val reloadResult = loadModelInternal(service, lastSource, lastConfig)
-                    reloadResult.exceptionOrNull()?.let { error ->
-                        EngineDiagnostics.error("ipc_client", "MODEL_RELOAD_FAILED", error)
-                    }
-                } else {
-                    _state.value = EngineState.Ready
+                val reloadResult = restoreLastModelAfterReconnect(service)
+                reloadResult?.exceptionOrNull()?.let { error ->
+                    EngineDiagnostics.error("ipc_client", "MODEL_RELOAD_FAILED", error)
                 }
             } catch (tce: TimeoutCancellationException) {
                 val elapsedMs = (System.nanoTime() - startNano) / 1_000_000L
@@ -388,6 +382,37 @@ internal class InferenceClient(
                 _state.value = EngineState.Error("Failed to reconnect: ${e.message}")
             } finally {
                 reconnectInProgress.set(false)
+            }
+        }
+    }
+
+    /**
+     * Recovery must share the same operation mutex as explicit load/unload calls.
+     * Without this gate, an automatic reload after process death can race a benchmark's
+     * next backend load and collide in pendingModelLoad, leaving both operations stranded.
+     *
+     * The last successful source/config are read only after acquiring the lock: a queued
+     * explicit backend change may have completed while this recovery waited.
+     */
+    internal suspend fun restoreLastModelAfterReconnect(
+        connectedService: IInferenceService
+    ): Result<ModelInfo>? {
+        val waitStarted = System.nanoTime()
+        return operationMutex.withLock {
+            val lockWaitMs = (System.nanoTime() - waitStarted) / 1_000_000L
+            val source = lastLoadedSource
+            val config = lastLoadedConfig
+            EngineDiagnostics.info(
+                "ipc_client",
+                "MODEL_RECONNECT_OPERATION_LOCK_ACQUIRED",
+                "waitMs=$lockWaitMs,hasRememberedModel=${source != null && config != null}"
+            )
+            if (source == null || config == null) {
+                _state.value = EngineState.Ready
+                null
+            } else {
+                _state.value = EngineState.LoadingModel(source)
+                loadModelInternal(connectedService, source, config)
             }
         }
     }

@@ -28,6 +28,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -58,6 +60,10 @@ class InferenceIpcTest {
         val loadedModel = AtomicReference<String?>(null)
         val loadedDescriptorSize = AtomicLong(-1L)
         val hangModelLoad = AtomicBoolean(false)
+        val blockNextModelLoad = AtomicBoolean(false)
+        val modelLoadEntered = CountDownLatch(1)
+        val releaseModelLoad = CountDownLatch(1)
+        val modelLoadCalls = AtomicInteger(0)
         val hangUnload = AtomicBoolean(false)
         val lastRequestId = AtomicReference<String?>(null)
         val cancelledRequestId = AtomicReference<String?>(null)
@@ -89,6 +95,13 @@ class InferenceIpcTest {
             config: EngineConfig,
             callback: IInferenceCallback?
         ) {
+            modelLoadCalls.incrementAndGet()
+            if (blockNextModelLoad.compareAndSet(true, false)) {
+                modelLoadEntered.countDown()
+                check(releaseModelLoad.await(5L, TimeUnit.SECONDS)) {
+                    "Timed out waiting for test to release blocked model load"
+                }
+            }
             loadedModel.set(modelPath)
             loadedDescriptorSize.set(modelDescriptor.statSize)
             replacementProcessIdOnLoad.get().takeIf { it > 0 }?.let(currentProcessId::set)
@@ -476,6 +489,64 @@ class InferenceIpcTest {
         assertTrue(fakeService.initialized.get())
         assertEquals(99999, client.remotePid.value)
         assertEquals("llama.cpp IPC Mock", client.backendInfo.value.backendName)
+    }
+
+    @Test
+    fun reconnectModelReloadIsSerializedWithExplicitBackendChange() = runBlocking {
+        val fakeService = FakeInferenceService()
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService
+        )
+        val originalFile = File.createTempFile("reconnect_original", ".gguf").apply {
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46) + ByteArray(96))
+            deleteOnExit()
+        }
+        val cpuFile = File.createTempFile("reconnect_cpu", ".gguf").apply {
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46) + ByteArray(96))
+            deleteOnExit()
+        }
+        val originalConfig = EngineConfig()
+        val cpuConfig = originalConfig.copy(backendPreference = com.mydocanizer.llm.engine.BackendPreference.CPU)
+
+        try {
+            val initial = client.loadModel(ModelSource.FilePath(originalFile.absolutePath), originalConfig)
+            assertTrue("Initial model load must succeed", initial.isSuccess)
+            assertEquals(1, fakeService.modelLoadCalls.get())
+
+            fakeService.blockNextModelLoad.set(true)
+            val recovery = async {
+                client.restoreLastModelAfterReconnect(fakeService)
+            }
+            withTimeout(1_000L) {
+                while (fakeService.modelLoadEntered.count != 0L) delay(5L)
+            }
+
+            // A CPU load submitted while automatic reconnect recovery is loading the
+            // remembered Vulkan model must queue behind the same operation mutex.
+            val explicitCpuLoad = async {
+                client.loadModel(ModelSource.FilePath(cpuFile.absolutePath), cpuConfig)
+            }
+            delay(75L)
+            assertEquals(
+                "A second model load must not enter the service while recovery owns the load slot",
+                2,
+                fakeService.modelLoadCalls.get()
+            )
+
+            fakeService.releaseModelLoad.countDown()
+            val recovered = withTimeout(2_000L) { recovery.await() }
+            val cpuLoaded = withTimeout(2_000L) { explicitCpuLoad.await() }
+
+            assertNotNull("A remembered model should be restored", recovered)
+            assertTrue("Reconnect recovery load must succeed", recovered!!.isSuccess)
+            assertTrue("The queued explicit CPU load must succeed", cpuLoaded.isSuccess)
+            assertEquals("The explicit CPU model load must run after recovery", cpuFile.absolutePath, fakeService.loadedModel.get())
+            assertEquals(3, fakeService.modelLoadCalls.get())
+        } finally {
+            fakeService.releaseModelLoad.countDown()
+            client.close()
+        }
     }
 
     @Test
