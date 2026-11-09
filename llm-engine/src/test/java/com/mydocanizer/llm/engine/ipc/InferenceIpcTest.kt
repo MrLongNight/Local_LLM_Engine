@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -215,6 +216,22 @@ class InferenceIpcTest {
         override fun shutdown() {
             isShutdown.set(true)
         }
+    }
+
+    @Test
+    fun procStatTreatsZombieAndDeadStatesAsTerminated() = runBlocking {
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = FakeInferenceService()
+        )
+
+        assertFalse(client.isProcStatAlive("1234 (llama-inference) Z 1 2 3 4 5"))
+        assertFalse(client.isProcStatAlive("1234 (llama ) worker) X 1 2 3 4 5"))
+        assertTrue(client.isProcStatAlive("1234 (llama-inference) S 1 2 3 4 5"))
+        assertTrue(client.isProcStatAlive("1234 (llama ) worker) R 1 2 3 4 5"))
+        // Unknown/malformed stat data is conservative and must not cause a false kill confirmation.
+        assertTrue(client.isProcStatAlive("not-a-proc-stat-line"))
+        client.close()
     }
 
     @Test
