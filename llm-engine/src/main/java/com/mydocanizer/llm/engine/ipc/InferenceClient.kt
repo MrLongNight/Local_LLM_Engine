@@ -641,8 +641,6 @@ internal class InferenceClient(
                     override fun onError(requestId: String?, errorMessage: String?, partialText: String?) {}
                 })
                 withTimeout(effective.modelLoadMs) { deferred.await() }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (timeout: TimeoutCancellationException) {
                 val error = InferenceTimeoutException(
                     FinishReason.TIMEOUT_MODEL_LOAD,
@@ -652,6 +650,8 @@ internal class InferenceClient(
                 _modelLoadProgress.value = null
                 if (targetPid != null) abortRemoteProcess(null, "model_unload_timeout", targetPid)
                 Result.failure(error)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 EngineDiagnostics.error("ipc_client", "MODEL_UNLOAD_FAILED", error)
                 Result.failure(error)
