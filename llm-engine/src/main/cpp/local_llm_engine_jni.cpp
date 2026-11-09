@@ -1209,7 +1209,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         jclass /*clazz*/,
         jlong handle) {
     auto* engine = fromHandle(handle);
-    if (!engine || !engine->model || !engine->context) return nullptr;
+    if (!engine) return nullptr;
+
+    // Model unload/destruction uses the same mutex. Acquire it before inspecting
+    // context/model pointers so a close cannot free llama_context during this token step.
+    std::lock_guard<std::mutex> lock(engine->mtx);
+    if (!engine->model || !engine->context) return nullptr;
 
     if (engine->generation_finished) return nullptr;
 
