@@ -144,16 +144,29 @@ object EngineDiagnostics {
         )
     }
 
+    private fun eventName(line: String): String =
+        line.substringAfterLast("] ")
+            .substringBefore(" - ")
+            .trim()
+            .uppercase(Locale.US)
+
+    private fun isPerformanceEvent(line: String): Boolean {
+        val event = eventName(line)
+        return event in setOf(
+            "NATIVE_BACKEND_PREFLIGHT",
+            "MODEL_NATIVE_RUNTIME_READY",
+            "PROMPT_STAGE_METRICS",
+            "GENERATION_COMPLETED"
+        ) || event.startsWith("BACKEND_BENCHMARK_")
+    }
+
     private fun isImportantEvent(line: String): Boolean {
         if (line.contains("[ERROR]") || line.contains("[WARN]")) return true
 
         // Log format is: timestamp [LEVEL] [tag] EVENT - details.
         // Only inspect the event token; free-form detail text must not promote
         // unrelated lines (for example a path containing the word "kill").
-        val event = line.substringAfterLast("] ")
-            .substringBefore(" - ")
-            .trim()
-            .uppercase(Locale.US)
+        val event = eventName(line)
         if (event.isBlank()) return false
 
         val exactEvents = setOf(
@@ -213,10 +226,19 @@ object EngineDiagnostics {
         val nativeLines = ordered.filter { it.contains("[NATIVE]") }
         val samples = kotlinLines.mapNotNull(::resourceSample)
         val events = kotlinLines
-            .filterNot { it.contains("RESOURCE_SNAPSHOT") }
+            .filterNot { it.contains("RESOURCE_SNAPSHOT") || isPerformanceEvent(it) }
             .filter(::isImportantEvent)
             .takeLast(MAX_EVENT_LINES)
             .map { compactLine(it) }
+        // These low-frequency metrics are essential to compare Vulkan against CPU:
+        // prefill/tokenization/decode times, generated tokens, generation wall time,
+        // measured tokens/s, and the backend used for each test. Prompts/responses
+        // are never included in these structured diagnostic events.
+        val performanceEvents = kotlinLines
+            .filterNot { it.contains("RESOURCE_SNAPSHOT") }
+            .filter(::isPerformanceEvent)
+            .takeLast(16)
+            .map { compactLine(it, 520) }
 
         val nativeKeywords = listOf(
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
@@ -295,6 +317,12 @@ object EngineDiagnostics {
             appendLine("[WICHTIGE EREIGNISSE]")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
             events.forEach(::appendLine)
+            appendLine()
+            appendLine("[BACKEND- UND INFERENZ-MESSWERTE]")
+            if (performanceEvents.isEmpty()) {
+                appendLine("Keine abgeschlossenen Backend-/Inferenz-Messwerte gefunden.")
+            }
+            performanceEvents.forEach(::appendLine)
             appendLine()
             appendLine("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
             if (memorySummaries.isEmpty()) appendLine("Keine RAM-Samples gefunden.")

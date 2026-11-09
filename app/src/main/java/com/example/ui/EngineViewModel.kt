@@ -316,7 +316,9 @@ class EngineViewModel(
         }
         val benchmarkPrompt = "wer ist Ricardo Villalobos"
         val benchmarkConfig = originalConfig.copy()
-        val backends = listOf(BackendPreference.CPU, BackendPreference.VULKAN)
+        // Match the user's troubleshooting sequence: measure the requested GPU
+        // backend first, then the CPU baseline. Only backendPreference changes.
+        val backends = listOf(BackendPreference.VULKAN, BackendPreference.CPU)
 
         _isBenchmarking.value = true
         _benchmarkReport.value = "Benchmark wird vorbereitet…"
@@ -328,7 +330,7 @@ class EngineViewModel(
                 "benchmark",
                 "BACKEND_BENCHMARK_STARTED",
                 "model=${model.name},modelBytes=${model.sizeBytes},prompt=ricardo_villalobos_fixed," +
-                    "context=${benchmarkConfig.contextSize},batch=${benchmarkConfig.batchSize}," +
+                    "backendOrder=VULKAN,CPU,context=${benchmarkConfig.contextSize},batch=${benchmarkConfig.batchSize}," +
                     "threads=${benchmarkConfig.threads},gpuLayers=${benchmarkConfig.gpuLayers}," +
                     "temperature=${benchmarkConfig.temperature},topP=${benchmarkConfig.topP}," +
                     "maxPredictTokens=${benchmarkConfig.maxPredictTokens},systemPromptChars=${systemPromptSnapshot.length}"
