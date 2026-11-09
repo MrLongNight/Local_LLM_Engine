@@ -177,7 +177,19 @@ object EngineDiagnostics {
             "PROCESS_EXIT_INFO",
             "PROCESS_EXIT_INFO_UNAVAILABLE",
             "PROCESS_KILLED",
-            "KILL_PROCESS_REQUESTED"
+            "KILL_PROCESS_REQUESTED",
+            "PROCESS_ABORT_REQUESTED",
+            "PROCESS_ABORT_CONFIRMED",
+            "PROCESS_ABORT_UNCONFIRMED",
+            "PROCESS_ABORT_SKIPPED_REPLACEMENT",
+            "COOPERATIVE_CANCEL_ESCALATED",
+            "TIMEOUT_COOPERATIVE_CANCEL_SENT",
+            "TIMEOUT_COOPERATIVE_CANCEL_ACKNOWLEDGED",
+            "TIMEOUT_COOPERATIVE_CANCEL_ESCALATED",
+            "SERVICE_RECONNECTED",
+            "SERVICE_CONNECTED",
+            "BINDING_DIED",
+            "CANCEL_REQUESTED"
         )
         return event in exactEvents ||
             event.startsWith("MODEL_LOAD_") ||
