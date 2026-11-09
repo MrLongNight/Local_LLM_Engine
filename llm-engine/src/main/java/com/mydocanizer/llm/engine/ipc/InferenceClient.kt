@@ -83,6 +83,12 @@ internal class InferenceClient(
         val deferred: CompletableDeferred<Result<ModelInfo>>
     )
 
+    private data class ActiveStreamControl(
+        val requestId: String,
+        val cancelAfterAbort: () -> Unit,
+        val failAfterDisconnect: (Throwable) -> Unit
+    )
+
     companion object {
         private const val TAG = "InferenceClient"
         private const val WATCHDOG_CHECK_INTERVAL_MS = 25L
@@ -114,6 +120,7 @@ internal class InferenceClient(
     private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
 
     private val activeRequestId = AtomicReference<String?>(null)
+    private val activeStreamControl = AtomicReference<ActiveStreamControl?>(null)
     private val pendingModelLoad = AtomicReference<PendingModelLoad?>(null)
     private val reconnectInProgress = AtomicBoolean(false)
     private var lastLoadedSource: ModelSource? = null
@@ -155,6 +162,9 @@ internal class InferenceClient(
             _currentModel.value = null
             _state.value = EngineState.Reconnecting
             serviceConnectionDeferred = CompletableDeferred()
+            activeStreamControl.get()
+                ?.takeIf { it.requestId == activeRequestId.get() }
+                ?.failAfterDisconnect(IllegalStateException("Inference service disconnected (PID=$disconnectedPid)"))
             EngineDiagnostics.info("ipc_client", "SERVICE_DISCONNECTED", "Service disconnected, reconnecting")
             if (!isClosed.get()) {
                 triggerReconnect()
@@ -170,6 +180,9 @@ internal class InferenceClient(
             _currentModel.value = null
             _state.value = EngineState.Reconnecting
             serviceConnectionDeferred = CompletableDeferred()
+            activeStreamControl.get()
+                ?.takeIf { it.requestId == activeRequestId.get() }
+                ?.failAfterDisconnect(IllegalStateException("Inference service binding died (PID=$disconnectedPid)"))
             EngineDiagnostics.error("ipc_client", "BINDING_DIED", IllegalStateException("Inference process died"))
             if (!isClosed.get()) {
                 triggerReconnect()
@@ -367,8 +380,9 @@ internal class InferenceClient(
         }
     }
 
-    private suspend fun getService(): IInferenceService {
-        val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
+    private suspend fun getService(
+        effective: TimeoutConfig = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
+    ): IInferenceService {
         val startNano = System.nanoTime()
         return try {
             withTimeout(effective.serviceBindMs) {
@@ -426,8 +440,16 @@ internal class InferenceClient(
         config: EngineConfig
     ): Result<ModelInfo> = operationMutex.withLock {
         withContext(Dispatchers.IO) {
-            val service = getService()
-            loadModelInternal(service, source, config)
+            try {
+                // A new model must use its own bind deadline, not the previous model's config.
+                val service = getService(config.timeoutConfig)
+                loadModelInternal(service, source, config)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                EngineDiagnostics.error("ipc_client", "MODEL_LOAD_SETUP_FAILED", error)
+                Result.failure(error)
+            }
         }
     }
 
@@ -587,14 +609,17 @@ internal class InferenceClient(
 
     override suspend fun unloadModel(): Result<Unit> = operationMutex.withLock {
         withContext(Dispatchers.IO) {
+            val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
             val deferred = CompletableDeferred<Result<Unit>>()
+            val targetPid = _remotePid.value
             try {
-                val service = getService()
+                val service = getService(effective)
                 service.unloadModel(object : IInferenceCallback.Stub() {
                     override fun onModelLoaded(modelInfo: ModelInfo?) {
                         _currentModel.value = null
                         lastLoadedSource = null
                         lastLoadedConfig = null
+                        _modelLoadProgress.value = null
                         _state.value = EngineState.Ready
                         deferred.complete(Result.success(Unit))
                     }
@@ -605,19 +630,30 @@ internal class InferenceClient(
                     }
 
                     override fun onModelLoadProgress(progressPercent: Int) {}
-
                     override fun onStarted(requestId: String?, promptMessageCount: Int) {}
                     override fun onToken(requestId: String?, token: String?, tokenIndex: Int) {}
                     override fun onProgress(requestId: String?, tokensGenerated: Int, elapsedMs: Long) {}
-                override fun onPromptProgress(requestId: String?, tokensProcessed: Int, totalPromptTokens: Int, elapsedMs: Long) {}
+                    override fun onPromptProgress(requestId: String?, tokensProcessed: Int, totalPromptTokens: Int, elapsedMs: Long) {}
                     override fun onCompleted(requestId: String?, result: InferenceResult?) {}
                     override fun onCancelled(requestId: String?, partialText: String?, tokensGenerated: Int) {}
                     override fun onError(requestId: String?, errorMessage: String?, partialText: String?) {}
                 })
-            } catch (t: Throwable) {
-                deferred.complete(Result.failure(t))
+                withTimeout(effective.modelLoadMs) { deferred.await() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (timeout: TimeoutCancellationException) {
+                val error = InferenceTimeoutException(
+                    FinishReason.TIMEOUT_MODEL_LOAD,
+                    effective.modelLoadMs
+                )
+                EngineDiagnostics.error("ipc_client", "MODEL_UNLOAD_TIMEOUT", error)
+                _modelLoadProgress.value = null
+                if (targetPid != null) abortRemoteProcess(null, "model_unload_timeout", targetPid)
+                Result.failure(error)
+            } catch (error: Throwable) {
+                EngineDiagnostics.error("ipc_client", "MODEL_UNLOAD_FAILED", error)
+                Result.failure(error)
             }
-            deferred.await()
         }
     }
 
