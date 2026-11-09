@@ -23,6 +23,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.runBlocking
+import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceEvent
@@ -162,6 +163,8 @@ class InferenceServiceProcessTest {
     fun inferenceClientHardAbortsWhileNativeProcessChatIsBlockedAndReconnects() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertInferenceServiceManifest(context)
+        // Persist the surviving app process's log separately from the service PID.
+        EngineDiagnostics.initialize(context)
 
         val timeoutConfig = TimeoutConfig(
             serviceBindMs = 5_000L,
@@ -225,6 +228,27 @@ class InferenceServiceProcessTest {
             )
             assertTrue("Original JNI-blocked PID must exit", awaitProcessExit(originalPid, PROCESS_EXIT_TIMEOUT_MS))
             assertEquals("App process must survive inference process termination", appPid, Process.myPid())
+
+            // PROCESS_ABORT_CONFIRMED is emitted by the surviving client process after
+            // it observes the old service PID disappear. Verify the event is persisted
+            // in the app PID's file (not only held in the in-memory diagnostics queue).
+            val appDiagnosticsFile = File(context.filesDir, "diagnostics/engine-$appPid.log")
+            val diagnosticsDeadline = SystemClock.elapsedRealtime() + PROCESS_EXIT_TIMEOUT_MS
+            var abortConfirmedLine: String? = null
+            while (SystemClock.elapsedRealtime() < diagnosticsDeadline && abortConfirmedLine == null) {
+                abortConfirmedLine = runCatching {
+                    appDiagnosticsFile.takeIf { it.isFile }?.readLines(Charsets.UTF_8)
+                        ?.lastOrNull { line ->
+                            line.contains("[ipc_client] PROCESS_ABORT_CONFIRMED") &&
+                                line.contains("Inference PID=$originalPid")
+                        }
+                }.getOrNull()
+                if (abortConfirmedLine == null) delay(PROCESS_POLL_INTERVAL_MS)
+            }
+            assertTrue(
+                "Surviving app-process log must persist PROCESS_ABORT_CONFIRMED for original PID=$originalPid",
+                abortConfirmedLine != null
+            )
 
             val recoveryDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
             var recoveredPid = 0
