@@ -1215,6 +1215,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     const int64_t prompt_start_us = llama_time_us();
     int dec_res = decode_tokens(
         engine, tokens, engine->current_position, true, &progress_context);
+    // Vulkan may enqueue work asynchronously. Include completion of that GPU work
+    // in prefill time rather than charging the wait to the first generated token.
+    if (dec_res == 0) {
+        llama_synchronize(engine->context);
+    }
     const int64_t prompt_duration_ms = (llama_time_us() - prompt_start_us) / 1000;
     engine->last_prompt_decode_us = prompt_duration_ms * 1000;
     engine->last_prompt_tokens = prompt_size;
@@ -1299,7 +1304,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     const int64_t decode_start_us = llama_time_us();
     const int decode_result = llama_decode(engine->context, engine->batch);
-    const int64_t decode_duration_us = llama_time_us() - decode_start_us;
+    const int64_t decode_submit_duration_us = llama_time_us() - decode_start_us;
     if (decode_result == 2) {
         LOGI("Token decode aborted by native cancellation callback");
         engine->last_finish_reason = 2; // CANCELLED
@@ -1311,6 +1316,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->last_finish_reason = 3; // ERROR
         return nullptr;
     }
+    // llama_decode can return after Vulkan command submission while GPU kernels are
+    // still running. Synchronize here so decodeUs reflects completed work on both
+    // CPU and Vulkan; the sampler's own synchronization is then only a no-op/wait.
+    const int64_t gpu_sync_start_us = llama_time_us();
+    llama_synchronize(engine->context);
+    const int64_t gpu_sync_wait_us = llama_time_us() - gpu_sync_start_us;
+    const int64_t decode_duration_us = decode_submit_duration_us + gpu_sync_wait_us;
 
     engine->current_position++;
 
@@ -1347,6 +1359,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         metric << "TOKEN_STEP_METRIC - index=" << engine->tokens_generated
                << ", sampleUs=" << sample_duration_us
                << ", decodeUs=" << decode_duration_us
+               << ", decodeSubmitUs=" << decode_submit_duration_us
+               << ", gpuSyncWaitUs=" << gpu_sync_wait_us
                << ", pieceUs=" << piece_duration_us
                << ", totalUs=" << token_total_duration_us
                << ", backend=" << engine->active_backend;

@@ -58,6 +58,23 @@ unloading a model does not clear the remembered selection.
 The source and settings are stored locally in app-private SharedPreferences. The GGUF
 file is not copied or uploaded by this feature.
 
+## CPU / Vulkan benchmark
+
+The Settings benchmark reloads the same model explicitly on Vulkan and CPU, in that
+order. Each backend receives a four-token warm-up and a deterministic 24-token
+measurement (temperature 0, top-p 1), so a slow first backend cannot consume the
+entire 512-token chat output budget before the CPU phase begins. The screen reports
+prefill progress, generation progress, first-token time and throughput. A failed
+Vulkan run is recorded and does not suppress the CPU attempt; the original model
+configuration is restored in a non-cancellable cleanup block.
+
+Native token timing distinguishes llama.cpp decode submission from the subsequent
+GPU synchronization wait. Vulkan can enqueue compute asynchronously; timing only
+the return of `llama_decode()` under-reports actual GPU work. Prompt prefill is also
+synchronized before its duration is finalized, so it is not incorrectly charged to
+the first generated token. `decodeUs` now includes submission plus completion wait,
+with `decodeSubmitUs` and `gpuSyncWaitUs` available separately in the native log.
+
 ## In-app configuration screening
 
 The Settings screen includes an opt-in on-device screening run for the loaded model and

@@ -257,9 +257,9 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Vergleicht dasselbe geladene Modell mit der Testfrage „wer ist Ricardo Villalobos“. " +
-                            "Kontext, Batch, Threads, GPU-Layer, Temperatur, Top-P und Ausgabelimit bleiben identisch. " +
-                            "Das Modell wird pro Backend neu geladen; anschließend wird deine ursprüngliche Backend-Einstellung wiederhergestellt.",
+                        text = "Vergleicht dasselbe Modell mit der Testfrage „wer ist Ricardo Villalobos“ auf Vulkan und CPU. " +
+                            "Je Backend gibt es 4 Warm-up-Tokens und 24 Mess-Tokens mit identischen Ladeparametern, Temperatur 0 und Top-P 1. " +
+                            "Der Fortschritt wird live angezeigt; danach wird deine ursprüngliche Modellkonfiguration wiederhergestellt.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

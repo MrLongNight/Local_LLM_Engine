@@ -20,6 +20,7 @@ import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.InferenceResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -405,10 +406,9 @@ class EngineViewModel(
 
 
     /**
-     * Runs the fixed Ricardo Villalobos prompt on CPU and Vulkan using the current
-     * app configuration. Only backendPreference changes between the two measured runs.
-     * The model is reloaded for each backend and the user's original backend is restored.
-     * Prompt/response text is never written to diagnostics.
+     * Short, reproducible comparison. Each backend gets a fresh model load, a four-token
+     * warm-up and a fixed 24-token measurement. A failed first backend never prevents
+     * trying the second one. The original load configuration is restored afterwards.
      */
     fun runDefaultBackendBenchmark() {
         if (_isBenchmarking.value) return
@@ -431,10 +431,8 @@ class EngineViewModel(
             ModelSource.FilePath(model.path)
         }
         val benchmarkPrompt = "wer ist Ricardo Villalobos"
-        val benchmarkConfig = originalConfig.copy()
-        // Match the user's troubleshooting sequence: measure the requested GPU
-        // backend first, then the CPU baseline. Only backendPreference changes.
-        val backends = listOf(BackendPreference.VULKAN, BackendPreference.CPU)
+        val benchmarkConfig = BackendBenchmarkPlan.configuration(originalConfig)
+        val backends = BackendBenchmarkPlan.BACKENDS
 
         _isBenchmarking.value = true
         _benchmarkReport.value = "Benchmark wird vorbereitet…"
@@ -446,81 +444,73 @@ class EngineViewModel(
                 "benchmark",
                 "BACKEND_BENCHMARK_STARTED",
                 "model=${model.name},modelBytes=${model.sizeBytes},prompt=ricardo_villalobos_fixed," +
-                    "backendOrder=VULKAN,CPU,context=${benchmarkConfig.contextSize},batch=${benchmarkConfig.batchSize}," +
-                    "threads=${benchmarkConfig.threads},gpuLayers=${benchmarkConfig.gpuLayers}," +
-                    "temperature=${benchmarkConfig.temperature},topP=${benchmarkConfig.topP}," +
-                    "maxPredictTokens=${benchmarkConfig.maxPredictTokens},systemPromptChars=${systemPromptSnapshot.length}"
+                    "backendOrder=VULKAN,CPU,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
+                    "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${benchmarkConfig.contextSize}," +
+                    "batch=${benchmarkConfig.batchSize},threads=${benchmarkConfig.threads}," +
+                    "batchThreads=${benchmarkConfig.batchThreads},microBatch=${benchmarkConfig.microBatchSize}," +
+                    "gpuLayers=${benchmarkConfig.gpuLayers},temperature=0.0,topP=1.0"
             )
 
             try {
                 for (backend in backends) {
-                    _benchmarkReport.value = "Lade ${backend.name} für den identischen Test…"
+                    currentCoroutineContext().ensureActive()
+                    _benchmarkReport.value = "Lade ${backend.name} für den kurzen Vergleich…"
                     try {
                         val backendConfig = benchmarkConfig.copy(backendPreference = backend)
                         val loadStarted = System.nanoTime()
                         val loaded = engine.loadModel(source, backendConfig).getOrElse { throw it }
                         val modelLoadMs = (System.nanoTime() - loadStarted) / 1_000_000L
 
-                        val messages = buildList {
-                            if (systemPromptSnapshot.isNotBlank()) add(ChatMessage.system(systemPromptSnapshot))
-                            add(ChatMessage.user(benchmarkPrompt))
+                        val actualBackend = backendFamily(loaded.activeBackend)
+                        if (actualBackend != backend.name) {
+                            throw IllegalStateException(
+                                "Angefordert wurde ${backend.name}, geladen wurde aber ${loaded.activeBackend}"
+                            )
                         }
-                        val request = InferenceRequest(
-                            messages = messages,
-                            maxPredictTokens = backendConfig.maxPredictTokens,
-                            temperature = backendConfig.temperature,
-                            topP = backendConfig.topP
+                        if (loaded.sizeBytes != model.sizeBytes ||
+                            (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
+                        ) {
+                            throw IllegalStateException("Nach dem Neuladen wurde nicht dieselbe Modelldatei bestätigt.")
+                        }
+
+                        val warmup = collectBackendBenchmarkSample(
+                            backend = backend,
+                            phaseLabel = "Warm-up",
+                            maxTokens = BackendBenchmarkPlan.WARMUP_TOKENS,
+                            systemPromptSnapshot = systemPromptSnapshot,
+                            benchmarkPrompt = benchmarkPrompt
                         )
-
-                        var firstTokenMs: Long? = null
-                        var promptProgressElapsedMs: Long? = null
-                        var promptTokensTotal = 0
-                        var promptTokensProcessed = 0
-                        var completed: com.mydocanizer.llm.engine.InferenceResult? = null
-                        val inferenceStarted = System.nanoTime()
-
-                        engine.streamChat(request).collect { event ->
-                            when (event) {
-                                is InferenceEvent.Progress -> {
-                                    if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION) {
-                                        promptProgressElapsedMs = event.elapsedMs
-                                        promptTokensTotal = event.promptTokensTotal
-                                        promptTokensProcessed = event.promptTokensProcessed
-                                    }
-                                }
-                                is InferenceEvent.Token -> {
-                                    if (firstTokenMs == null) {
-                                        firstTokenMs = (System.nanoTime() - inferenceStarted) / 1_000_000L
-                                    }
-                                }
-                                is InferenceEvent.Completed -> completed = event.result
-                                is InferenceEvent.Error -> throw event.throwable
-                                is InferenceEvent.Cancelled -> throw IllegalStateException(
-                                    "Benchmark-Inferenz wurde unerwartet abgebrochen"
-                                )
-                                is InferenceEvent.Started -> Unit
-                            }
+                        delay(BackendBenchmarkPlan.COOLDOWN_MS)
+                        val measured = collectBackendBenchmarkSample(
+                            backend = backend,
+                            phaseLabel = "Messung",
+                            maxTokens = BackendBenchmarkPlan.MEASURED_TOKENS,
+                            systemPromptSnapshot = systemPromptSnapshot,
+                            benchmarkPrompt = benchmarkPrompt
+                        )
+                        if (measured.result.tokensGenerated < 8) {
+                            throw IllegalStateException(
+                                "Zu wenige Mess-Tokens für einen brauchbaren Vergleich: ${measured.result.tokensGenerated}"
+                            )
                         }
 
-                        val inferenceWallMs = (System.nanoTime() - inferenceStarted) / 1_000_000L
-                        val result = completed
-                            ?: throw IllegalStateException("Keine abgeschlossene Inferenzantwort erhalten")
                         val reportLine = String.format(
                             java.util.Locale.US,
-                            "%s: backend=%s, modelLoadMs=%d, promptTokens=%d, prefillProgressMs=%s, " +
-                                "timeToFirstTokenMs=%s, generationMs=%d, outputTokens=%d, tokensPerSecond=%.3f, " +
-                                "streamWallMs=%d, finishReason=%s, activeBackend=%s",
-                            backend.name,
+                            "%s: modelLoadMs=%d, promptTokens=%d, prefillMs=%s, TTFT=%s ms, " +
+                                "generationMs=%d, outputTokens=%d, tokensPerSecond=%.3f, streamWallMs=%d, " +
+                                "finishReason=%s, warmupTokens=%d, warmupTokensPerSecond=%.3f, activeBackend=%s",
                             backend.name,
                             modelLoadMs,
-                            promptTokensTotal.coerceAtLeast(promptTokensProcessed),
-                            promptProgressElapsedMs?.toString() ?: "n/a",
-                            firstTokenMs?.toString() ?: "n/a",
-                            result.durationMs,
-                            result.tokensGenerated,
-                            result.tokensPerSecond,
-                            inferenceWallMs,
-                            result.finishReason.name,
+                            measured.promptTokens,
+                            measured.promptEvaluationMs?.toString() ?: "n/a",
+                            measured.firstTokenMs?.toString() ?: "n/a",
+                            measured.result.durationMs,
+                            measured.result.tokensGenerated,
+                            measured.result.tokensPerSecond,
+                            measured.wallMs,
+                            measured.result.finishReason.name,
+                            warmup.result.tokensGenerated,
+                            warmup.result.tokensPerSecond,
                             loaded.activeBackend
                         )
                         lines.add(reportLine)
@@ -528,19 +518,26 @@ class EngineViewModel(
                             "benchmark",
                             "BACKEND_BENCHMARK_RESULT",
                             reportLine + ",context=${backendConfig.contextSize},batch=${backendConfig.batchSize}," +
-                                "threads=${backendConfig.threads},gpuLayers=${backendConfig.gpuLayers}," +
-                                "temperature=${backendConfig.temperature},topP=${backendConfig.topP}," +
-                                "maxPredictTokens=${backendConfig.maxPredictTokens}"
+                                "threads=${backendConfig.threads},batchThreads=${backendConfig.batchThreads}," +
+                                "microBatch=${backendConfig.microBatchSize},gpuLayers=${backendConfig.gpuLayers}," +
+                                "temperature=0.0,topP=1.0,maxPredictTokens=${BackendBenchmarkPlan.MEASURED_TOKENS}"
                         )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (error: Throwable) {
                         val failure = "${backend.name}: FEHLER - ${error.message ?: error.javaClass.simpleName}"
                         lines.add(failure)
                         EngineDiagnostics.error("benchmark", "BACKEND_BENCHMARK_FAILED", error)
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                lines.add("Benchmark wurde abgebrochen.")
+                throw cancelled
             } finally {
-                _benchmarkReport.value = "Stelle ursprüngliche Backend-Einstellung wieder her…"
-                val restore = runCatching { engine.loadModel(source, originalConfig).getOrThrow() }
+                _benchmarkReport.value = "Stelle ursprüngliche Modellkonfiguration wieder her…"
+                val restore = withContext(NonCancellable) {
+                    runCatching { engine.loadModel(source, originalConfig).getOrThrow() }
+                }
                 restore.onSuccess { restored ->
                     EngineDiagnostics.info(
                         "benchmark",
@@ -548,25 +545,102 @@ class EngineViewModel(
                         "backendPreference=${originalConfig.backendPreference},activeBackend=${restored.activeBackend}"
                     )
                 }.onFailure { error ->
-                    lines.add("Wiederherstellung des ursprünglichen Backends fehlgeschlagen: ${error.message}")
+                    lines.add("Wiederherstellung der ursprünglichen Konfiguration fehlgeschlagen: ${error.message}")
                     EngineDiagnostics.error("benchmark", "BACKEND_BENCHMARK_RESTORE_FAILED", error)
                 }
 
                 _benchmarkReport.value = buildString {
+                    appendLine("CPU- / Vulkan-Kurzbenchmark")
                     appendLine("Frage: wer ist Ricardo Villalobos")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB)")
                     appendLine(
-                        "Fixe Parameter: Kontext ${benchmarkConfig.contextSize}, Batch ${benchmarkConfig.batchSize}, " +
-                            "${benchmarkConfig.threads} Threads, GPU-Layer ${benchmarkConfig.gpuLayers}, " +
-                            "Temp ${benchmarkConfig.temperature}, Top-P ${benchmarkConfig.topP}, " +
-                            "max. ${benchmarkConfig.maxPredictTokens} Tokens"
+                        "Test: 4 Warm-up-Tokens + 24 Mess-Tokens; Temperatur 0; Top-P 1; " +
+                            "Kontext ${benchmarkConfig.contextSize}; Batch ${benchmarkConfig.batchSize}; " +
+                            "${benchmarkConfig.threads} Threads; GPU-Layer ${benchmarkConfig.gpuLayers}."
                     )
                     lines.forEach { appendLine(it) }
-                    append("RAM-Messwerte stehen im Diagnose-Export unter RESOURCE_SNAPSHOT.")
+                    append("Fortschritt und native Zeitmesswerte stehen zusätzlich im Diagnoseexport.")
                 }
                 _isBenchmarking.value = false
             }
         }
+    }
+
+    private data class BackendBenchmarkSample(
+        val result: InferenceResult,
+        val firstTokenMs: Long?,
+        val promptEvaluationMs: Long?,
+        val promptTokens: Int,
+        val wallMs: Long
+    )
+
+    private suspend fun collectBackendBenchmarkSample(
+        backend: BackendPreference,
+        phaseLabel: String,
+        maxTokens: Int,
+        systemPromptSnapshot: String,
+        benchmarkPrompt: String
+    ): BackendBenchmarkSample {
+        val messages = buildList {
+            if (systemPromptSnapshot.isNotBlank()) add(ChatMessage.system(systemPromptSnapshot))
+            add(ChatMessage.user(benchmarkPrompt))
+        }
+        val request = InferenceRequest(
+            messages = messages,
+            maxPredictTokens = maxTokens,
+            temperature = 0f,
+            topP = 1f
+        )
+
+        var firstTokenMs: Long? = null
+        var promptEvaluationMs: Long? = null
+        var promptTokens = 0
+        var completed: InferenceResult? = null
+        val started = System.nanoTime()
+
+        engine.streamChat(request).collect { event ->
+            when (event) {
+                is InferenceEvent.Progress -> {
+                    when (event.phase) {
+                        InferenceEvent.ProgressPhase.PROMPT_EVALUATION -> {
+                            promptEvaluationMs = event.elapsedMs
+                            promptTokens = event.promptTokensTotal
+                            _benchmarkReport.value =
+                                "${backend.name} ${phaseLabel}: Prompt ${event.promptTokensProcessed}/${event.promptTokensTotal} Tokens…"
+                        }
+                        InferenceEvent.ProgressPhase.GENERATING -> {
+                            _benchmarkReport.value =
+                                "${backend.name} ${phaseLabel}: ${event.tokensGenerated}/$maxTokens Tokens, " +
+                                String.format(java.util.Locale.US, "%.2f tok/s…", event.tokensPerSecond)
+                        }
+                        else -> Unit
+                    }
+                }
+                is InferenceEvent.Token -> {
+                    if (firstTokenMs == null) {
+                        firstTokenMs = (System.nanoTime() - started) / 1_000_000L
+                        _benchmarkReport.value = "${backend.name} ${phaseLabel}: erste Antwort erhalten…"
+                    }
+                }
+                is InferenceEvent.Completed -> completed = event.result
+                is InferenceEvent.Error -> throw event.throwable
+                is InferenceEvent.Cancelled -> throw CancellationException(
+                    "${backend.name} ${phaseLabel} wurde abgebrochen."
+                )
+                is InferenceEvent.Started -> {
+                    _benchmarkReport.value = "${backend.name} ${phaseLabel}: Inferenz gestartet…"
+                }
+            }
+        }
+
+        val result = completed ?: throw IllegalStateException("Keine abgeschlossene Antwort für ${backend.name} erhalten.")
+        return BackendBenchmarkSample(
+            result = result,
+            firstTokenMs = firstTokenMs,
+            promptEvaluationMs = promptEvaluationMs,
+            promptTokens = promptTokens,
+            wallMs = (System.nanoTime() - started) / 1_000_000L
+        )
     }
 
     /**
