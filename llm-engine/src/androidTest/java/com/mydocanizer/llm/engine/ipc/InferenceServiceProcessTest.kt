@@ -416,7 +416,13 @@ class InferenceServiceProcessTest {
                 }
                 delay(PROCESS_POLL_INTERVAL_MS)
             }
-            assertTrue("Client must reconnect to a new inference process", recoveredPid > 0)
+            assertTrue(
+                "Client must reconnect to a new inference process; state=${client.state.value}, " +
+                    "remotePid=${client.remotePid.value}, currentModel=${client.currentModel.value?.path}, " +
+                    "recentEvents=${EngineDiagnostics.getLogs().takeLast(60).joinToString(" | ")}, " +
+                    "appLogTail=${runCatching { appDiagnosticsFile.readLines(Charsets.UTF_8).takeLast(60).joinToString(" | ") }.getOrDefault("unavailable")}",
+                recoveredPid > 0
+            )
             assertTrue("Replacement inference PID must exist", File("/proc/$recoveredPid").exists())
             assertEquals("Recovery must reload the exact original GGUF source",
                 modelFile.absolutePath, recoveredModelPath)

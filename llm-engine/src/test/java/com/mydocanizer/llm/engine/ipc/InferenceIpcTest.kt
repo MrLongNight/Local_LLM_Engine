@@ -286,6 +286,9 @@ class InferenceIpcTest {
         val cancelled = events.filterIsInstance<InferenceEvent.Cancelled>().single()
         assertEquals("Hallo", cancelled.partialText)
         assertEquals(1, cancelled.tokensGenerated)
+        withTimeout(1_000L) {
+            while (!fakeService.isKilled.get()) delay(5L)
+        }
         assertTrue("Non-cooperative cancellation must escalate to process kill", fakeService.isKilled.get())
         client.close()
     }
