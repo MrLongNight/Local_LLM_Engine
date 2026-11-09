@@ -60,13 +60,15 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Streams token generation as an asynchronous [Flow] of [InferenceEvent].
      *
-     * Explicit cancellation is cooperative first. The client requests native
-     * cancellation and waits for the configured abort grace period before escalating
-     * to a process kill. The inference timeout watchdog currently takes the direct
-     * hard-abort path; aligning that path with cooperative-first escalation remains
-     * open. After process death, the client reconnects and attempts to reload the last
-     * successfully loaded source/configuration. End-to-end GGUF recovery and
-     * real-device verification are still pending.
+     * Explicit cancellation and phase timeouts are cooperative-first: the client
+     * requests native cancellation, waits for the configured abort grace period, and
+     * then terminates the original :inference process if it has not unwound. A forced
+     * user cancellation completes the local stream as Cancelled; a deadline remains
+     * an InferenceTimeoutException. The pinned llama.cpp abort callback is enabled for
+     * CPU decode; Vulkan retains process-level termination as the backend-independent
+     * fallback. After process death, the client reconnects and attempts to reload the
+     * last successfully loaded source/configuration. End-to-end GGUF recovery and
+     * real-device verification remain separate acceptance requirements.
      *
      * @param request Multi-message chat request.
      * @return Flow emitting [InferenceEvent.Started], [InferenceEvent.Token], and completion/cancellation events.
@@ -84,10 +86,10 @@ interface LocalLlmEngine : AutoCloseable {
     /**
      * Requests native cooperative cancellation of the active generation first. If native
      * cancellation does not finish within the configured abort grace period, the client
-     * terminates the original `:inference` process and confirms PID death. The client
-     * then reconnects and attempts to reload the last successfully loaded source/config.
-     * The timeout watchdog currently bypasses this cooperative-first grace sequence;
-     * that implementation gap, model recovery, and real-device verification remain open.
+     * terminates the original `:inference` process, completes the active stream locally,
+     * and confirms PID death. The stream preserves the partial text already received by
+     * the client. The client then reconnects and attempts to reload the last successfully
+     * loaded source/config. Same-GGUF recovery and real-device verification remain open.
      */
     fun cancelInference()
 
