@@ -180,7 +180,11 @@ internal class InferenceClient(
     init {
         // The library client owns its app-process diagnostics lifecycle. Do not rely
         // on a demo Activity having initialized the process log before embedding IPC.
-        EngineDiagnostics.initialize(context.applicationContext)
+        if (mockService == null) {
+            // Only the real Android IPC client owns persistent app-process diagnostics.
+            // Mock-service unit tests intentionally use lightweight Context wrappers.
+            EngineDiagnostics.initialize(context.applicationContext)
+        }
         if (mockService != null) {
             remoteService = mockService
             serviceConnectionDeferred.complete(mockService)
