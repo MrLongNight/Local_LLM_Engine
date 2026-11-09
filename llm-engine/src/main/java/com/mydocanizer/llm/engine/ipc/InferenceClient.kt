@@ -330,11 +330,6 @@ internal class InferenceClient(
             val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
             try {
                 _state.value = EngineState.Reconnecting
-                EngineDiagnostics.info(
-                    "ipc_client",
-                    "SERVICE_RECONNECT_STARTED",
-                    "Starting recovery; previous remote PID=${_remotePid.value}, bound=$isBound"
-                )
 
                 if (isBound) {
                     try {
@@ -351,11 +346,6 @@ internal class InferenceClient(
                 _modelLoadProgress.value = null
                 serviceConnectionDeferred = CompletableDeferred()
                 bindToService()
-                EngineDiagnostics.info(
-                    "ipc_client",
-                    "SERVICE_RECONNECT_BIND_REQUESTED",
-                    "bindAccepted=$isBound"
-                )
 
                 val service = withTimeout(effective.reconnectMs) {
                     getService()
@@ -384,7 +374,6 @@ internal class InferenceClient(
                 _state.value = EngineState.Error("Service reconnection timed out ($elapsedMs ms)")
             } catch (e: Exception) {
                 Log.e(TAG, "Reconnection failed", e)
-                EngineDiagnostics.error("ipc_client", "SERVICE_RECONNECT_FAILED", e)
                 _state.value = EngineState.Error("Failed to reconnect: ${e.message}")
             } finally {
                 reconnectInProgress.set(false)
@@ -1176,16 +1165,14 @@ internal class InferenceClient(
                     "COOPERATIVE_CANCEL_ESCALATED",
                     "request=$requestId did not finish within ${graceMs}ms; aborting original PID=$targetPid"
                 )
-                // Send the hard-abort request before closing the local stream. Otherwise
-                // collectors can resume and observe completion before the kill is issued.
+                activeStreamControl.get()
+                    ?.takeIf { it.requestId == requestId }
+                    ?.cancelAfterAbort?.invoke()
                 abortRemoteProcess(
                     requestId = requestId,
                     reason = "cooperative_cancel_timeout",
                     targetPidOverride = targetPid
                 )
-                activeStreamControl.get()
-                    ?.takeIf { it.requestId == requestId }
-                    ?.cancelAfterAbort?.invoke()
             }
         }
     }
@@ -1208,14 +1195,6 @@ internal class InferenceClient(
             (targetPid == null || servicePid == targetPid)
         val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
 
-        // Persist the abort intent before asking the remote process to terminate. The
-        // remote process can exit immediately after the one-way Binder transaction.
-        EngineDiagnostics.info(
-            "ipc_client",
-            "PROCESS_ABORT_REQUESTED",
-            "reason=$reason, request=$requestId, remotePid=$targetPid"
-        )
-
         if (serviceMatchesTarget && targetPid != null) {
             // Never send a kill request to a replacement process for an older operation.
             // One-way Binder call: it must not wait for native cleanup in the service process.
@@ -1235,6 +1214,12 @@ internal class InferenceClient(
                 "reason=$reason, targetPid=$targetPid, currentServicePid=$servicePid"
             )
         }
+
+        EngineDiagnostics.info(
+            "ipc_client",
+            "PROCESS_ABORT_REQUESTED",
+            "reason=$reason, request=$requestId, remotePid=$targetPid"
+        )
 
         if (targetPid != null && targetPid != Process.myPid()) {
             clientScope.launch {
@@ -1264,16 +1249,9 @@ internal class InferenceClient(
 
                 if (!isAlive) {
                     EngineDiagnostics.info("ipc_client", "PROCESS_ABORT_CONFIRMED", "Inference PID=$targetPid is no longer alive")
-                    if (mockService == null && !isClosed.get()) {
-                        // onServiceDisconnected clears remotePid before its reconnect
-                        // callback is guaranteed to finish. Retry the recovery trigger while
-                        // no replacement PID has been published; the atomic guard prevents
-                        // duplicate binds when a reconnect is already running.
-                        val currentPid = _remotePid.value
-                        if (currentPid == null || currentPid == targetPid) {
-                            _state.value = EngineState.Reconnecting
-                            triggerReconnect()
-                        }
+                    if (mockService == null && !isClosed.get() && _remotePid.value == targetPid) {
+                        _state.value = EngineState.Reconnecting
+                        triggerReconnect()
                     }
                 } else {
                     val error = IllegalStateException(

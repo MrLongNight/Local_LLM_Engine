@@ -92,7 +92,10 @@ class EngineViewModel(
             topP = 0.9f,
             maxPredictTokens = 512,
             backendPreference = BackendPreference.VULKAN,
-            gpuLayers = 16
+            // Qwen3-4B has 36 transformer layers plus the output layer.
+            // 37 requests full offload for that class of model; llama.cpp caps
+            // the value to the actual layer count for smaller models.
+            gpuLayers = 37
         )
     )
     val engineConfig: StateFlow<EngineConfig> = _engineConfig.asStateFlow()
@@ -141,7 +144,17 @@ class EngineViewModel(
 
     fun updateConfig(config: EngineConfig) {
         if (_isBenchmarking.value) return
+        val previous = _engineConfig.value
         _engineConfig.value = config
+        if (previous.backendPreference != config.backendPreference ||
+            previous.gpuLayers != config.gpuLayers
+        ) {
+            EngineDiagnostics.info(
+                "ui",
+                "EXECUTION_CONFIG_UPDATED",
+                "backendPreference=${config.backendPreference}, gpuLayers=${config.gpuLayers}"
+            )
+        }
     }
 
     fun dismissStatus() {
@@ -193,10 +206,20 @@ class EngineViewModel(
         _isImporting.value = true
         _errorMessage.value = null
         _statusMessage.value = operationLabel
+        // Capture the exact settings at the user's load action. A later slider/chip
+        // change must not silently alter a queued model-load operation.
+        val loadConfig = _engineConfig.value
+        EngineDiagnostics.info(
+            "ui",
+            "MODEL_LOAD_CONFIGURATION",
+            "operation=$operationLabel, backendPreference=${loadConfig.backendPreference}, " +
+                "gpuLayers=${loadConfig.gpuLayers}, context=${loadConfig.contextSize}, " +
+                "batch=${loadConfig.batchSize}, threads=${loadConfig.threads}"
+        )
 
         viewModelScope.launch {
             try {
-                val result = engine.loadModel(source, _engineConfig.value)
+                val result = engine.loadModel(source, loadConfig)
                 result.onSuccess { info ->
                     refreshModelFiles()
                     val hashLabel = info.sha256?.take(12)?.let { " (SHA-256: $it…)" }.orEmpty()

@@ -120,7 +120,7 @@ fun SettingsScreen(
                     if (config.backendPreference != BackendPreference.CPU) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "GPU-Layer-Offload: ${config.gpuLayers} Layer (nur bei eingebautem GPU-Backend)",
+                            text = "GPU-Layer-Offload: ${config.gpuLayers} Layer (99 = maximal; bei Qwen3-4B genügen 37 für 36 Layer plus Output)",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
