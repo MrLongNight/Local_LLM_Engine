@@ -38,6 +38,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.UUID
 
 internal class LocalLlmEngineImpl(
     private val context: Context
@@ -327,6 +328,7 @@ internal class LocalLlmEngineImpl(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = callbackFlow {
+        val inferenceRunId = UUID.randomUUID().toString()
         val handle = getValidHandle()
 
         // In Debug builds only, instrumentation can arm a non-cooperative block at the
@@ -340,6 +342,7 @@ internal class LocalLlmEngineImpl(
             )
             NativeEngineHandle.nativeProcessChat(
                 handle = handle,
+                inferenceRunId = "debug-$inferenceRunId",
                 roles = emptyArray(),
                 contents = emptyArray(),
                 maxPredict = request.maxPredictTokens,
@@ -378,7 +381,8 @@ internal class LocalLlmEngineImpl(
         EngineDiagnostics.info(
             "inference",
             "PROMPT_EVALUATION_STARTED",
-            "messages=${request.messages.size}, maxPredictTokens=${request.maxPredictTokens}, backend=${modelInfo.activeBackend}"
+            "runId=$inferenceRunId,pid=${android.os.Process.myPid()},messages=${request.messages.size}, " +
+                "maxPredictTokens=${request.maxPredictTokens},backend=${modelInfo.activeBackend}"
         )
 
         val progressCallback = NativeInferenceProgressCallback { processed, total ->
@@ -415,6 +419,7 @@ internal class LocalLlmEngineImpl(
 
         val processRes = NativeEngineHandle.nativeProcessChat(
             handle = handle,
+            inferenceRunId = inferenceRunId,
             roles = roles,
             contents = contents,
             maxPredict = request.maxPredictTokens,
@@ -429,7 +434,8 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.info(
                 "inference",
                 "PREFILL_CANCELLED",
-                "tokensGenerated=$cancelledTokens, nativeResult=$processRes"
+                "runId=$inferenceRunId,pid=${android.os.Process.myPid()}, " +
+                    "tokensGenerated=$cancelledTokens,nativeResult=$processRes"
             )
             trySend(InferenceEvent.Cancelled("", cancelledTokens))
             _state.value = EngineState.ModelLoaded(modelInfo)
@@ -460,18 +466,22 @@ internal class LocalLlmEngineImpl(
         EngineDiagnostics.info(
             "inference",
             "PROMPT_STAGE_METRICS",
-            promptMetrics
+            "runId=$inferenceRunId,pid=${android.os.Process.myPid()}, " +
+                "backend=${modelInfo.activeBackend},$promptMetrics"
         )
         EngineDiagnostics.info(
             "inference",
             "PREFILL_COMPLETED",
-            "messages=${request.messages.size}, prefillMs=$prefillDurationMs, backend=${modelInfo.activeBackend}"
+            "runId=$inferenceRunId,pid=${android.os.Process.myPid()},messages=${request.messages.size}, " +
+                "prefillMs=$prefillDurationMs,backend=${modelInfo.activeBackend}"
         )
+        val prefillCompletedNano = System.nanoTime()
         trySend(InferenceEvent.Started(request.messages.size))
 
         val outputBuilder = StringBuilder()
         var tokenCount = 0
         var nativeTokenSteps = 0
+        var firstVisibleTokenRecorded = false
 
         try {
             while (!isCancelled.get()) {
@@ -486,11 +496,23 @@ internal class LocalLlmEngineImpl(
                     EngineDiagnostics.info(
                         "inference",
                         "TOKEN_STEP_METRIC",
-                        "nativeStep=$nativeTokenSteps, jniWallUs=$tokenStepDurationUs, " +
-                            "visiblePieces=$tokenCount, backend=${modelInfo.activeBackend}"
+                        "runId=$inferenceRunId,pid=${android.os.Process.myPid()}, " +
+                            "nativeStep=$nativeTokenSteps,jniWallUs=$tokenStepDurationUs, " +
+                            "visiblePieces=$tokenCount,backend=${modelInfo.activeBackend}"
                     )
                 }
                 if (tokenPiece.isNotEmpty()) {
+                    if (!firstVisibleTokenRecorded) {
+                        firstVisibleTokenRecorded = true
+                        val latencyAfterPrefillMs =
+                            (System.nanoTime() - prefillCompletedNano) / 1_000_000L
+                        EngineDiagnostics.info(
+                            "inference",
+                            "FIRST_TOKEN_RECEIVED",
+                            "runId=$inferenceRunId,pid=${android.os.Process.myPid()}, " +
+                                "latencyAfterPrefillMs=$latencyAfterPrefillMs,backend=${modelInfo.activeBackend}"
+                        )
+                    }
                     outputBuilder.append(tokenPiece)
                     trySend(InferenceEvent.Token(tokenPiece, tokenCount))
                     tokenCount++
@@ -517,7 +539,9 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.info(
                 "inference",
                 "GENERATION_COMPLETED",
-                "tokens=$actualTokens, generationMs=$durationMs, tokensPerSecond=$tokensPerSec, finishReason=$finishReason, backend=${modelInfo.activeBackend}"
+                "runId=$inferenceRunId,pid=${android.os.Process.myPid()},tokens=$actualTokens, " +
+                    "generationMs=$durationMs,tokensPerSecond=$tokensPerSec,finishReason=$finishReason, " +
+                    "backend=${modelInfo.activeBackend}"
             )
 
             when (finishReason) {

@@ -104,6 +104,7 @@ internal object NativeEngineHandle {
     @JvmStatic
     external fun nativeProcessChat(
         handle: Long,
+        inferenceRunId: String,
         roles: Array<String>,
         contents: Array<String>,
         maxPredict: Int,

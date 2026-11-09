@@ -130,6 +130,8 @@ struct EngineInstance {
     float default_temperature = DEFAULT_TEMP;
     float default_top_p = 0.9f;
     std::string active_backend = "CPU";
+    // Correlates native prompt and decode timings with the Kotlin request diagnostics.
+    std::string inference_run_id;
     std::atomic<bool> cancel_requested{false};
 #if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
     // Debug-only fault injection used to prove PID-level abort while JNI is blocked.
@@ -225,6 +227,7 @@ struct EngineInstance {
             model_file_stream = nullptr;
         }
         active_backend = "None";
+        inference_run_id.clear();
     }
 
     void unload() {
@@ -968,6 +971,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptM
        << ";threads=" << engine->last_prompt_threads
        << ";batchThreads=" << engine->n_threads_batch
        << ";microBatchSize=" << engine->micro_batch_size
+       << ";pid=" << getpid()
+       << ";runId=" << engine->inference_run_id
        << ";backend=" << engine->active_backend;
     return env->NewStringUTF(ss.str().c_str());
 }
@@ -1006,6 +1011,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         JNIEnv* env,
         jclass /*clazz*/,
         jlong handle,
+        jstring j_inference_run_id,
         jobjectArray jroles,
         jobjectArray jcontents,
         jint max_predict,
@@ -1027,7 +1033,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
 #endif
     if (!engine || !engine->model || !engine->context) return 1;
 
+    std::string inference_run_id = "unknown";
+    if (j_inference_run_id != nullptr) {
+        const char* raw_run_id = env->GetStringUTFChars(j_inference_run_id, nullptr);
+        if (raw_run_id != nullptr) {
+            inference_run_id.assign(raw_run_id);
+            env->ReleaseStringUTFChars(j_inference_run_id, raw_run_id);
+        }
+    }
+
     std::lock_guard<std::mutex> lock(engine->mtx);
+    engine->inference_run_id = inference_run_id;
     // The request's cancellation flag is cleared by nativeResetCancellation()
     // before entering JNI. Never clear it here: a Binder cancel racing with
     // nativeProcessChat must not be lost.
@@ -1363,6 +1379,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
                << ", gpuSyncWaitUs=" << gpu_sync_wait_us
                << ", pieceUs=" << piece_duration_us
                << ", totalUs=" << token_total_duration_us
+               << ", pid=" << getpid()
+               << ", runId=" << engine->inference_run_id
                << ", backend=" << engine->active_backend;
         log_native_info_message(metric.str());
     }

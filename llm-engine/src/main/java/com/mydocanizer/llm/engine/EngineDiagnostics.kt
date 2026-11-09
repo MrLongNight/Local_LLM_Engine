@@ -103,21 +103,55 @@ object EngineDiagnostics {
     }
 
     private data class NativeTokenStepMetric(
+        val pid: String,
+        val runId: String,
+        val backend: String,
         val index: Int,
         val sampleUs: Long,
         val decodeUs: Long,
+        val decodeSubmitUs: Long,
+        val gpuSyncWaitUs: Long,
         val pieceUs: Long,
         val totalUs: Long
     )
 
+    private data class KotlinTokenStepMetric(
+        val pid: String,
+        val runId: String,
+        val backend: String,
+        val index: Int,
+        val jniWallUs: Long
+    )
+
+    /**
+     * Only metrics with an explicit runId are eligible for percentile aggregation.
+     * Older files did not carry a request identity and may contain several backends
+     * or inference runs; mixing those samples would produce misleading percentiles.
+     */
     private fun nativeTokenStepMetric(line: String): NativeTokenStepMetric? {
         if (!line.contains("TOKEN_STEP_METRIC")) return null
         return NativeTokenStepMetric(
+            pid = field(line, "pid") ?: return null,
+            runId = field(line, "runId") ?: return null,
+            backend = field(line, "backend") ?: return null,
             index = field(line, "index")?.toIntOrNull() ?: return null,
             sampleUs = field(line, "sampleUs")?.toLongOrNull() ?: return null,
             decodeUs = field(line, "decodeUs")?.toLongOrNull() ?: return null,
+            decodeSubmitUs = field(line, "decodeSubmitUs")?.toLongOrNull() ?: return null,
+            gpuSyncWaitUs = field(line, "gpuSyncWaitUs")?.toLongOrNull() ?: return null,
             pieceUs = field(line, "pieceUs")?.toLongOrNull() ?: return null,
             totalUs = field(line, "totalUs")?.toLongOrNull() ?: return null
+        )
+    }
+
+    private fun kotlinTokenStepMetric(line: String): KotlinTokenStepMetric? {
+        if (!line.contains("TOKEN_STEP_METRIC") || line.contains("[NATIVE]")) return null
+        return KotlinTokenStepMetric(
+            pid = field(line, "pid") ?: return null,
+            runId = field(line, "runId") ?: return null,
+            backend = field(line, "backend") ?: return null,
+            index = field(line, "nativeStep")?.toIntOrNull() ?: return null,
+            jniWallUs = field(line, "jniWallUs")?.toLongOrNull() ?: return null
         )
     }
 
@@ -187,6 +221,7 @@ object EngineDiagnostics {
             "NATIVE_BACKEND_PREFLIGHT",
             "MODEL_NATIVE_RUNTIME_READY",
             "PROMPT_STAGE_METRICS",
+            "PREFILL_COMPLETED",
             "FIRST_TOKEN_RECEIVED",
             "TOKEN_STEP_METRIC",
             "GENERATION_COMPLETED"
@@ -285,24 +320,55 @@ object EngineDiagnostics {
             val upper = line.uppercase(Locale.US)
             nativeKeywords.any(upper::contains)
         }
-        val nativeTokenMetrics = nativeLines.mapNotNull(::nativeTokenStepMetric)
+        val nativeTokenMetricLines = nativeLines.filter { it.contains("TOKEN_STEP_METRIC") }
+        val nativeTokenMetrics = nativeTokenMetricLines.mapNotNull(::nativeTokenStepMetric)
+        val legacyNativeMetricCount = nativeTokenMetricLines.size - nativeTokenMetrics.size
+        val kotlinTokenMetrics = kotlinLines.mapNotNull(::kotlinTokenStepMetric)
         val nativeSelected = (
             relevantNative.take(10) + relevantNative.takeLast(4)
         ).distinct().map { compactLine(it, 360) }
-        val tokenMetricLines = nativeTokenMetrics.take(4) + nativeTokenMetrics.takeLast(6)
         val tokenMetricSummary = buildString {
             if (nativeTokenMetrics.isEmpty()) {
-                appendLine("Keine nativen Token-Schritt-Messwerte gefunden.")
+                appendLine("Keine eindeutig einem Inferenzlauf zuordenbaren nativen Token-Messwerte gefunden.")
             } else {
-                appendLine("Stichproben=${nativeTokenMetrics.size}; Messintervalle:")
-                appendLine(timingSummary("sample", nativeTokenMetrics.map { it.sampleUs }))
-                appendLine(timingSummary("decode", nativeTokenMetrics.map { it.decodeUs }))
-                appendLine(timingSummary("tokenPiece", nativeTokenMetrics.map { it.pieceUs }))
-                appendLine(timingSummary("nativeStep", nativeTokenMetrics.map { it.totalUs }))
-                appendLine("Repräsentative Token-Schritte (index/sampleUs/decodeUs/pieceUs/totalUs):")
-                tokenMetricLines.distinctBy { it.index }.forEach { metric ->
-                    appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.pieceUs}/${metric.totalUs}")
-                }
+                appendLine("Native Decode-Zeiten – strikt nach PID, Backend und runId getrennt:")
+                nativeTokenMetrics
+                    .groupBy { "${it.pid}/${it.backend}/${it.runId}" }
+                    .toSortedMap()
+                    .forEach { (_, metrics) ->
+                        val first = metrics.first()
+                        appendLine("pid=${first.pid} backend=${first.backend} runId=${first.runId} samples=${metrics.size}")
+                        appendLine(timingSummary("sample", metrics.map { it.sampleUs }))
+                        appendLine(timingSummary("decode", metrics.map { it.decodeUs }))
+                        appendLine(timingSummary("decodeSubmit", metrics.map { it.decodeSubmitUs }))
+                        appendLine(timingSummary("gpuSyncWait", metrics.map { it.gpuSyncWaitUs }))
+                        appendLine(timingSummary("tokenPiece", metrics.map { it.pieceUs }))
+                        appendLine(timingSummary("nativeStep", metrics.map { it.totalUs }))
+                        appendLine("Token-Schritte (index/sampleUs/decodeUs/submitUs/gpuSyncWaitUs/pieceUs/totalUs):")
+                        metrics.sortedBy { it.index }.forEach { metric ->
+                            appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.decodeSubmitUs}/${metric.gpuSyncWaitUs}/${metric.pieceUs}/${metric.totalUs}")
+                        }
+                    }
+            }
+            if (legacyNativeMetricCount > 0) {
+                appendLine("Legacy native samples without pid/runId/backend correlation (excluded from percentiles): $legacyNativeMetricCount")
+            }
+            appendLine()
+            appendLine("Kotlin/JNI-Wall-Zeiten – strikt nach PID, Backend und runId getrennt:")
+            if (kotlinTokenMetrics.isEmpty()) {
+                appendLine("Keine eindeutig zuordenbaren Kotlin/JNI-Token-Messwerte gefunden.")
+            } else {
+                kotlinTokenMetrics
+                    .groupBy { "${it.pid}/${it.backend}/${it.runId}" }
+                    .toSortedMap()
+                    .forEach { (_, metrics) ->
+                        val first = metrics.first()
+                        appendLine("pid=${first.pid} backend=${first.backend} runId=${first.runId} samples=${metrics.size}")
+                        appendLine(timingSummary("jniWall", metrics.map { it.jniWallUs }))
+                        metrics.sortedBy { it.index }.forEach { metric ->
+                            appendLine("nativeStep=${metric.index} jniWallUs=${metric.jniWallUs}")
+                        }
+                    }
             }
         }
 
@@ -394,6 +460,8 @@ object EngineDiagnostics {
                 "Der Bericht ist auf maximal 16 KiB begrenzt; häufige RAM-Samples wurden zusammengefasst.")
         }.let { limitUtf8(it, MAX_EXPORT_BYTES) }
     }
+
+    internal fun buildCompactReportForTest(lines: List<String>): String = buildCompactReport(lines)
 
     private fun limitUtf8(value: String, maxBytes: Int): String {
         val bytes = value.toByteArray(Charsets.UTF_8)
