@@ -513,29 +513,6 @@ internal class InferenceClient(
             _modelLoadProgress.value = 0
             _modelLoadProgressEvents.tryEmit(0)
 
-            val control = ActiveStreamControl(
-            requestId = requestId,
-            cancelAfterAbort = {
-                if (pendingTimeout.get() != null) {
-                    reportTimeout()
-                } else {
-                    _state.value = EngineState.Reconnecting
-                    val partial = synchronized(streamBuilder) { streamBuilder.toString() }
-                    finishStream(InferenceEvent.Cancelled(partial, tokenCount.get()))
-                }
-            },
-            failAfterDisconnect = { error ->
-                if (pendingTimeout.get() != null) {
-                    reportTimeout()
-                } else {
-                    val partial = synchronized(streamBuilder) { streamBuilder.toString() }
-                    finishStream(InferenceEvent.Error(error, partial))
-                }
-            }
-        )
-        streamControl = control
-        activeStreamControl.set(control)
-
         val callback = object : IInferenceCallback.Stub() {
                 override fun onModelLoaded(modelInfo: ModelInfo?) {
                     if (!pendingModelLoad.compareAndSet(pending, null)) return
@@ -887,6 +864,29 @@ internal class InferenceClient(
                 }
             }
         }
+
+        val control = ActiveStreamControl(
+            requestId = requestId,
+            cancelAfterAbort = {
+                if (pendingTimeout.get() != null) {
+                    reportTimeout()
+                } else {
+                    _state.value = EngineState.Reconnecting
+                    val partial = synchronized(streamBuilder) { streamBuilder.toString() }
+                    finishStream(InferenceEvent.Cancelled(partial, tokenCount.get()))
+                }
+            },
+            failAfterDisconnect = { error ->
+                if (pendingTimeout.get() != null) {
+                    reportTimeout()
+                } else {
+                    val partial = synchronized(streamBuilder) { streamBuilder.toString() }
+                    finishStream(InferenceEvent.Error(error, partial))
+                }
+            }
+        )
+        streamControl = control
+        activeStreamControl.set(control)
 
         val callback = object : IInferenceCallback.Stub() {
             override fun onStarted(reqId: String?, promptMessageCount: Int) {
