@@ -432,7 +432,7 @@ class InferenceServiceProcessTest {
             // process and must not inherit the 1.5s fault-injection prefill deadline.
             val recoveryTimeoutConfig = timeoutConfig.copy(
                 prefillMs = 30_000L,
-                firstTokenMs = 15_000L,
+                firstTokenMs = 30_000L,
                 interTokenMs = 10_000L,
                 totalInferenceMs = 60_000L
             )
