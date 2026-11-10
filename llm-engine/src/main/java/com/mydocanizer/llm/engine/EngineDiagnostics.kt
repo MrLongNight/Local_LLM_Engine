@@ -124,6 +124,16 @@ object EngineDiagnostics {
         val jniWallUs: Long
     )
 
+    private data class VulkanOperationSample(
+        val pid: String,
+        val snapshot: String,
+        val operation: String,
+        val sampleCount: Int,
+        val averageUs: Double,
+        val totalUs: Double,
+        val gflops: Double?
+    )
+
     /**
      * Only metrics with an explicit runId are eligible for percentile aggregation.
      * Older files did not carry a request identity and may contain several backends
@@ -159,6 +169,32 @@ object EngineDiagnostics {
         )
     }
 
+    private fun vulkanOperationSample(line: String): VulkanOperationSample? {
+        if (!line.contains("LOCAL_LLM_VULKAN_OP_TIMING - ")) return null
+        return VulkanOperationSample(
+            pid = field(line, "pid") ?: return null,
+            snapshot = field(line, "snapshot") ?: return null,
+            operation = field(line, "op") ?: return null,
+            sampleCount = field(line, "samples")?.toIntOrNull()?.takeIf { it > 0 } ?: return null,
+            averageUs = field(line, "avgUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
+            totalUs = field(line, "totalUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
+            gflops = field(line, "gflops")?.toDoubleOrNull()?.takeIf { it >= 0.0 }
+        )
+    }
+
+    private fun doubleTimingSummary(name: String, values: List<Double>): String {
+        if (values.isEmpty()) return "$name=n/a"
+        val sorted = values.sorted()
+        fun at(fraction: Double): Double {
+            val rank = sorted.lastIndex * fraction.coerceIn(0.0, 1.0)
+            val index = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
+            return sorted[index]
+        }
+        return "$name p50=${String.format(Locale.US, "%.3f", at(0.50))}us " +
+            "p90=${String.format(Locale.US, "%.3f", at(0.90))}us " +
+            "max=${String.format(Locale.US, "%.3f", sorted.last())}us"
+    }
+
     private fun percentile(values: List<Long>, fraction: Double): Long? {
         if (values.isEmpty()) return null
         val sorted = values.sorted()
@@ -173,6 +209,14 @@ object EngineDiagnostics {
         return "${name} p50=${percentile(values, 0.50)}us p90=${percentile(values, 0.90)}us max=${values.maxOrNull()}us"
     }
 
+    private fun percentileDouble(values: List<Double>, fraction: Double): Double {
+        if (values.isEmpty()) return 0.0
+        val sorted = values.sorted()
+        val rank = sorted.lastIndex * fraction.coerceIn(0.0, 1.0)
+        val index = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
+        return sorted[index]
+    }
+
     private data class ResourceSample(
         val line: String,
         val timestamp: String,
@@ -185,10 +229,11 @@ object EngineDiagnostics {
         val availableRamMb: Double?
     )
 
-    private const val MAX_EXPORT_BYTES = 16 * 1024
+    private const val MAX_EXPORT_BYTES = 32 * 1024
     private const val MAX_EVENT_LINES = 24
     private const val MAX_NATIVE_LINES = 14
-    private const val MAX_MEMORY_TIMELINE_LINES = 8
+    private const val MAX_MEMORY_TIMELINE_LINES = 16
+    private const val MAX_VULKAN_PROFILE_SNAPSHOTS = 12
 
     private fun field(line: String, key: String): String? {
         val marker = "$key="
@@ -312,17 +357,20 @@ object EngineDiagnostics {
         val performanceEvents = kotlinLines
             .filterNot { it.contains("RESOURCE_SNAPSHOT") }
             .filter(::isPerformanceEvent)
-            .takeLast(16)
+            .takeLast(12)
             .map { compactLine(it, 520) }
 
         val nativeKeywords = listOf(
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
-            "TOKEN_STEP_METRIC", "MEMORY", "ALLOC", "PIPELINE", "SHADER", "FENCE", "QUEUE",
+            "TOKEN_STEP_METRIC", "MEMORY", "ALLOC", "PIPELINE", "SHADER", "FENCE", "QUEUE", "PERF_PROFILER",
             "FAILED", "ERROR", "WARN", "UNSUPPORTED", "FALLBACK",
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST"
         )
         val relevantNative = nativeLines
-            .filterNot { it.contains("TOKEN_STEP_METRIC") }
+            .filterNot {
+                it.contains("TOKEN_STEP_METRIC") ||
+                    it.contains("LOCAL_LLM_VULKAN_OP_TIMING")
+            }
             .filter { line ->
             val upper = line.uppercase(Locale.US)
             nativeKeywords.any(upper::contains)
@@ -358,10 +406,52 @@ object EngineDiagnostics {
                     line.contains("LOCAL_LLM_MEMORY_HEAP")
             }
             .takeLast(4)
+        val profilerConfigEvidence = nativeLines
+            .filter { it.contains("VULKAN_PERF_PROFILER_CONFIG") }
+            .takeLast(2)
         val nativePriorityEvidence = (
-            vulkanCapabilityEvidence + actualLayerOffloadEvidence +
+            profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
                 q4kPrefillEvidence + q4kDecodeEvidence + memoryBudgetEvidence
             ).distinct().map { compactLine(it, 360) }
+
+        // The upstream Vulkan profiler emits one timestamp-query row per operator.
+        // Keep only the newest snapshots, then report per-op p50/p90 instead of
+        // dumping hundreds of raw lines into the compact export.
+        val allVulkanOperationSamples = nativeLines.mapNotNull(::vulkanOperationSample)
+        val recentSnapshotKeys = allVulkanOperationSamples
+            .map { "${it.pid}/${it.snapshot}" }
+            .distinct()
+            .takeLast(MAX_VULKAN_PROFILE_SNAPSHOTS)
+            .toSet()
+        val recentVulkanOperationSamples = allVulkanOperationSamples.filter {
+            "${it.pid}/${it.snapshot}" in recentSnapshotKeys
+        }
+        val vulkanOperationSummary = buildString {
+            if (recentVulkanOperationSamples.isEmpty()) {
+                appendLine("Keine Vulkan-Per-Operation-Timestamps gefunden. Prüfe VULKAN_PERF_PROFILER_CONFIG und einen Vulkan-Inferenzlauf.")
+            } else {
+                val groupedOperations = recentVulkanOperationSamples
+                    .groupBy { it.pid to it.operation }
+                    .map { (key, metrics) ->
+                        Triple(key, metrics, metrics.sumOf { it.totalUs })
+                    }
+                    .sortedByDescending { it.third }
+                    .take(20)
+                groupedOperations.forEach { (key, metrics, summedUs) ->
+                    val uniqueSnapshots = metrics.map { it.snapshot }.distinct().size
+                    val totalSamples = metrics.sumOf { it.sampleCount }
+                    val gflops = metrics.mapNotNull { it.gflops }
+                    appendLine(
+                        "pid=${key.first} op=${key.second} snapshots=$uniqueSnapshots samples=$totalSamples " +
+                            doubleTimingSummary("gpuAvg", metrics.map { it.averageUs }) +
+                            " gpuSumUs=${String.format(Locale.US, "%.3f", summedUs)}" +
+                            (if (gflops.isNotEmpty()) {
+                                " gflops_p50=${String.format(Locale.US, "%.3f", percentileDouble(gflops, 0.50))}"
+                            } else "")
+                    )
+                }
+            }
+        }
 
         val nativeSelected = (
             relevantNative.take(10) + relevantNative.takeLast(4)
@@ -498,18 +588,8 @@ object EngineDiagnostics {
                 nativePriorityEvidence.forEach(::appendLine)
             }
             appendLine()
-            appendLine("[WICHTIGE EREIGNISSE]")
-            if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
-            events.forEach(::appendLine)
-            appendLine()
-            appendLine("[BACKEND- UND INFERENZ-MESSWERTE]")
-            if (performanceEvents.isEmpty()) {
-                appendLine("Keine abgeschlossenen Backend-/Inferenz-Messwerte gefunden.")
-            }
-            performanceEvents.forEach(::appendLine)
-            appendLine()
-            appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
-            tokenMetricSummary.lineSequence().forEach { appendLine(it) }
+            appendLine("[VULKAN-GPU-OPERATIONSPROFIL – LETZTE ${MAX_VULKAN_PROFILE_SNAPSHOTS} GRAPH-SNAPSHOTS]")
+            vulkanOperationSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
             appendLine("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
             if (memorySummaries.isEmpty()) appendLine("Keine RAM-Samples gefunden.")
@@ -518,12 +598,25 @@ object EngineDiagnostics {
             appendLine("[RAM-ZEITVERLAUF – AUSGEDÜNNT, SPITZEN UND BACKEND-SAMPLES]")
             memoryTimeline.forEach(::appendLine)
             appendLine()
+            appendLine("[BACKEND- UND INFERENZ-MESSWERTE]")
+            if (performanceEvents.isEmpty()) {
+                appendLine("Keine abgeschlossenen Backend-/Inferenz-Messwerte gefunden.")
+            }
+            performanceEvents.forEach(::appendLine)
+            appendLine()
+            appendLine("[WICHTIGE EREIGNISSE]")
+            if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
+            events.forEach(::appendLine)
+            appendLine()
+            appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
+            tokenMetricSummary.lineSequence().forEach { appendLine(it) }
+            appendLine()
             appendLine("[NATIVE / VULKAN – GEFILTERTE MELDUNGEN]")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
             nativeSelected.forEach(::appendLine)
             appendLine()
             appendLine("Hinweis: Chat-Prompts und Modellantworten werden nicht exportiert. " +
-                "Der Bericht ist auf maximal 16 KiB begrenzt; häufige RAM-Samples wurden zusammengefasst.")
+                "Der Bericht ist auf maximal 32 KiB begrenzt; GPU-Operatorzeiten werden aggregiert und RAM-Samples zusammengefasst.")
         }.let { limitUtf8(it, MAX_EXPORT_BYTES) }
     }
 
