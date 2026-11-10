@@ -213,3 +213,12 @@ Ausgangscommit vor diesem Plan: `ed6506302565f02c4896095c8d6f00a778f9f689`.
 - **Messgrenze:** Ein Prozess-Kill beendet den `:inference`-Prozess einschließlich seines Resource-Monitors. Vulkan-/Graphics-Ressourcenfreigabe muss deshalb vom fortbestehenden App-Prozess oder einem externen Test-Harness nach dem Kill gemessen werden.
 
 **Status:** Work in progress. Manifest und AIDL sind im Quellstand vorhanden; Timeout-Korrektur ist implementiert, CI- und Geräteabnahme sind noch nicht abgeschlossen.
+
+
+## Debug-Vulkan-Profiler – Implementierung am 10.11.2026, Verifikation ausstehend
+
+- Debug-Builds übergeben `BuildConfig.DEBUG` an den JNI-Backendstart. Vor `llama_backend_init()` wird dadurch `GGML_VK_PERF_LOGGER=1` mit Frequenz 1 gesetzt; der nicht-konkurrierende Per-Operator-Modus bleibt aktiv. Release-Builds entfernen die Variablen ausdrücklich.
+- Der Android-CMake-Overlay ersetzt gezielt `vk_perf_logger::print_timings()` im generierten Vulkan-Quelltext. Die Upstream-Ausgabe über `std::cerr` wird zu strukturierten `GGML_LOG_INFO`-Zeilen umgeleitet, damit sie in der vorhandenen nativen Prozess-Logdatei erhalten bleibt. Jede Zeile enthält PID, Graph-Snapshot-ID, Operator, Sample-Anzahl sowie durchschnittliche und kumulierte GPU-Zeit; GFLOPS nur, wenn Upstream passende FLOP-Zähler bereitstellt.
+- Der kompakte Export fasst die letzten zwölf Graph-Snapshots pro Operator zusammen und meldet p50/p90 der GPU-Operatorzeit. Die RAM-Zusammenfassung und RAM-Zeitlinie stehen vor umfangreichen Token-Stichproben. Native Prozesslogs behalten bis zu 2 MiB, der kompakte Export bis zu 32 KiB.
+- **Messgrenze:** Vulkan-Timestamp-Queries und deren Auslesen verursachen zusätzliche Laufzeit-/Synchronisationskosten. Tokens/s eines profileraktivierten Debug-Laufs sind daher kein sauberer Performancevergleich. Die Operationstimestamps dienen der Lokalisierung teurer GPU-Operationen; jede Optimierung muss anschließend in einem profilerfreien Lauf erneut gemessen werden.
+- **Noch nicht abgenommen:** CI muss den erzeugten Vulkan-Overlay-Quelltext und die Debug-/Release-JNI-Konfiguration kompilieren. Auf dem Mali-G57 muss ein Debug-Lauf echte `LOCAL_LLM_VULKAN_OP_TIMING`-Zeilen zeigen. Erst danach sind Q4_K-Prefill-/Decode-Operationen getrennt zu vergleichen. Ein Build allein beweist weder funktionierende Hardware-Timestamp-Queries noch einen Performancegewinn.
