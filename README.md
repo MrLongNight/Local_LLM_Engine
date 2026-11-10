@@ -104,17 +104,23 @@ UID, not Android's separately sandboxed isolated-UID service mode.
 
 The Android instrumentation suite inspects the resolved `ServiceInfo` before
 binding and verifies the dedicated service PID, Binder disconnect, process death,
-idle-service rebind and automatic client reconnect. It now also contains a
-Debug-only native test hook: `nativeProcessChat` is deliberately blocked inside
-JNI, the real client's prefill watchdog expires, and the test checks that the app
-PID survives, the original `:inference` PID disappears, Binder disconnects and
-the client binds a replacement service. The hook is enabled only for Debug
-(`LOCAL_LLM_ENABLE_TEST_HOOKS=ON`) and disabled for Release.
+idle-service rebind and automatic client reconnect. It also contains a Debug-only
+native test hook: `nativeProcessChat` is deliberately blocked inside JNI and the
+real client's prefill watchdog expires. The dedicated recovery test loads a real,
+small Q4_K_M GGUF fixture first, then verifies that the app PID survives, the
+original `:inference` PID disappears, Binder disconnects, and the surviving app
+process persists `PROCESS_ABORT_CONFIRMED` for that original PID. The client then
+reconnects, reloads the same original `FilePath` source into the replacement
+process and completes a real follow-up inference that generates tokens. The hook
+is enabled only for Debug (`LOCAL_LLM_ENABLE_TEST_HOOKS=ON`) and disabled for
+Release.
 
-This blocked-JNI test does not load a GGUF model. It therefore does not verify
-same-source model reload, a successful follow-up inference, the persisted
-`PROCESS_ABORT_CONFIRMED` diagnostic event, or Vulkan-driver resource release.
-Emulator results do not replace a real-device test on the target phone.
+This emulator recovery test uses a small fixture copied from androidTest assets
+into app-private cache and CPU inference (`gpuLayers=0`). It does not prove the
+Binder handoff of a real SAF-provider descriptor, reload of the user's 2.5-GB
+Mali/Vulkan model, Vulkan-driver resource release, or repeated five-cycle
+resource stability. Emulator results do not replace a real-device test on the
+target phone.
 
 ### Cancellation and hard-abort sequence
 
@@ -146,8 +152,9 @@ The client polls the original PID and can issue a same-UID client-side PID kill
 if the service did not exit in time. Binder disconnect or confirmed PID death
 starts reconnection. The app-side client retains the last successfully loaded
 source/configuration and attempts to reload them in the replacement service.
-That reload-and-follow-up-inference path is implemented but has not yet been
-proven end-to-end with a real GGUF model.
+The emulator recovery test now proves this sequence with its pinned tiny GGUF
+fixture and a successful token-producing follow-up inference. It is not yet a
+proof for a real SAF URI or the large Qwen GGUF on the Mali-G57 device.
 
 This is the implemented process-isolation path, not a real-device acceptance
 result. Process termination alone does not prove that a vendor Vulkan driver
@@ -203,7 +210,7 @@ gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
 - A SAF-selected local GGUF is opened as a `ParcelFileDescriptor` and passed to `:inference`; the service-side loader opens the retained descriptor through `/proc/self/fd/<n>`. Before native loading, the resolver checks that it is a regular file, tests seeking and positional GGUF-header reads, and probes read-only `mmap`. Pipe/non-regular sources are rejected with a no-copy diagnostic. The current instrumentation tests exercise this resolver with a regular file and a pipe in the test process; they do not yet verify a real SAF provider descriptor after the Binder handoff into `:inference` on the target device. APK assets and HTTPS remote sources are still materialized in app-private storage, validated for the GGUF magic header, SHA-256 hashed, and atomically published under a SHA-256-addressed filename. HTTPS redirects are limited and cannot downgrade to HTTP. Downloads are not resumable yet.
-- The emulator suite tests a deliberately blocked JNI call and a real client prefill-timeout path, including app-process survival, original service-PID disappearance, Binder disconnect and replacement-service reconnect. Robolectric tests cover the timeout's cooperative-first branch and grace-period escalation. Neither suite loads/reloads a real GGUF model or runs a successful follow-up inference after process death. No five-cycle external resource check or real-device acceptance has been completed.
+- The emulator suite currently runs seven Android instrumentation tests. Its recovery test loads the pinned tiny GGUF fixture, blocks a real JNI inference call, verifies persisted `PROCESS_ABORT_CONFIRMED`, reloads the same `FilePath` into the replacement service and completes a token-producing follow-up inference. Robolectric tests cover the timeout's cooperative-first branch and grace-period escalation. Real SAF-provider/Binder descriptor handoff, the user's large GGUF, five-cycle external resource checks and target-device acceptance remain open.
 - No real-device performance result is implied by CI success.
 
 ## Implementation plan
