@@ -71,6 +71,7 @@ function(local_llm_prepare_android_vulkan source_dir)
 #include <vulkan/vulkan.hpp>
 #include <stdexcept>
 #include <atomic>
+#include <unistd.h>
 
 // LOCAL_LLM_ANDROID_VULKAN_COMPAT: resolve the Vulkan 1.1 promoted command
 // through the instance dispatcher; API-24 libvulkan.so may not export it.
