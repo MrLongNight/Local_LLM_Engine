@@ -222,3 +222,12 @@ Ausgangscommit vor diesem Plan: `ed6506302565f02c4896095c8d6f00a778f9f689`.
 - Der kompakte Export fasst die letzten zwölf Graph-Snapshots pro Operator zusammen und meldet p50/p90 der GPU-Operatorzeit. Die RAM-Zusammenfassung und RAM-Zeitlinie stehen vor umfangreichen Token-Stichproben. Native Prozesslogs behalten bis zu 2 MiB, der kompakte Export bis zu 32 KiB.
 - **Messgrenze:** Vulkan-Timestamp-Queries und deren Auslesen verursachen zusätzliche Laufzeit-/Synchronisationskosten. Tokens/s eines profileraktivierten Debug-Laufs sind daher kein sauberer Performancevergleich. Die Operationstimestamps dienen der Lokalisierung teurer GPU-Operationen; jede Optimierung muss anschließend in einem profilerfreien Lauf erneut gemessen werden.
 - **Noch nicht abgenommen:** CI muss den erzeugten Vulkan-Overlay-Quelltext und die Debug-/Release-JNI-Konfiguration kompilieren. Auf dem Mali-G57 muss ein Debug-Lauf echte `LOCAL_LLM_VULKAN_OP_TIMING`-Zeilen zeigen. Erst danach sind Q4_K-Prefill-/Decode-Operationen getrennt zu vergleichen. Ein Build allein beweist weder funktionierende Hardware-Timestamp-Queries noch einen Performancegewinn.
+
+
+### Diagnose-Follow-up – Profiling nach Inferenzlauf trennen
+
+Der erste Mali-G57-Bericht (10.11.2026, 21:59) zeigte, dass der bisherige Vulkan-Profiler zwar Operatorzeiten erfasste, die Zusammenfassung aber alle Graph-Snapshots eines Service-PIDs zusammenfasste. Ein Prozess kann während eines GPU-Layer-Sweeps mehrere Modellkonfigurationen und Inferenzläufe ausführen. Deshalb enthält die Profilzeile jetzt auch die aktive `runId`, die der JNI-Prompt- und Tokenpfad vor jedem Graph-Aufruf setzt. Die Auswertung gruppiert nach PID, runId und Operator.
+
+Zusätzlich werden Kommata im Operator-Deskriptor bei der nativen Ausgabe durch Semikolons ersetzt. Dies verhindert, dass Formen wie `FLASH_ATTN_EXT dst(...)` vom kommagetrennten Logfeldparser abgeschnitten werden. Die GPU-p50/p90-Berechnung verwendet jetzt lineare Interpolation; Regressionstests decken mehrere runIds, Operatorformen mit mehreren Dimensionen und eine Zweipunkt-Stichprobe ab.
+
+**Abnahme ausstehend:** Der neue CMake-/JNI-Pfad muss erneut als ARM64-Debug-APK gebaut werden. Anschließend ist ein kurzer Vulkan-Decode-Lauf auf dem nubia Z2462N erforderlich. Der Export muss für jeden Operator dieselbe runId wie die dazugehörigen `TOKEN_STEP_METRIC`-Zeilen ausweisen. Die vorangegangenen grünen CI-Läufe (#201 APK und #262 Unit Tests) beziehen sich auf den vorherigen Stand ohne diese runId-Erweiterung und gelten nicht als Verifikation dieser Änderung.
