@@ -238,7 +238,9 @@ internal class LocalLlmEngineImpl(
             )
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)
             updateModelLoadProgress(87) // native runtime ready; metadata has been read
-            val parts = rawMetadata.split(";")
+            // The backend description itself contains a semicolon (device; requested layers X/Y).
+            // Preserve it as the final field instead of truncating ModelInfo.activeBackend.
+            val parts = rawMetadata.split(";", limit = 5)
             val desc = parts.getOrNull(0) ?: ""
             val nParams = parts.getOrNull(1)?.toLongOrNull() ?: 0L
             val nCtxTrain = parts.getOrNull(2)?.toIntOrNull() ?: 0
