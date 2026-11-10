@@ -149,7 +149,7 @@ static void ggml_vk_get_physical_device_features2(
     # These anchors are checked against the pinned upstream Vulkan source, then
     # injected only into the generated Android build copy (the submodule remains pristine).
     set(_q4_prefill_anchor [=[    vk_pipeline pipeline = ggml_vk_guess_matmul_pipeline_map(ctx, *mmp_map, ne01, ne11, aligned, false);]=])
-    string(FIND "\${_vulkan_contents}" "\${_q4_prefill_anchor}" _q4_prefill_position)
+    string(FIND "${_vulkan_contents}" "${_q4_prefill_anchor}" _q4_prefill_position)
     if(_q4_prefill_position LESS 0)
         message(FATAL_ERROR "LocalLLM: upstream Q4_K prefill pipeline anchor changed.")
     endif()
@@ -171,7 +171,7 @@ static void ggml_vk_get_physical_device_features2(
                 static_cast<unsigned long long>(ne01));
         }
     }]=])
-    string(REPLACE "\${_q4_prefill_anchor}" "\${_q4_prefill_replacement}" _vulkan_contents "\${_vulkan_contents}")
+    string(REPLACE "${_q4_prefill_anchor}" "${_q4_prefill_replacement}" _vulkan_contents "${_vulkan_contents}")
 
     set(_q4_decode_anchor [=[
     if (dmmv == nullptr) {
@@ -179,7 +179,7 @@ static void ggml_vk_get_physical_device_features2(
         dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
         quantize_y = false;
     }]=])
-    string(FIND "\${_vulkan_contents}" "\${_q4_decode_anchor}" _q4_decode_position)
+    string(FIND "${_vulkan_contents}" "${_q4_decode_anchor}" _q4_decode_position)
     if(_q4_decode_position LESS 0)
         message(FATAL_ERROR "LocalLLM: upstream Q4_K decode pipeline anchor changed.")
     endif()
@@ -206,14 +206,14 @@ static void ggml_vk_get_physical_device_features2(
                 static_cast<unsigned long long>(ne01));
         }
     }]=])
-    string(REPLACE "\${_q4_decode_anchor}" "\${_q4_decode_replacement}" _vulkan_contents "\${_vulkan_contents}")
+    string(REPLACE "${_q4_decode_anchor}" "${_q4_decode_replacement}" _vulkan_contents "${_vulkan_contents}")
 
     set(_memory_properties_anchor [=[
     vkdev.getMemoryProperties2(&memprops);
 
     *total = 0;
     *free = 0;]=])
-    string(FIND "\${_vulkan_contents}" "\${_memory_properties_anchor}" _memory_properties_position)
+    string(FIND "${_vulkan_contents}" "${_memory_properties_anchor}" _memory_properties_position)
     if(_memory_properties_position LESS 0)
         message(FATAL_ERROR "LocalLLM: upstream Vulkan memory-properties anchor changed.")
     endif()
@@ -230,7 +230,7 @@ static void ggml_vk_get_physical_device_features2(
 
     *total = 0;
     *free = 0;]=])
-    string(REPLACE "\${_memory_properties_anchor}" "\${_memory_properties_replacement}" _vulkan_contents "\${_vulkan_contents}")
+    string(REPLACE "${_memory_properties_anchor}" "${_memory_properties_replacement}" _vulkan_contents "${_vulkan_contents}")
 
     set(_memory_heap_anchor [=[
             if (membudget_supported && i < budgetprops.heapUsage.size()) {
@@ -241,7 +241,7 @@ static void ggml_vk_get_physical_device_features2(
             } else {
                 *free += heap.size;
             }]=])
-    string(FIND "\${_vulkan_contents}" "\${_memory_heap_anchor}" _memory_heap_position)
+    string(FIND "${_vulkan_contents}" "${_memory_heap_anchor}" _memory_heap_position)
     if(_memory_heap_position LESS 0)
         message(FATAL_ERROR "LocalLLM: upstream Vulkan heap-budget branch changed.")
     endif()
@@ -268,7 +268,7 @@ static void ggml_vk_get_physical_device_features2(
                     static_cast<unsigned long long>(heap.size));
                 *free += heap.size;
             }]=])
-    string(REPLACE "\${_memory_heap_anchor}" "\${_memory_heap_replacement}" _vulkan_contents "\${_vulkan_contents}")
+    string(REPLACE "${_memory_heap_anchor}" "${_memory_heap_replacement}" _vulkan_contents "${_vulkan_contents}")
 
     set(_patched_dir "${CMAKE_CURRENT_BINARY_DIR}/local-android-vulkan")
     file(MAKE_DIRECTORY "${_patched_dir}")
