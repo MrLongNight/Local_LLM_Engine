@@ -31,7 +31,7 @@ class EngineDiagnosticsTest {
     fun legacyNativeSamplesWithoutRunIdentityAreNotMixedIntoPercentiles() {
         val legacy = "2026-11-09 21:00:00.000 [NATIVE] TOKEN_STEP_METRIC - " +
             "index=1, sampleUs=100, decodeUs=9000000, decodeSubmitUs=9000000, " +
-            "backendSyncWaitUs=0, pieceUs=5, totalUs=9000105, backend=CPU"
+            "gpuSyncWaitUs=0, pieceUs=5, totalUs=9000105, backend=CPU"
 
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(legacy, nativeMetric(1, 100_000, 200, "fresh-run", "Vulkan"))
@@ -43,6 +43,21 @@ class EngineDiagnosticsTest {
         assertFalse(report.contains("decode p50=9000000us"))
     }
 
+
+    @Test
+    fun legacyGpuSyncFieldIsMappedToBackendSynchronizationNotKernelTime() {
+        val oldFormat = "2026-11-10 16:00:00.000 [NATIVE] TOKEN_STEP_METRIC - " +
+            "index=1, sampleUs=500, decodeUs=610000, decodeSubmitUs=7000, " +
+            "gpuSyncWaitUs=603000, pieceUs=5, totalUs=610505, " +
+            "pid=501, runId=legacy-sync-run, backend=Vulkan"
+
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(oldFormat))
+
+        assertTrue(report.contains("backendSyncWait p50=603000us"))
+        assertTrue(report.contains("ältere Samples heißen gpuSyncWaitUs"))
+        assertTrue(report.contains("nicht als reine GPU-Kernelzeit"))
+        assertFalse(report.contains("gpuSyncWait p50="))
+    }
 
     @Test
     fun percentileUsesTheFullSortedRangeForP50AndP90() {
