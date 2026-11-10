@@ -353,12 +353,12 @@ object EngineDiagnostics {
         val nativeSelected = (
             relevantNative.take(10) + relevantNative.takeLast(4)
         ).distinct().map { compactLine(it, 360) }
+        val legacySyncLabelSamples = nativeTokenMetrics.count { it.usedLegacyGpuSyncWaitLabel }
         val tokenMetricSummary = buildString {
             if (nativeTokenMetrics.isEmpty()) {
                 appendLine("Keine eindeutig einem Inferenzlauf zuordenbaren nativen Token-Messwerte gefunden.")
             } else {
                 appendLine("Native Decode-Zeiten – strikt nach PID, Backend und runId getrennt:")
-                val legacySyncLabelSamples = nativeTokenMetrics.count { it.usedLegacyGpuSyncWaitLabel }
                 nativeTokenMetrics
                     .groupBy { "${it.pid}/${it.backend}/${it.runId}" }
                     .toSortedMap()
