@@ -187,13 +187,8 @@ object EngineDiagnostics {
     private fun doubleTimingSummary(name: String, values: List<Double>): String {
         if (values.isEmpty()) return "$name=n/a"
         val sorted = values.sorted()
-        fun at(fraction: Double): Double {
-            val rank = sorted.lastIndex * fraction.coerceIn(0.0, 1.0)
-            val index = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
-            return sorted[index]
-        }
-        return "$name p50=${String.format(Locale.US, "%.3f", at(0.50))}us " +
-            "p90=${String.format(Locale.US, "%.3f", at(0.90))}us " +
+        return "$name p50=${String.format(Locale.US, "%.3f", percentileDouble(sorted, 0.50))}us " +
+            "p90=${String.format(Locale.US, "%.3f", percentileDouble(sorted, 0.90))}us " +
             "max=${String.format(Locale.US, "%.3f", sorted.last())}us"
     }
 
