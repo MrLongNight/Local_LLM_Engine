@@ -1344,13 +1344,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->last_finish_reason = 3; // ERROR
         return nullptr;
     }
-    // llama_decode can return after Vulkan command submission while GPU kernels are
-    // still running. Synchronize here so decodeUs reflects completed work on both
-    // CPU and Vulkan; the sampler's own synchronization is then only a no-op/wait.
-    const int64_t gpu_sync_start_us = llama_time_us();
+    // llama_decode can return after asynchronous backend work has been submitted.
+    // Measure the full llama_synchronize() envelope separately: for Vulkan this may
+    // include queue submission, fence polling/wait, and deferred host/device copies.
+    // It is not a pure GPU-kernel timer; per-operation GPU timestamps are separate.
+    const int64_t backend_sync_start_us = llama_time_us();
     llama_synchronize(engine->context);
-    const int64_t gpu_sync_wait_us = llama_time_us() - gpu_sync_start_us;
-    const int64_t decode_duration_us = decode_submit_duration_us + gpu_sync_wait_us;
+    const int64_t backend_sync_wait_us = llama_time_us() - backend_sync_start_us;
+    const int64_t decode_duration_us = decode_submit_duration_us + backend_sync_wait_us;
 
     engine->current_position++;
 
@@ -1388,7 +1389,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
                << ", sampleUs=" << sample_duration_us
                << ", decodeUs=" << decode_duration_us
                << ", decodeSubmitUs=" << decode_submit_duration_us
-               << ", gpuSyncWaitUs=" << gpu_sync_wait_us
+               << ", backendSyncWaitUs=" << backend_sync_wait_us
                << ", pieceUs=" << piece_duration_us
                << ", totalUs=" << token_total_duration_us
                << ", pid=" << getpid()
