@@ -118,7 +118,7 @@ jobs:
           curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 600 \
             "https://sdk.lunarg.com/sdk/download/${SDK_VERSION}/linux/vulkan_sdk.tar.xz" \
             --output "$SDK_DOWNLOAD"
-          printf '%s  %s\n' "$SDK_SHA256" "$SDK_DOWNLOAD" | sha256sum --check --strict
+          printf '%s  %s' "$SDK_SHA256" "$SDK_DOWNLOAD" | sha256sum --check --strict
 
           mkdir -p "$SDK_EXTRACT"
           tar -xJf "$SDK_DOWNLOAD" -C "$SDK_EXTRACT"
