@@ -422,13 +422,21 @@ object EngineDiagnostics {
         // Keep only the newest snapshots, then report per-op p50/p90 instead of
         // dumping hundreds of raw lines into the compact export.
         val allVulkanOperationSamples = nativeLines.mapNotNull(::vulkanOperationSample)
+        // Retain the newest snapshots independently for each process/run pair.
+        // Otherwise one later benchmark run would evict the earlier run before
+        // the per-run grouping below has a chance to compare them.
         val recentSnapshotKeys = allVulkanOperationSamples
-            .map { "${it.pid}/${it.snapshot}" }
-            .distinct()
-            .takeLast(MAX_VULKAN_PROFILE_SNAPSHOTS)
+            .groupBy { "${it.pid}/${it.runId}" }
+            .values
+            .flatMap { runSamples ->
+                runSamples
+                    .map { "${it.pid}/${it.runId}/${it.snapshot}" }
+                    .distinct()
+                    .takeLast(MAX_VULKAN_PROFILE_SNAPSHOTS)
+            }
             .toSet()
         val recentVulkanOperationSamples = allVulkanOperationSamples.filter {
-            "${it.pid}/${it.snapshot}" in recentSnapshotKeys
+            "${it.pid}/${it.runId}/${it.snapshot}" in recentSnapshotKeys
         }
         val vulkanOperationSummary = buildString {
             if (recentVulkanOperationSamples.isEmpty()) {
