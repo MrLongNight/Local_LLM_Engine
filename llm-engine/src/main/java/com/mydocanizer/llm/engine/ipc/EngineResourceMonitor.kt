@@ -101,8 +101,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 contextTokens = config.contextSize,
                 batchSize = config.batchSize,
                 threads = config.threads,
-                batchThreads = config.batchThreads.takeIf { it > 0 } ?: config.threads,
-                microBatchSize = config.microBatchSize.takeIf { it > 0 } ?: config.batchSize,
+                batchThreads = config.effectiveBatchThreads,
+                microBatchSize = config.effectiveMicroBatchSize,
                 gpuLayers = config.gpuLayers,
                 backendPreference = config.backendPreference.name,
                 activeBackend = info.activeBackend
