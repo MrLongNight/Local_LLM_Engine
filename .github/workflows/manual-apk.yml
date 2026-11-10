@@ -241,6 +241,8 @@ jobs:
                           "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH",
                       "Vulkan integrated-memory budget diagnostics":
                           "LOCAL_LLM_MEMORY_BUDGET",
+                      "Vulkan per-operation GPU timestamp diagnostics":
+                          "LOCAL_LLM_VULKAN_OP_TIMING",
                   }
                   for vulkan_entry in vulkan_sources:
                       vulkan_file = vulkan_entry.get("file", "")
