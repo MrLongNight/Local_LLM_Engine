@@ -346,9 +346,22 @@ object EngineDiagnostics {
                     (upper.contains("OFFLOADED ") && upper.contains(" LAYERS TO GPU"))
             }
             .takeLast(3)
-        val nativePriorityEvidence = (vulkanCapabilityEvidence + actualLayerOffloadEvidence)
-            .distinct()
-            .map { compactLine(it, 520) }
+        val q4kPrefillEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH") }
+            .takeLast(4)
+        val q4kDecodeEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH") }
+            .takeLast(4)
+        val memoryBudgetEvidence = nativeLines
+            .filter { line ->
+                line.contains("LOCAL_LLM_MEMORY_BUDGET") ||
+                    line.contains("LOCAL_LLM_MEMORY_HEAP")
+            }
+            .takeLast(4)
+        val nativePriorityEvidence = (
+            vulkanCapabilityEvidence + actualLayerOffloadEvidence +
+                q4kPrefillEvidence + q4kDecodeEvidence + memoryBudgetEvidence
+            ).distinct().map { compactLine(it, 360) }
 
         val nativeSelected = (
             relevantNative.take(10) + relevantNative.takeLast(4)
@@ -478,7 +491,7 @@ object EngineDiagnostics {
             appendLine("Erfasste Logzeilen: ${ordered.size}; RAM-Samples: ${samples.size}")
             appendLine("Zeitraum: ${ordered.firstOrNull()?.substringBefore(" [") ?: "n/a"} bis ${ordered.lastOrNull()?.substringBefore(" [") ?: "n/a"}")
             appendLine()
-            appendLine("[VULKAN-LAUFZEITBELEG – TREIBER UND TATSÄCHLICHES LAYER-OFFLOAD]")
+            appendLine("[VULKAN-LAUFZEITBELEG – TREIBER, LAYER-OFFLOAD, Q4_K-KERNELPFAD UND SPEICHERBUDGET]")
             if (nativePriorityEvidence.isEmpty()) {
                 appendLine("Keine passende Runtime-Zeile für Mali-Treiberfähigkeiten oder tatsächliche Layer-Zuweisung im nativen Log gefunden.")
             } else {

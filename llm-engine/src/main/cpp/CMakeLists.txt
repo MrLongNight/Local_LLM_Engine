@@ -70,6 +70,7 @@ function(local_llm_prepare_android_vulkan source_dir)
     set(_helper [=[
 #include <vulkan/vulkan.hpp>
 #include <stdexcept>
+#include <atomic>
 
 // LOCAL_LLM_ANDROID_VULKAN_COMPAT: resolve the Vulkan 1.1 promoted command
 // through the instance dispatcher; API-24 libvulkan.so may not export it.
@@ -145,14 +146,141 @@ static void ggml_vk_get_physical_device_features2(
 ]=])
     string(REPLACE "${_device_anchor}" "${_device_replacement}" _vulkan_contents "${_vulkan_contents}")
 
+    # These anchors are checked against the pinned upstream Vulkan source, then
+    # injected only into the generated Android build copy (the submodule remains pristine).
+    set(_q4_prefill_anchor [=[    vk_pipeline pipeline = ggml_vk_guess_matmul_pipeline_map(ctx, *mmp_map, ne01, ne11, aligned, false);]=])
+    string(FIND "\${_vulkan_contents}" "\${_q4_prefill_anchor}" _q4_prefill_position)
+    if(_q4_prefill_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Q4_K prefill pipeline anchor changed.")
+    endif()
+    set(_q4_prefill_replacement [=[    vk_pipeline pipeline = ggml_vk_guess_matmul_pipeline_map(ctx, *mmp_map, ne01, ne11, aligned, false);
+    if (src0->type == GGML_TYPE_Q4_K) {
+        static std::atomic<uint32_t> local_llm_q4k_prefill_log_count{0};
+        const uint32_t sample_index = local_llm_q4k_prefill_log_count.fetch_add(1, std::memory_order_relaxed);
+        if (sample_index < 12) {
+            GGML_LOG_INFO(
+                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH - device=%s,intDot=%d,coopMatInt=%d,canQuantizeY=%d,selected=%s,yKernelType=%s,batchTokens=%llu,hidden=%llu,weightRows=%llu\n",
+                ctx->device->name.c_str(),
+                ctx->device->integer_dot_product ? 1 : 0,
+                ctx->device->coopmat_int_support ? 1 : 0,
+                can_quantize_y ? 1 : 0,
+                quantize_y ? "Q8_1_MATMUL" : "F16_F32_MATMUL",
+                ggml_type_name(y_kernel_type),
+                static_cast<unsigned long long>(ne11),
+                static_cast<unsigned long long>(ne10),
+                static_cast<unsigned long long>(ne01));
+        }
+    }]=])
+    string(REPLACE "\${_q4_prefill_anchor}" "\${_q4_prefill_replacement}" _vulkan_contents "\${_vulkan_contents}")
+
+    set(_q4_decode_anchor [=[
+    if (dmmv == nullptr) {
+        // Fall back to f16 dequant mul mat
+        dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
+        quantize_y = false;
+    }]=])
+    string(FIND "\${_vulkan_contents}" "\${_q4_decode_anchor}" _q4_decode_position)
+    if(_q4_decode_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Q4_K decode pipeline anchor changed.")
+    endif()
+    set(_q4_decode_replacement [=[
+    if (dmmv == nullptr) {
+        // Fall back to f16 dequant mul mat
+        dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
+        quantize_y = false;
+    }
+    if (src0->type == GGML_TYPE_Q4_K) {
+        static std::atomic<uint32_t> local_llm_q4k_decode_log_count{0};
+        const uint32_t sample_index = local_llm_q4k_decode_log_count.fetch_add(1, std::memory_order_relaxed);
+        if (sample_index < 12) {
+            GGML_LOG_INFO(
+                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - device=%s,intDot=%d,quantizeY=%d,selected=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
+                ctx->device->name.c_str(),
+                ctx->device->integer_dot_product ? 1 : 0,
+                quantize_y ? 1 : 0,
+                quantize_y ? "Q8_1_INTEGER_DOT_MMVQ" : "BASE_TYPE_MMV",
+                ggml_type_name(src1->type),
+                ggml_type_name(y_kernel_type),
+                static_cast<unsigned long long>(ne11),
+                static_cast<unsigned long long>(ne10),
+                static_cast<unsigned long long>(ne01));
+        }
+    }]=])
+    string(REPLACE "\${_q4_decode_anchor}" "\${_q4_decode_replacement}" _vulkan_contents "\${_vulkan_contents}")
+
+    set(_memory_properties_anchor [=[
+    vkdev.getMemoryProperties2(&memprops);
+
+    *total = 0;
+    *free = 0;]=])
+    string(FIND "\${_vulkan_contents}" "\${_memory_properties_anchor}" _memory_properties_position)
+    if(_memory_properties_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan memory-properties anchor changed.")
+    endif()
+    set(_memory_properties_replacement [=[
+    vkdev.getMemoryProperties2(&memprops);
+
+    GGML_LOG_INFO(
+        "ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET - device=%d,name=%s,integrated=%d,extensionSupported=%d,heapCount=%u\n",
+        device,
+        vkdev.getProperties().deviceName.data(),
+        is_integrated_gpu ? 1 : 0,
+        membudget_supported ? 1 : 0,
+        memprops.memoryProperties.memoryHeapCount);
+
+    *total = 0;
+    *free = 0;]=])
+    string(REPLACE "\${_memory_properties_anchor}" "\${_memory_properties_replacement}" _vulkan_contents "\${_vulkan_contents}")
+
+    set(_memory_heap_anchor [=[
+            if (membudget_supported && i < budgetprops.heapUsage.size()) {
+                // Driver may report heapBudget > heap.size so we add a safeguard here
+                // See https://github.com/ggml-org/llama.cpp/issues/29277
+                const vk::DeviceSize budget = std::min(budgetprops.heapBudget[i], heap.size);
+                *free += budget > budgetprops.heapUsage[i] ? budget - budgetprops.heapUsage[i] : 0;
+            } else {
+                *free += heap.size;
+            }]=])
+    string(FIND "\${_vulkan_contents}" "\${_memory_heap_anchor}" _memory_heap_position)
+    if(_memory_heap_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan heap-budget branch changed.")
+    endif()
+    set(_memory_heap_replacement [=[
+            if (membudget_supported && i < budgetprops.heapUsage.size()) {
+                // Driver may report heapBudget > heap.size so we add a safeguard here
+                // See https://github.com/ggml-org/llama.cpp/issues/29277
+                const vk::DeviceSize budget = std::min(budgetprops.heapBudget[i], heap.size);
+                const vk::DeviceSize usage = budgetprops.heapUsage[i];
+                const vk::DeviceSize available = budget > usage ? budget - usage : 0;
+                GGML_LOG_INFO(
+                    "ggml_vulkan: LOCAL_LLM_MEMORY_HEAP - device=%d,heapIndex=%u,budgetKnown=1,heapSizeBytes=%llu,budgetBytes=%llu,usageBytes=%llu,freeBytes=%llu\n",
+                    device, i,
+                    static_cast<unsigned long long>(heap.size),
+                    static_cast<unsigned long long>(budget),
+                    static_cast<unsigned long long>(usage),
+                    static_cast<unsigned long long>(available));
+                *free += available;
+            } else {
+                GGML_LOG_INFO(
+                    "ggml_vulkan: LOCAL_LLM_MEMORY_HEAP - device=%d,heapIndex=%u,budgetKnown=0,heapSizeBytes=%llu,freeEstimateBytes=%llu\n",
+                    device, i,
+                    static_cast<unsigned long long>(heap.size),
+                    static_cast<unsigned long long>(heap.size));
+                *free += heap.size;
+            }]=])
+    string(REPLACE "\${_memory_heap_anchor}" "\${_memory_heap_replacement}" _vulkan_contents "\${_vulkan_contents}")
+
     set(_patched_dir "${CMAKE_CURRENT_BINARY_DIR}/local-android-vulkan")
     file(MAKE_DIRECTORY "${_patched_dir}")
     set(_patched_cpp "${_patched_dir}/ggml-vulkan.cpp")
     file(WRITE "${_patched_cpp}" "${_vulkan_contents}")
 
     if(NOT _vulkan_contents MATCHES "LOCAL_LLM_ANDROID_VULKAN_COMPAT" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
-        message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility overlay did not apply completely.")
+        message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
     set(LOCAL_LLM_PATCHED_VULKAN_CPP "${_patched_cpp}" PARENT_SCOPE)
 

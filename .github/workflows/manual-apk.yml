@@ -235,6 +235,12 @@ jobs:
                           "VULKAN_HPP_DEFAULT_DISPATCHER.init(device->device)",
                       "Android Vulkan compatibility overlay marker":
                           "LOCAL_LLM_ANDROID_VULKAN_COMPAT",
+                      "Q4_K prefill runtime path instrumentation":
+                          "LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH",
+                      "Q4_K decode runtime path instrumentation":
+                          "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH",
+                      "Vulkan integrated-memory budget diagnostics":
+                          "LOCAL_LLM_MEMORY_BUDGET",
                   }
                   for vulkan_entry in vulkan_sources:
                       vulkan_file = vulkan_entry.get("file", "")
@@ -250,9 +256,44 @@ jobs:
                                   f"arm64-v8a compiled Vulkan source {vulkan_file} "
                                   f"is missing compatibility fix: {description}"
                               )
+
+                      command = vulkan_entry.get("command")
+                      vulkan_args = shlex.split(command) if command else vulkan_entry.get("arguments", [])
+                      integer_dot_define = "-DGGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT"
+                      if not any(
+                          arg == integer_dot_define or arg.startswith(integer_dot_define + "=")
+                          for arg in vulkan_args
+                      ):
+                          raise SystemExit(
+                              "arm64-v8a ggml-vulkan.cpp compile command is missing "
+                              "GGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT; the fast Q4_K "
+                              "integer-dot kernels would not be compiled"
+                          )
                       print(
-                          "arm64-v8a: verified generated Vulkan compatibility source "
-                          f"was compiled: {vulkan_file}"
+                          "arm64-v8a: verified upstream GGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT "
+                          "is active for the compiled Vulkan source."
+                      )
+                      print(
+                          "arm64-v8a: verified generated Vulkan compatibility/performance "
+                          f"diagnostics source was compiled: {vulkan_file}"
+                      )
+
+              if abi == "arm64-v8a":
+                  has_integer_dot_runtime_marker = False
+                  for entry in selected:
+                      command = entry.get("command")
+                      args = shlex.split(command) if command else entry.get("arguments", [])
+                      if any(
+                          arg == "-DLOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED=1"
+                          for arg in args
+                      ):
+                          has_integer_dot_runtime_marker = True
+                          break
+                  if not has_integer_dot_runtime_marker:
+                      raise SystemExit(
+                          "arm64-v8a JNI compile command is missing "
+                          "LOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED=1; "
+                          "the app-side build-capability diagnostic would be false"
                       )
 
               for entry in selected:

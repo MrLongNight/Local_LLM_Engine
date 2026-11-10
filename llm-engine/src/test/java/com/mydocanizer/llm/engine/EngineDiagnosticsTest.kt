@@ -101,6 +101,18 @@ class EngineDiagnosticsTest {
             "uma: 1 | rebar: 0 | fp16: true | bf16: 0 | fp4: 0 | warp size: 16 | " +
             "shared memory: 32768 | int dot: 1 | matrix cores: none"
         val actualOffload = "2026-11-10 16:00:01.000 [NATIVE] llama_model_load: offloaded 37/37 layers to GPU"
+        val prefillPath =
+            "2026-11-10 16:00:02.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH - " +
+                "device=Mali-G57,intDot=1,coopMatInt=0,canQuantizeY=1,selected=Q8_1_MATMUL"
+        val decodePath =
+            "2026-11-10 16:00:03.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - " +
+                "device=Mali-G57,intDot=1,quantizeY=1,selected=Q8_1_INTEGER_DOT_MMVQ"
+        val memoryBudget =
+            "2026-11-10 16:00:04.000 [NATIVE] ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET - " +
+                "device=0,name=Mali-G57,integrated=1,extensionSupported=0,heapCount=1"
+        val memoryHeap =
+            "2026-11-10 16:00:05.000 [NATIVE] ggml_vulkan: LOCAL_LLM_MEMORY_HEAP - " +
+                "device=0,heapIndex=0,budgetKnown=0,heapSizeBytes=7784226816,freeEstimateBytes=7784226816"
         val noisyErrors = (1..24).map { index ->
             "2026-11-10 16:01:%02d.000 [ERROR] [engine] SYNTHETIC_FAILURE - ".format(index) +
                 "x".repeat(420)
@@ -111,11 +123,16 @@ class EngineDiagnosticsTest {
         }
 
         val report = EngineDiagnostics.buildCompactReportForTest(
-            listOf(capability, actualOffload) + noisyErrors + noisyPerformance
+            listOf(capability, actualOffload, prefillPath, decodePath, memoryBudget, memoryHeap) +
+                noisyErrors + noisyPerformance
         )
 
         assertTrue(report.contains("int dot: 1"))
         assertTrue(report.contains("offloaded 37/37 layers to GPU"))
+        assertTrue(report.contains("selected=Q8_1_MATMUL"))
+        assertTrue(report.contains("selected=Q8_1_INTEGER_DOT_MMVQ"))
+        assertTrue(report.contains("extensionSupported=0"))
+        assertTrue(report.contains("budgetKnown=0"))
         assertTrue(
             report.indexOf("[VULKAN-LAUFZEITBELEG") <
                 report.indexOf("[WICHTIGE EREIGNISSE")
