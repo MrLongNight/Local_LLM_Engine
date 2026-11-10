@@ -152,24 +152,34 @@ class EngineDiagnosticsTest {
     }
 
     @Test
-    fun vulkanPerOperationGpuTimestampsAreGroupedByOperator() {
+    fun vulkanPerOperationGpuTimestampsAreGroupedByProcessRunAndOperator() {
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(
-                vulkanOperationMetric(6412, 100, "mul_mat_vec_q4_K", 1, 620.0, 620.0),
-                vulkanOperationMetric(6412, 101, "mul_mat_vec_q4_K", 1, 580.0, 580.0),
-                vulkanOperationMetric(6412, 102, "mul_mat_vec_q4_K", 1, 590.0, 590.0),
-                vulkanOperationMetric(6412, 102, "rms_norm", 1, 12.5, 12.5)
+                vulkanOperationMetric(6412, "decode-run-a", 100, "mul_mat_vec_q4_K", 1, 620.0, 620.0),
+                vulkanOperationMetric(6412, "decode-run-a", 101, "mul_mat_vec_q4_K", 1, 580.0, 580.0),
+                vulkanOperationMetric(6412, "decode-run-a", 102, "mul_mat_vec_q4_K", 1, 590.0, 590.0),
+                vulkanOperationMetric(6412, "decode-run-b", 103, "mul_mat_vec_q4_K", 1, 900.0, 900.0),
+                vulkanOperationMetric(6412, "decode-run-a", 102, "rms_norm", 1, 12.5, 12.5),
+                vulkanOperationMetric(
+                    6412, "decode-run-a", 104, "FLASH_ATTN_EXT dst(128;1;8)", 1, 25.0, 25.0
+                )
             )
         )
 
         assertTrue(report.contains("[VULKAN-GPU-OPERATIONSPROFIL"))
         assertTrue(
             report.contains(
-                "pid=6412 op=mul_mat_vec_q4_K snapshots=3 samples=3 " +
-                    "gpuAvg p50=590.000us p90=620.000us max=620.000us"
+                "pid=6412 runId=decode-run-a op=mul_mat_vec_q4_K snapshots=3 samples=3 " +
+                    "gpuAvg p50=590.000us p90=614.000us max=620.000us"
             )
         )
-        assertTrue(report.contains("op=rms_norm snapshots=1"))
+        assertTrue(
+            report.contains(
+                "pid=6412 runId=decode-run-b op=mul_mat_vec_q4_K snapshots=1 samples=1 " +
+                    "gpuAvg p50=900.000us p90=900.000us max=900.000us"
+            )
+        )
+        assertTrue(report.contains("op=FLASH_ATTN_EXT dst(128;1;8) snapshots=1"))
         assertFalse(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
     }
 
@@ -203,6 +213,7 @@ class EngineDiagnosticsTest {
 
     private fun vulkanOperationMetric(
         pid: Int,
+        runId: String,
         snapshot: Int,
         operation: String,
         samples: Int,
@@ -210,7 +221,7 @@ class EngineDiagnosticsTest {
         totalUs: Double
     ): String =
         "2026-11-10 16:00:00.000 [NATIVE] ggml_vulkan: " +
-            "LOCAL_LLM_VULKAN_OP_TIMING - pid=$pid,snapshot=$snapshot,op=$operation," +
+            "LOCAL_LLM_VULKAN_OP_TIMING - pid=$pid,runId=$runId,snapshot=$snapshot,op=$operation," +
             "samples=$samples,avgUs=$averageUs,totalUs=$totalUs,gflops=n/a"
 
     private fun nativeMetric(
