@@ -36,6 +36,41 @@ static std::mutex g_native_log_file_mutex;
 static FILE* g_native_log_file = nullptr;
 static constexpr long MAX_NATIVE_LOG_FILE_BYTES = 2L * 1024L * 1024L;
 
+// Vulkan graph-compute profiling runs inside the native inference call. Keep
+// the active inference identity visible to the generated ggml-vulkan.cpp
+// translation unit so its GPU timestamp rows can be correlated with Kotlin
+// token metrics from the same inference.
+static std::mutex g_vulkan_profile_run_id_mutex;
+static std::string g_vulkan_profile_run_id = "none";
+
+static void set_vulkan_profile_run_id(const std::string& run_id) {
+    std::lock_guard<std::mutex> lock(g_vulkan_profile_run_id_mutex);
+    g_vulkan_profile_run_id = run_id.empty() ? "none" : run_id;
+}
+
+extern "C" const char* local_llm_vulkan_profile_run_id() {
+    static thread_local std::string run_id_snapshot;
+    {
+        std::lock_guard<std::mutex> lock(g_vulkan_profile_run_id_mutex);
+        run_id_snapshot = g_vulkan_profile_run_id;
+    }
+    return run_id_snapshot.c_str();
+}
+
+class VulkanProfileRunScope {
+public:
+    explicit VulkanProfileRunScope(const std::string& run_id) {
+        set_vulkan_profile_run_id(run_id);
+    }
+
+    ~VulkanProfileRunScope() {
+        set_vulkan_profile_run_id("none");
+    }
+
+    VulkanProfileRunScope(const VulkanProfileRunScope&) = delete;
+    VulkanProfileRunScope& operator=(const VulkanProfileRunScope&) = delete;
+};
+
 static void local_llm_native_log_callback(enum ggml_log_level level, const char* text, void* /*user_data*/) {
     if (text == nullptr) return;
 
@@ -1083,6 +1118,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         }
     }
 
+    // Covers prompt prefill and its llama_synchronize() call.
+    VulkanProfileRunScope profile_run_scope(inference_run_id);
     std::lock_guard<std::mutex> lock(engine->mtx);
     engine->inference_run_id = inference_run_id;
     // The request's cancellation flag is cleared by nativeResetCancellation()
@@ -1347,6 +1384,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return nullptr;
     }
 
+    // Token decoding happens in separate JNI calls after nativeProcessChat()
+    // has returned. Re-activate the same run ID for this token's GPU graph.
+    VulkanProfileRunScope profile_run_scope(engine->inference_run_id);
     const int64_t token_step_start_us = llama_time_us();
     const int64_t sample_start_us = llama_time_us();
     const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
