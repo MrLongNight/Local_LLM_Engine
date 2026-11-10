@@ -122,9 +122,20 @@ class EngineDiagnosticsTest {
                 "detail=".repeat(90)
         }
 
+        val noisyTokenMetrics = (1..30).flatMap { run ->
+            (1..8).map { index ->
+                nativeMetric(
+                    index = index,
+                    decodeUs = run * 10_000L + index * 1_000L,
+                    pid = 700 + run,
+                    runId = "overflow-run-$run",
+                    backend = "Vulkan"
+                )
+            }
+        }
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(capability, actualOffload, prefillPath, decodePath, memoryBudget, memoryHeap) +
-                noisyErrors + noisyPerformance
+                noisyErrors + noisyPerformance + noisyTokenMetrics
         )
 
         assertTrue(report.contains("int dot: 1"))
@@ -139,6 +150,68 @@ class EngineDiagnosticsTest {
         )
         assertTrue(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
     }
+
+    @Test
+    fun vulkanPerOperationGpuTimestampsAreGroupedByOperator() {
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(
+                vulkanOperationMetric(6412, 100, "mul_mat_vec_q4_K", 1, 620.0, 620.0),
+                vulkanOperationMetric(6412, 101, "mul_mat_vec_q4_K", 1, 580.0, 580.0),
+                vulkanOperationMetric(6412, 102, "mul_mat_vec_q4_K", 1, 590.0, 590.0),
+                vulkanOperationMetric(6412, 102, "rms_norm", 1, 12.5, 12.5)
+            )
+        )
+
+        assertTrue(report.contains("[VULKAN-GPU-OPERATIONSPROFIL"))
+        assertTrue(
+            report.contains(
+                "pid=6412 op=mul_mat_vec_q4_K snapshots=3 samples=3 " +
+                    "gpuAvg p50=590.000us p90=620.000us max=620.000us"
+            )
+        )
+        assertTrue(report.contains("op=rms_norm snapshots=1"))
+        assertFalse(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
+    }
+
+    @Test
+    fun ramSummaryIsPlacedBeforeVerboseTokenMetricsWhenExportMustBeTruncated() {
+        val ramSample =
+            "2026-11-10 16:00:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=100,phase=MODEL_LOADED_IDLE,processPssMb=123.4,nativePssMb=50.0," +
+                "nativeHeapAllocatedMb=20.0,javaHeapUsedMb=10.0,systemAvailableRamMb=1000.0"
+        val manyTokenRuns = (1..50).flatMap { run ->
+            (1..8).map { index ->
+                nativeMetric(
+                    index = index,
+                    decodeUs = run * 100_000L + index,
+                    pid = 800 + run,
+                    runId = "ram-priority-run-$run",
+                    backend = "Vulkan"
+                )
+            }
+        }
+
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(ramSample) + manyTokenRuns)
+        val ramIndex = report.indexOf("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
+        val tokenIndex = report.indexOf("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
+
+        assertTrue(report.contains("MODEL_LOADED_IDLE"))
+        assertTrue(ramIndex >= 0)
+        assertTrue(tokenIndex < 0 || ramIndex < tokenIndex)
+        assertTrue(report.contains("PSS_peak=123.4MB"))
+    }
+
+    private fun vulkanOperationMetric(
+        pid: Int,
+        snapshot: Int,
+        operation: String,
+        samples: Int,
+        averageUs: Double,
+        totalUs: Double
+    ): String =
+        "2026-11-10 16:00:00.000 [NATIVE] ggml_vulkan: " +
+            "LOCAL_LLM_VULKAN_OP_TIMING - pid=$pid,snapshot=$snapshot,op=$operation," +
+            "samples=$samples,avgUs=$averageUs,totalUs=$totalUs,gflops=n/a"
 
     private fun nativeMetric(
         index: Int,
