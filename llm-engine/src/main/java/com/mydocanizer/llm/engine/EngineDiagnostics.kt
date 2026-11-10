@@ -327,6 +327,25 @@ object EngineDiagnostics {
         val nativeTokenMetrics = nativeTokenMetricLines.mapNotNull(::nativeTokenStepMetric)
         val legacyNativeMetricCount = nativeTokenMetricLines.size - nativeTokenMetrics.size
         val kotlinTokenMetrics = kotlinLines.mapNotNull(::kotlinTokenStepMetric)
+        // These two runtime facts are acceptance-critical and must never be lost
+        // behind the verbose token/RAM sections in the 16 KiB compact export:
+        //  - ggml_vulkan's live driver capability (especially "int dot")
+        //  - llama.cpp's actual model-layer assignment, not our requested layer count.
+        val vulkanCapabilityEvidence = nativeLines
+            .filter { it.contains("ggml_vulkan:", ignoreCase = true) &&
+                it.contains("int dot:", ignoreCase = true) }
+            .takeLast(2)
+        val actualLayerOffloadEvidence = nativeLines
+            .filter { line ->
+                val upper = line.uppercase(Locale.US)
+                upper.contains("OFFLOADING OUTPUT LAYER TO GPU") ||
+                    (upper.contains("OFFLOADED ") && upper.contains(" LAYERS TO GPU"))
+            }
+            .takeLast(3)
+        val nativePriorityEvidence = (vulkanCapabilityEvidence + actualLayerOffloadEvidence)
+            .distinct()
+            .map { compactLine(it, 520) }
+
         val nativeSelected = (
             relevantNative.take(10) + relevantNative.takeLast(4)
         ).distinct().map { compactLine(it, 360) }
@@ -446,6 +465,13 @@ object EngineDiagnostics {
             appendLine("Erstellt: ${Date()}")
             appendLine("Erfasste Logzeilen: ${ordered.size}; RAM-Samples: ${samples.size}")
             appendLine("Zeitraum: ${ordered.firstOrNull()?.substringBefore(" [") ?: "n/a"} bis ${ordered.lastOrNull()?.substringBefore(" [") ?: "n/a"}")
+            appendLine()
+            appendLine("[VULKAN-LAUFZEITBELEG – TREIBER UND TATSÄCHLICHES LAYER-OFFLOAD]")
+            if (nativePriorityEvidence.isEmpty()) {
+                appendLine("Keine passende Runtime-Zeile für Mali-Treiberfähigkeiten oder tatsächliche Layer-Zuweisung im nativen Log gefunden.")
+            } else {
+                nativePriorityEvidence.forEach(::appendLine)
+            }
             appendLine()
             appendLine("[WICHTIGE EREIGNISSE]")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
