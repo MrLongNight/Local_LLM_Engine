@@ -232,8 +232,8 @@ internal class LocalLlmEngineImpl(
                 "engine",
                 "MODEL_NATIVE_RUNTIME_READY",
                 "durationMs=$nativeLoadDurationMs, backend=${NativeEngineHandle.nativeGetActiveBackend(handle)}, " +
-                    "threads=${config.threads}, batchThreads=${config.batchThreads.takeIf { it > 0 } ?: config.threads}, " +
-                    "batch=${config.batchSize}, microBatch=${config.microBatchSize.takeIf { it > 0 } ?: config.batchSize}, " +
+                    "threads=${config.threads}, batchThreads=${config.effectiveBatchThreads}, " +
+                    "batch=${config.batchSize}, microBatch=${config.effectiveMicroBatchSize}, " +
                     "context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
             )
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)
