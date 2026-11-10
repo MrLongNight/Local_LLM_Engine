@@ -427,12 +427,21 @@ class InferenceServiceProcessTest {
             assertEquals("Recovery must reload the exact original GGUF source",
                 modelFile.absolutePath, recoveredModelPath)
 
-            val followup = withTimeout(30_000L) {
+            // Keep the strict timeout above for the deliberately blocked JNI fault
+            // injection. Recovery is a separate, real inference on a cold replacement
+            // process and must not inherit the 1.5s fault-injection prefill deadline.
+            val recoveryTimeoutConfig = timeoutConfig.copy(
+                prefillMs = 30_000L,
+                firstTokenMs = 15_000L,
+                interTokenMs = 10_000L,
+                totalInferenceMs = 60_000L
+            )
+            val followup = withTimeout(recoveryTimeoutConfig.totalInferenceMs + 5_000L) {
                 client.generateChat(
                     InferenceRequest.single(
                         userPrompt = "Write one short sentence.",
                         maxPredictTokens = 12
-                    ).copy(timeoutConfig = timeoutConfig)
+                    ).copy(timeoutConfig = recoveryTimeoutConfig)
                 )
             }
             assertTrue("A real follow-up inference must succeed after reload: ${followup.exceptionOrNull()}",
