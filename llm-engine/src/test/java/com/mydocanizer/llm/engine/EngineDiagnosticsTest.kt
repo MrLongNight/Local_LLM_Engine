@@ -172,20 +172,20 @@ class EngineDiagnosticsTest {
         assertTrue(
             report.contains(
                 "pid=6412 runId=decode-run-a op=mul_mat_vec_q4_K snapshots=3 samples=3 " +
-                    "gpuAvg p50=590.000us p90=614.000us max=620.000us"
+                    "gpuAvg p50=590.000us p90=614.000us max=620.000us gpuPerGraphUs=596.667"
             )
         )
         assertTrue(
             report.contains(
                 "pid=6412 runId=decode-run-b op=mul_mat_vec_q4_K snapshots=1 samples=1 " +
-                    "gpuAvg p50=900.000us p90=900.000us max=900.000us"
+                    "gpuAvg p50=900.000us p90=900.000us max=900.000us gpuPerGraphUs=900.000"
             )
         )
         assertTrue(report.contains("op=FLASH_ATTN_EXT dst(128;1;8) snapshots=1"))
         assertTrue(
             report.contains(
                 "runId=two-snapshot-run op=two_value_op snapshots=2 samples=2 " +
-                    "gpuAvg p50=600.000us p90=616.000us max=620.000us"
+                    "gpuAvg p50=600.000us p90=616.000us max=620.000us gpuPerGraphUs=600.000"
             )
         )
         assertFalse(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
