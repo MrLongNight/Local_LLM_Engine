@@ -80,6 +80,34 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("measuredTokensPerSecond=0.750"))
     }
 
+    @Test
+    fun compactReportPrioritizesVulkanRuntimeCapabilitiesAndActualLayerOffload() {
+        val capability = "2026-11-10 16:00:00.000 [NATIVE] ggml_vulkan: 0 = Mali-G57 (Mali driver) | " +
+            "uma: 1 | rebar: 0 | fp16: true | bf16: 0 | fp4: 0 | warp size: 16 | " +
+            "shared memory: 32768 | int dot: 1 | matrix cores: none"
+        val actualOffload = "2026-11-10 16:00:01.000 [NATIVE] llama_model_load: offloaded 37/37 layers to GPU"
+        val noisyErrors = (1..24).map { index ->
+            "2026-11-10 16:01:%02d.000 [ERROR] [engine] SYNTHETIC_FAILURE - ".format(index) +
+                "x".repeat(420)
+        }
+        val noisyPerformance = (1..16).map { index ->
+            "2026-11-10 16:02:%02d.000 [INFO] [benchmark] GPU_LAYER_SWEEP_RESULT - ".format(index) +
+                "detail=".repeat(90)
+        }
+
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(capability, actualOffload) + noisyErrors + noisyPerformance
+        )
+
+        assertTrue(report.contains("int dot: 1"))
+        assertTrue(report.contains("offloaded 37/37 layers to GPU"))
+        assertTrue(
+            report.indexOf("[VULKAN-LAUFZEITBELEG") <
+                report.indexOf("[WICHTIGE EREIGNISSE")
+        )
+        assertTrue(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
+    }
+
     private fun nativeMetric(
         index: Int,
         decodeUs: Long,
