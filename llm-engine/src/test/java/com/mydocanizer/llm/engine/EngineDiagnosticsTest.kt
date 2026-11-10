@@ -162,7 +162,9 @@ class EngineDiagnosticsTest {
                 vulkanOperationMetric(6412, "decode-run-a", 102, "rms_norm", 1, 12.5, 12.5),
                 vulkanOperationMetric(
                     6412, "decode-run-a", 104, "FLASH_ATTN_EXT dst(128;1;8)", 1, 25.0, 25.0
-                )
+                ),
+                vulkanOperationMetric(6412, "two-snapshot-run", 105, "two_value_op", 1, 580.0, 580.0),
+                vulkanOperationMetric(6412, "two-snapshot-run", 106, "two_value_op", 1, 620.0, 620.0)
             )
         )
 
@@ -180,6 +182,12 @@ class EngineDiagnosticsTest {
             )
         )
         assertTrue(report.contains("op=FLASH_ATTN_EXT dst(128;1;8) snapshots=1"))
+        assertTrue(
+            report.contains(
+                "runId=two-snapshot-run op=two_value_op snapshots=2 samples=2 " +
+                    "gpuAvg p50=600.000us p90=616.000us max=620.000us"
+            )
+        )
         assertFalse(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
     }
 
