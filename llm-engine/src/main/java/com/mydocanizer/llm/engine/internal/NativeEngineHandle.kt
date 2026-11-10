@@ -1,6 +1,7 @@
 package com.mydocanizer.llm.engine.internal
 
 import android.util.Log
+import com.mydocanizer.llm.engine.BuildConfig
 import java.io.File
 
 /**
@@ -45,7 +46,7 @@ internal object NativeEngineHandle {
             try {
                 System.loadLibrary(LIB_NAME)
                 nativeSetDiagnosticsLogFile(diagnosticsLogFile.absolutePath)
-                nativeInitBackend()
+                nativeInitBackend(enableVulkanPerfProfiler = BuildConfig.DEBUG)
                 isLoaded = true
                 Log.i(TAG, "Native library $LIB_NAME successfully loaded and backend initialized")
             } catch (t: Throwable) {
@@ -60,7 +61,7 @@ internal object NativeEngineHandle {
     external fun nativeSetDiagnosticsLogFile(path: String)
 
     @JvmStatic
-    external fun nativeInitBackend()
+    external fun nativeInitBackend(enableVulkanPerfProfiler: Boolean)
 
     @JvmStatic
     external fun nativeShutdownBackend()
