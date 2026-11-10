@@ -452,10 +452,12 @@ object EngineDiagnostics {
                 groupedOperations.forEach { (key, metrics, summedUs) ->
                     val uniqueSnapshots = metrics.map { it.snapshot }.distinct().size
                     val totalSamples = metrics.sumOf { it.sampleCount }
+                    val perGraphTotalUs = if (uniqueSnapshots > 0) summedUs / uniqueSnapshots else summedUs
                     val gflops = metrics.mapNotNull { it.gflops }
                     appendLine(
                         "pid=${key.first} runId=${key.second} op=${key.third} snapshots=$uniqueSnapshots samples=$totalSamples " +
                             doubleTimingSummary("gpuAvg", metrics.map { it.averageUs }) +
+                            " gpuPerGraphUs=${String.format(Locale.US, "%.3f", perGraphTotalUs)}" +
                             " gpuSumUs=${String.format(Locale.US, "%.3f", summedUs)}" +
                             (if (gflops.isNotEmpty()) {
                                 " gflops_p50=${String.format(Locale.US, "%.3f", percentileDouble(gflops, 0.50))}"
