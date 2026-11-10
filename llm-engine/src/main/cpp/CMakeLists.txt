@@ -270,6 +270,100 @@ static void ggml_vk_get_physical_device_features2(
             }]=])
     string(REPLACE "${_memory_heap_anchor}" "${_memory_heap_replacement}" _vulkan_contents "${_vulkan_contents}")
 
+    # Upstream writes GGML_VK_PERF_LOGGER output to std::cerr, which is not
+    # persisted by the engine's llama/ggml log callback. Replace only this
+    # function in the generated Android source so each GPU timestamp sample
+    # enters the same timestamped, exportable native diagnostics file.
+    set(_perf_logger_start_anchor "void vk_perf_logger::print_timings(bool force) {")
+    set(_perf_logger_end_anchor "std::string vk_perf_logger::get_node_fusion_name")
+    string(FIND "${_vulkan_contents}" "${_perf_logger_start_anchor}" _perf_logger_start)
+    string(FIND "${_vulkan_contents}" "${_perf_logger_end_anchor}" _perf_logger_end)
+    if(_perf_logger_start LESS 0 OR _perf_logger_end LESS _perf_logger_start)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan per-operation profiler anchor changed.")
+    endif()
+
+    set(_perf_logger_replacement [=[
+void vk_perf_logger::print_timings(bool force) {
+    if (timings.empty()) {
+        return;
+    }
+    print_count++;
+    if ((print_count % vk_perf_logger_frequency) != 0 && !force) {
+        return;
+    }
+    print_count = 0;
+
+    static std::atomic<uint64_t> local_llm_snapshot_counter{0};
+    const uint64_t snapshot_id =
+        local_llm_snapshot_counter.fetch_add(1, std::memory_order_relaxed);
+    const int process_id = static_cast<int>(getpid());
+    uint64_t total_all_op_times = 0;
+    uint64_t logged_ops = 0;
+
+    for (const auto & t : timings) {
+        const size_t sample_count = t.second.size();
+        if (sample_count == 0) {
+            continue;
+        }
+
+        uint64_t total_op_times = 0;
+        for (const auto & time : t.second) {
+            total_op_times += time;
+        }
+        const double average_us =
+            static_cast<double>(total_op_times) /
+            static_cast<double>(sample_count) / 1000.0;
+        const double total_us = static_cast<double>(total_op_times) / 1000.0;
+
+        auto it = flops.find(t.first);
+        if (it != flops.end() && it->second.size() == sample_count && total_op_times > 0) {
+            uint64_t total_op_flops = 0;
+            for (const auto & elem : it->second) {
+                total_op_flops += elem;
+            }
+            const double gflops =
+                static_cast<double>(total_op_flops) /
+                static_cast<double>(total_op_times);
+            GGML_LOG_INFO(
+                "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING - pid=%d,snapshot=%llu,op=%s,samples=%llu,avgUs=%.3f,totalUs=%.3f,gflops=%.3f\n",
+                process_id,
+                static_cast<unsigned long long>(snapshot_id),
+                t.first.c_str(),
+                static_cast<unsigned long long>(sample_count),
+                average_us,
+                total_us,
+                gflops);
+        } else {
+            GGML_LOG_INFO(
+                "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING - pid=%d,snapshot=%llu,op=%s,samples=%llu,avgUs=%.3f,totalUs=%.3f,gflops=n/a\n",
+                process_id,
+                static_cast<unsigned long long>(snapshot_id),
+                t.first.c_str(),
+                static_cast<unsigned long long>(sample_count),
+                average_us,
+                total_us);
+        }
+
+        total_all_op_times += total_op_times;
+        ++logged_ops;
+    }
+
+    GGML_LOG_INFO(
+        "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING_SUMMARY - pid=%d,snapshot=%llu,ops=%llu,sumOpUs=%.3f\n",
+        process_id,
+        static_cast<unsigned long long>(snapshot_id),
+        static_cast<unsigned long long>(logged_ops),
+        static_cast<double>(total_all_op_times) / 1000.0);
+
+    timings.clear();
+    flops.clear();
+}
+]=])
+
+    string(SUBSTRING "${_vulkan_contents}" 0 ${_perf_logger_start} _perf_logger_prefix)
+    string(SUBSTRING "${_vulkan_contents}" ${_perf_logger_end} -1 _perf_logger_suffix)
+    set(_vulkan_contents "${_perf_logger_prefix}${_perf_logger_replacement}${_perf_logger_suffix}")
+
     set(_patched_dir "${CMAKE_CURRENT_BINARY_DIR}/local-android-vulkan")
     file(MAKE_DIRECTORY "${_patched_dir}")
     set(_patched_cpp "${_patched_dir}/ggml-vulkan.cpp")
@@ -279,6 +373,7 @@ static void ggml_vk_get_physical_device_features2(
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_OP_TIMING" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
