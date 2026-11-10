@@ -284,6 +284,8 @@ static void ggml_vk_get_physical_device_features2(
     endif()
 
     set(_perf_logger_replacement [=[
+extern "C" const char* local_llm_vulkan_profile_run_id();
+
 void vk_perf_logger::print_timings(bool force) {
     if (timings.empty()) {
         return;
@@ -298,6 +300,10 @@ void vk_perf_logger::print_timings(bool force) {
     const uint64_t snapshot_id =
         local_llm_snapshot_counter.fetch_add(1, std::memory_order_relaxed);
     const int process_id = static_cast<int>(getpid());
+    const char* active_run_id = local_llm_vulkan_profile_run_id();
+    if (active_run_id == nullptr || active_run_id[0] == '\0') {
+        active_run_id = "none";
+    }
     uint64_t total_all_op_times = 0;
     uint64_t logged_ops = 0;
 
@@ -315,6 +321,13 @@ void vk_perf_logger::print_timings(bool force) {
             static_cast<double>(total_op_times) /
             static_cast<double>(sample_count) / 1000.0;
         const double total_us = static_cast<double>(total_op_times) / 1000.0;
+        std::string operation_name = t.first;
+        // The compact Kotlin parser uses commas as field separators.
+        // Sanitize the operation descriptor so shapes like FLASH_ATTN_EXT
+        // remain complete in the exported diagnostic.
+        std::replace(operation_name.begin(), operation_name.end(), ',', ';');
+        std::replace(operation_name.begin(), operation_name.end(), '\n', ' ');
+        std::replace(operation_name.begin(), operation_name.end(), '\r', ' ');
 
         auto it = flops.find(t.first);
         if (it != flops.end() && it->second.size() == sample_count && total_op_times > 0) {
@@ -326,20 +339,22 @@ void vk_perf_logger::print_timings(bool force) {
                 static_cast<double>(total_op_flops) /
                 static_cast<double>(total_op_times);
             GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING - pid=%d,snapshot=%llu,op=%s,samples=%llu,avgUs=%.3f,totalUs=%.3f,gflops=%.3f\n",
+                "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING - pid=%d,runId=%s,snapshot=%llu,op=%s,samples=%llu,avgUs=%.3f,totalUs=%.3f,gflops=%.3f\n",
                 process_id,
+                active_run_id,
                 static_cast<unsigned long long>(snapshot_id),
-                t.first.c_str(),
+                operation_name.c_str(),
                 static_cast<unsigned long long>(sample_count),
                 average_us,
                 total_us,
                 gflops);
         } else {
             GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING - pid=%d,snapshot=%llu,op=%s,samples=%llu,avgUs=%.3f,totalUs=%.3f,gflops=n/a\n",
+                "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING - pid=%d,runId=%s,snapshot=%llu,op=%s,samples=%llu,avgUs=%.3f,totalUs=%.3f,gflops=n/a\n",
                 process_id,
+                active_run_id,
                 static_cast<unsigned long long>(snapshot_id),
-                t.first.c_str(),
+                operation_name.c_str(),
                 static_cast<unsigned long long>(sample_count),
                 average_us,
                 total_us);
@@ -350,8 +365,9 @@ void vk_perf_logger::print_timings(bool force) {
     }
 
     GGML_LOG_INFO(
-        "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING_SUMMARY - pid=%d,snapshot=%llu,ops=%llu,sumOpUs=%.3f\n",
+        "ggml_vulkan: LOCAL_LLM_VULKAN_OP_TIMING_SUMMARY - pid=%d,runId=%s,snapshot=%llu,ops=%llu,sumOpUs=%.3f\n",
         process_id,
+        active_run_id,
         static_cast<unsigned long long>(snapshot_id),
         static_cast<unsigned long long>(logged_ops),
         static_cast<double>(total_all_op_times) / 1000.0);
