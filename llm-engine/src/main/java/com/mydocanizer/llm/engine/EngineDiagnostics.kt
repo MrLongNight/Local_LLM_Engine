@@ -110,7 +110,7 @@ object EngineDiagnostics {
         val sampleUs: Long,
         val decodeUs: Long,
         val decodeSubmitUs: Long,
-        val gpuSyncWaitUs: Long,
+        val backendSyncWaitUs: Long,
         val pieceUs: Long,
         val totalUs: Long
     )
@@ -138,7 +138,7 @@ object EngineDiagnostics {
             sampleUs = field(line, "sampleUs")?.toLongOrNull() ?: return null,
             decodeUs = field(line, "decodeUs")?.toLongOrNull() ?: return null,
             decodeSubmitUs = field(line, "decodeSubmitUs")?.toLongOrNull() ?: return null,
-            gpuSyncWaitUs = field(line, "gpuSyncWaitUs")?.toLongOrNull() ?: return null,
+            backendSyncWaitUs = field(line, "backendSyncWaitUs")?.toLongOrNull() ?: return null,
             pieceUs = field(line, "pieceUs")?.toLongOrNull() ?: return null,
             totalUs = field(line, "totalUs")?.toLongOrNull() ?: return null
         )
@@ -363,10 +363,10 @@ object EngineDiagnostics {
                         appendLine(timingSummary("sample", metrics.map { it.sampleUs }))
                         appendLine(timingSummary("decode", metrics.map { it.decodeUs }))
                         appendLine(timingSummary("decodeSubmit", metrics.map { it.decodeSubmitUs }))
-                        appendLine(timingSummary("gpuSyncWait", metrics.map { it.gpuSyncWaitUs }))
+                        appendLine(timingSummary("backendSyncWait", metrics.map { it.backendSyncWaitUs }))
                         appendLine(timingSummary("tokenPiece", metrics.map { it.pieceUs }))
                         appendLine(timingSummary("nativeStep", metrics.map { it.totalUs }))
-                        appendLine("Token-Schritte (index/sampleUs/decodeUs/submitUs/gpuSyncWaitUs/pieceUs/totalUs):")
+                        appendLine("Token-Schritte (index/sampleUs/decodeUs/submitUs/backendSyncWaitUs/pieceUs/totalUs):")
                         val orderedMetrics = metrics.sortedBy { it.index }
                         val representativeMetrics = if (orderedMetrics.size <= 8) {
                             orderedMetrics
@@ -374,7 +374,7 @@ object EngineDiagnostics {
                             (orderedMetrics.take(4) + orderedMetrics.takeLast(4)).distinctBy { it.index }
                         }
                         representativeMetrics.forEach { metric ->
-                            appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.decodeSubmitUs}/${metric.gpuSyncWaitUs}/${metric.pieceUs}/${metric.totalUs}")
+                            appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.decodeSubmitUs}/${metric.backendSyncWaitUs}/${metric.pieceUs}/${metric.totalUs}")
                         }
                     }
             }
