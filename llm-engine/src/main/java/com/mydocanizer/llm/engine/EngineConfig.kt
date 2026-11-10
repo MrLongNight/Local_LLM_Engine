@@ -57,6 +57,20 @@ data class EngineConfig(
     val batchThreads: Int = 0,
     val microBatchSize: Int = 0
 ) : Parcelable {
+    /**
+     * Effective llama.cpp thread count for prompt/batch processing.
+     * A configured value of zero means "follow the main thread count".
+     */
+    val effectiveBatchThreads: Int
+        get() = batchThreads.takeIf { it > 0 } ?: threads
+
+    /**
+     * Effective llama.cpp micro-batch size.
+     * A configured value of zero means "follow the configured batch size".
+     */
+    val effectiveMicroBatchSize: Int
+        get() = microBatchSize.takeIf { it > 0 } ?: batchSize
+
     init {
         require(contextSize >= 256) { "contextSize must be at least 256" }
         require(batchSize >= 64) { "batchSize must be at least 64" }
