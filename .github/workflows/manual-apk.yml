@@ -243,6 +243,10 @@ jobs:
                           "LOCAL_LLM_MEMORY_BUDGET",
                       "Vulkan per-operation GPU timestamp diagnostics":
                           "LOCAL_LLM_VULKAN_OP_TIMING",
+                      "Vulkan profiler inference-run correlation":
+                          "local_llm_vulkan_profile_run_id()",
+                      "Vulkan profiler operation-name field sanitization":
+                          "std::replace(operation_name.begin(), operation_name.end(), ',', ';')",
                   }
                   for vulkan_entry in vulkan_sources:
                       vulkan_file = vulkan_entry.get("file", "")
