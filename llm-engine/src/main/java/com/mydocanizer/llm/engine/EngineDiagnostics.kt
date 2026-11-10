@@ -111,6 +111,7 @@ object EngineDiagnostics {
         val decodeUs: Long,
         val decodeSubmitUs: Long,
         val backendSyncWaitUs: Long,
+        val usedLegacyGpuSyncWaitLabel: Boolean,
         val pieceUs: Long,
         val totalUs: Long
     )
@@ -130,6 +131,8 @@ object EngineDiagnostics {
      */
     private fun nativeTokenStepMetric(line: String): NativeTokenStepMetric? {
         if (!line.contains("TOKEN_STEP_METRIC")) return null
+        val currentSyncField = field(line, "backendSyncWaitUs")
+        val legacyGpuSyncField = if (currentSyncField == null) field(line, "gpuSyncWaitUs") else null
         return NativeTokenStepMetric(
             pid = field(line, "pid") ?: return null,
             runId = field(line, "runId") ?: return null,
@@ -138,7 +141,8 @@ object EngineDiagnostics {
             sampleUs = field(line, "sampleUs")?.toLongOrNull() ?: return null,
             decodeUs = field(line, "decodeUs")?.toLongOrNull() ?: return null,
             decodeSubmitUs = field(line, "decodeSubmitUs")?.toLongOrNull() ?: return null,
-            backendSyncWaitUs = field(line, "backendSyncWaitUs")?.toLongOrNull() ?: return null,
+            backendSyncWaitUs = (currentSyncField ?: legacyGpuSyncField)?.toLongOrNull() ?: return null,
+            usedLegacyGpuSyncWaitLabel = currentSyncField == null && legacyGpuSyncField != null,
             pieceUs = field(line, "pieceUs")?.toLongOrNull() ?: return null,
             totalUs = field(line, "totalUs")?.toLongOrNull() ?: return null
         )
@@ -354,6 +358,7 @@ object EngineDiagnostics {
                 appendLine("Keine eindeutig einem Inferenzlauf zuordenbaren nativen Token-Messwerte gefunden.")
             } else {
                 appendLine("Native Decode-Zeiten – strikt nach PID, Backend und runId getrennt:")
+                val legacySyncLabelSamples = nativeTokenMetrics.count { it.usedLegacyGpuSyncWaitLabel }
                 nativeTokenMetrics
                     .groupBy { "${it.pid}/${it.backend}/${it.runId}" }
                     .toSortedMap()
@@ -377,6 +382,13 @@ object EngineDiagnostics {
                             appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.decodeSubmitUs}/${metric.backendSyncWaitUs}/${metric.pieceUs}/${metric.totalUs}")
                         }
                     }
+            }
+            if (legacySyncLabelSamples > 0) {
+                appendLine(
+                    "Hinweis: $legacySyncLabelSamples ältere Samples heißen gpuSyncWaitUs; " +
+                        "sie messen ebenfalls die gesamte llama_synchronize()-Dauer und werden hier " +
+                        "als backendSyncWait interpretiert, nicht als reine GPU-Kernelzeit."
+                )
             }
             if (legacyNativeMetricCount > 0) {
                 appendLine("Legacy native samples without pid/runId/backend correlation (excluded from percentiles): $legacyNativeMetricCount")
