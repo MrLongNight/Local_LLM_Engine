@@ -18,8 +18,10 @@ class LocalLlmEngineApiTest {
         assertEquals(1024, config.maxPredictTokens)
         assertEquals(BackendPreference.AUTO, config.backendPreference)
         assertEquals(99, config.gpuLayers)
-        assertEquals(0, config.batchThreads) // follows n_threads
-        assertEquals(0, config.microBatchSize) // follows n_batch
+        assertEquals(0, config.batchThreads) // raw setting: follow n_threads
+        assertEquals(0, config.microBatchSize) // raw setting: follow n_batch
+        assertEquals(4, config.effectiveBatchThreads)
+        assertEquals(512, config.effectiveMicroBatchSize)
     }
 
     @Test
@@ -28,6 +30,8 @@ class LocalLlmEngineApiTest {
         assertEquals(6, config.threads)
         assertEquals(2, config.batchThreads)
         assertEquals(32, config.microBatchSize)
+        assertEquals(2, config.effectiveBatchThreads)
+        assertEquals(32, config.effectiveMicroBatchSize)
     }
 
     @Test(expected = IllegalArgumentException::class)
