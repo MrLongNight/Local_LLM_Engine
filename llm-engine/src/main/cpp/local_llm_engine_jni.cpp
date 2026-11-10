@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <cstring>
 #include <ctime>
+#include <cstdlib>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -610,7 +611,35 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetDiagnostics
 }
 
 JNIEXPORT void JNICALL
-Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(JNIEnv* /*env*/, jclass /*clazz*/) {
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(
+        JNIEnv* /*env*/,
+        jclass /*clazz*/,
+        jboolean enable_vulkan_perf_profiler) {
+    const bool profiler_requested = enable_vulkan_perf_profiler == JNI_TRUE;
+    if (profiler_requested) {
+        // llama.cpp reads these variables during Vulkan backend discovery.
+        // Configure them before llama_backend_init() so query pools are created
+        // before the first model is loaded or graph is executed.
+        const int profiler_result = setenv("GGML_VK_PERF_LOGGER", "1", 1);
+        const int frequency_result = setenv("GGML_VK_PERF_LOGGER_FREQUENCY", "1", 1);
+        unsetenv("GGML_VK_PERF_LOGGER_CONCURRENT");
+        if (profiler_result == 0 && frequency_result == 0) {
+            log_native_info_message(
+                "VULKAN_PERF_PROFILER_CONFIG - enabled=true,frequency=1,mode=per_operation_gpu_timestamps,scope=debug_only");
+        } else {
+            unsetenv("GGML_VK_PERF_LOGGER");
+            unsetenv("GGML_VK_PERF_LOGGER_FREQUENCY");
+            LOGE("Could not configure Vulkan per-operation profiler: errno=%d", errno);
+            log_native_info_message("VULKAN_PERF_PROFILER_CONFIG - enabled=false,reason=setenv_failed");
+        }
+    } else {
+        // Do not inherit an accidental profiler setting in release builds.
+        unsetenv("GGML_VK_PERF_LOGGER");
+        unsetenv("GGML_VK_PERF_LOGGER_FREQUENCY");
+        unsetenv("GGML_VK_PERF_LOGGER_CONCURRENT");
+        log_native_info_message("VULKAN_PERF_PROFILER_CONFIG - enabled=false,scope=release");
+    }
+
 #if defined(LOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED)
     log_native_info_message("VULKAN_INTEGER_DOT_SHADER_COMPILED=true");
 #else
