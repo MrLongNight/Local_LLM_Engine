@@ -93,9 +93,11 @@ profiling adds timestamp queries and synchronization/readback overhead, so
 benchmark**. Use it to identify expensive Vulkan operators and compare kernel
 paths; validate any resulting optimization again in a profiler-disabled build.
 
-The diagnostic export summarizes the newest 12 graph snapshots by operator,
-including p50/p90 GPU operation timings, and places the RAM summary before
-verbose token samples. The native log retention limit is 2 MiB per process and
+The diagnostic export summarizes the newest 12 graph snapshots by process,
+inference run ID and operator, including interpolated p50/p90 GPU operation
+timings. Operation descriptors are sanitized so commas in Vulkan operator
+shapes do not truncate the export fields. The RAM summary stays before verbose
+token samples. The native log retention limit is 2 MiB per process and
 the compact report limit is 32 KiB. Prompt and response contents remain
 excluded.
 
