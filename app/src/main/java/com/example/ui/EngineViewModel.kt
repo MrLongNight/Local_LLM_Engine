@@ -448,7 +448,7 @@ class EngineViewModel(
                     "backendOrder=VULKAN,CPU,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},totalTokens=${BackendBenchmarkPlan.TOTAL_TOKENS}," +
                     "context=${benchmarkConfig.contextSize},batch=${benchmarkConfig.batchSize},threads=${benchmarkConfig.threads}," +
-                    "batchThreads=${benchmarkConfig.batchThreads},microBatch=${benchmarkConfig.microBatchSize}," +
+                    "batchThreads=${benchmarkConfig.effectiveBatchThreads},microBatch=${benchmarkConfig.effectiveMicroBatchSize}," +
                     "gpuLayers=${benchmarkConfig.gpuLayers},temperature=0.0,topP=1.0"
             )
 
@@ -514,8 +514,8 @@ class EngineViewModel(
                             "benchmark",
                             "BACKEND_BENCHMARK_RESULT",
                             reportLine + ",context=${backendConfig.contextSize},batch=${backendConfig.batchSize}," +
-                                "threads=${backendConfig.threads},batchThreads=${backendConfig.batchThreads}," +
-                                "microBatch=${backendConfig.microBatchSize},gpuLayers=${backendConfig.gpuLayers}," +
+                                "threads=${backendConfig.threads},batchThreads=${backendConfig.effectiveBatchThreads}," +
+                                "microBatch=${backendConfig.effectiveMicroBatchSize},gpuLayers=${backendConfig.gpuLayers}," +
                                 "temperature=0.0,topP=1.0,maxPredictTokens=${BackendBenchmarkPlan.TOTAL_TOKENS}"
                         )
                     } catch (cancelled: CancellationException) {
@@ -862,8 +862,8 @@ class EngineViewModel(
                             "nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
                             "generationMs=${measured.result.durationMs},finishReason=${measured.result.finishReason.name}," +
                             "context=${originalConfig.contextSize},batch=${originalConfig.batchSize}," +
-                            "threads=${originalConfig.threads},batchThreads=${originalConfig.batchThreads}," +
-                            "microBatch=${originalConfig.microBatchSize},backend=${loaded.activeBackend}"
+                            "threads=${originalConfig.threads},batchThreads=${originalConfig.effectiveBatchThreads}," +
+                            "microBatch=${originalConfig.effectiveMicroBatchSize},backend=${loaded.activeBackend}"
                     )
                     if (index < runLayers.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
                 }
