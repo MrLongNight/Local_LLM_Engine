@@ -31,7 +31,7 @@ class EngineDiagnosticsTest {
     fun legacyNativeSamplesWithoutRunIdentityAreNotMixedIntoPercentiles() {
         val legacy = "2026-11-09 21:00:00.000 [NATIVE] TOKEN_STEP_METRIC - " +
             "index=1, sampleUs=100, decodeUs=9000000, decodeSubmitUs=9000000, " +
-            "gpuSyncWaitUs=0, pieceUs=5, totalUs=9000105, backend=CPU"
+            "backendSyncWaitUs=0, pieceUs=5, totalUs=9000105, backend=CPU"
 
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(legacy, nativeMetric(1, 100_000, 200, "fresh-run", "Vulkan"))
@@ -117,7 +117,7 @@ class EngineDiagnosticsTest {
     ): String =
         "2026-11-09 21:00:00.000 [NATIVE] TOKEN_STEP_METRIC - " +
             "index=$index, sampleUs=500, decodeUs=$decodeUs, decodeSubmitUs=$decodeUs, " +
-            "gpuSyncWaitUs=0, pieceUs=5, totalUs=${decodeUs + 505}, " +
+            "backendSyncWaitUs=0, pieceUs=5, totalUs=${decodeUs + 505}, " +
             "pid=$pid, runId=$runId, backend=$backend"
 
     private fun kotlinMetric(
