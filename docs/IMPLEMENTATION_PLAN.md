@@ -127,6 +127,21 @@ Zwei weitere Instrumentationstests prüfen den Descriptor-Resolver: ein seekbare
 
 **Abnahme:** Ein Backend wird nur angeboten, wenn der Build, die Runtime-Erkennung, reale Inferenz und ein reproduzierbarer Leistungs-/Stabilitätsvergleich belegt sind.
 
+## Vulkan-Q4_K-Decode – Build-Toolchain-Ursache identifiziert (10.11.2026)
+
+**Befund aus dem realen APK-Workflow #175:** Der ARM64-Vulkan-Build installierte über Ubuntu Noble das Paket `glslc 2023.8-1build1`. Diese Shaderc-Version unterstützt `GL_EXT_integer_dot_product` nicht. Upstream testet diese GLSL-Erweiterung optional und deaktiviert bei einem zu alten Compiler `GGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT`, ohne den Vulkan-Build abzubrechen. Dadurch werden die Q8_1-/Integer-Dot-MMVQ-Shader und die entsprechende Runtime-Erkennung aus dem kompilierten Vulkan-Backend ausgeschlossen. Der Vulkan-Backendname und `37/37` offgeladene Layer können trotzdem erfolgreich gemeldet werden.
+
+Das passt direkt zu den Geräte-Messungen vom 10.11.2026: Vulkan wartet bei der Token-Generierung rund 503 ms pro Decode auf die Backend-Fertigstellung und ist damit langsamer als die CPU. Es ist die erste konkret nachgewiesene, projektseitige Ursache für den fehlenden schnellen Q4_K-Decode-Pfad. Ob die Mali-G57 selbst zusätzlich keine beschleunigte Integer-Dot-Funktion bereitstellt, bleibt eine getrennte Runtime-Frage.
+
+**Korrektur im aktuellen Diagnose-Commit:**
+- GitHub Actions verwendet statt Ubuntu-glslc 2023.8 den SHA256-geprüften LunarG Vulkan SDK 1.4.363.0.
+- Workflow und CMake kompilieren explizit llama.cpps `feature-tests/integer_dot.comp`.
+- Der Android-Vulkan-Build bricht ab, wenn `GL_EXT_integer_dot_product` nicht unterstützt wird. Kein stiller Build mit deaktiviertem MMVQ-Pfad.
+- Der JNI-Diagnoselogger übernimmt selektiv die kompakte `ggml_vulkan:`-DEBUG-Hardwarezeile (FP16, Integer Dot, Subgroup, Shared Memory, UMA und Matrix Cores), ohne allgemeines per-Operation-DEBUG zu aktivieren.
+- Der native Export nennt zusätzlich `VULKAN_INTEGER_DOT_SHADER_COMPILED=true/false`, damit Compile-Fähigkeit und Treiberfähigkeit getrennt beurteilt werden.
+
+**Abnahme noch offen:** Der neue GitHub-Actions-Build muss erfolgreich sein. Danach ist auf dem nubia Z2462N zu prüfen, ob die native Hardwaremeldung `int dot: 1` oder `int dot: 0` nennt. Nur bei `int dot: 1` ist die Verwendung des Integer-Dot-MMVQ-Pfads hardwareseitig möglich; andernfalls bleibt Q4_K auf diesem Treiber beim F16/F32-Fallback. Eine Beschleunigung auf dem Zielgerät wird erst nach einem neuen identischen CPU-/Vulkan-Benchmark behauptet.
+
 ## Geräte-Log vom 05.11.2026 – Ausgangsbefund, keine Abnahme
 
 Verwendetes Modell: `evora-qwen3-1.7b-en.Q4_K_M.gguf` (1,107,408,576 Bytes).

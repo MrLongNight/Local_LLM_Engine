@@ -218,7 +218,32 @@ else()
     set(GGML_VULKAN OFF CACHE BOOL "ggml: Vulkan backend" FORCE)
 endif()
 
+set(LOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED OFF)
+
 if(GGML_VULKAN)
+    # Do not let an old host glslc silently compile Vulkan without the fast
+    # quantized MMVQ integer-dot kernels. Upstream treats this as an optional
+    # shader extension; this Android engine requires it for a valid Vulkan build.
+    set(_integer_dot_shader "${LLAMA_SRC}/ggml/src/ggml-vulkan/vulkan-shaders/feature-tests/integer_dot.comp")
+    if(NOT EXISTS "${_integer_dot_shader}")
+        message(FATAL_ERROR "LocalLLM: pinned llama.cpp integer-dot feature test is missing: ${_integer_dot_shader}")
+    endif()
+
+    execute_process(
+        COMMAND "${Vulkan_GLSLC_EXECUTABLE}" -o - -fshader-stage=compute --target-env=vulkan1.3 "${_integer_dot_shader}"
+        RESULT_VARIABLE _integer_dot_glslc_result
+        OUTPUT_VARIABLE _integer_dot_glslc_output
+        ERROR_VARIABLE _integer_dot_glslc_error
+    )
+    if(NOT _integer_dot_glslc_result EQUAL 0)
+        message(FATAL_ERROR
+            "LocalLLM: Vulkan glslc cannot compile GL_EXT_integer_dot_product. "
+            "This disables llama.cpp's quantized MMVQ integer-dot kernels and causes slow Q4_K decode. "
+            "Use the pinned Vulkan SDK 1.4.363.0 toolchain. glslc error: ${_integer_dot_glslc_error}")
+    endif()
+
+    set(LOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED ON)
+    message(STATUS "LocalLLM: GL_EXT_integer_dot_product shader support VERIFIED by ${Vulkan_GLSLC_EXECUTABLE}")
     local_llm_prepare_android_vulkan("${LLAMA_SRC}")
 endif()
 
@@ -260,6 +285,10 @@ endif()
 add_library(localllm_engine SHARED
     local_llm_engine_jni.cpp
 )
+
+if(LOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED)
+    target_compile_definitions(localllm_engine PRIVATE LOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED=1)
+endif()
 
 option(LOCAL_LLM_ENABLE_TEST_HOOKS "Enable debug-only native inference fault injection" OFF)
 if(LOCAL_LLM_ENABLE_TEST_HOOKS)

@@ -36,13 +36,20 @@ static FILE* g_native_log_file = nullptr;
 static constexpr long MAX_NATIVE_LOG_FILE_BYTES = 512L * 1024L;
 
 static void local_llm_native_log_callback(enum ggml_log_level level, const char* text, void* /*user_data*/) {
-    if (text == nullptr || level < GGML_LOG_LEVEL_INFO) return;
+    if (text == nullptr) return;
+
+    // llama.cpp reports the actual Vulkan feature set (FP16, integer dot,
+    // subgroup size, shared memory, UMA and matrix cores) as DEBUG. Preserve
+    // only its compact device-capability line; do not enable noisy per-op DEBUG.
+    const bool is_vulkan_capability_line =
+        level == GGML_LOG_LEVEL_DEBUG && std::strstr(text, "ggml_vulkan:") != nullptr;
+    if (level < GGML_LOG_LEVEL_INFO && !is_vulkan_capability_line) return;
 
     int android_priority = ANDROID_LOG_INFO;
     switch (level) {
         case GGML_LOG_LEVEL_WARN: android_priority = ANDROID_LOG_WARN; break;
         case GGML_LOG_LEVEL_ERROR: android_priority = ANDROID_LOG_ERROR; break;
-        case GGML_LOG_LEVEL_DEBUG: return;
+        case GGML_LOG_LEVEL_DEBUG: android_priority = ANDROID_LOG_DEBUG; break;
         default: android_priority = ANDROID_LOG_INFO; break;
     }
     __android_log_write(android_priority, TAG, text);
@@ -604,6 +611,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetDiagnostics
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(LOCAL_LLM_INTEGER_DOT_GLSLC_SUPPORTED)
+    log_native_info_message("VULKAN_INTEGER_DOT_SHADER_COMPILED=true");
+#else
+    log_native_info_message("VULKAN_INTEGER_DOT_SHADER_COMPILED=false");
+#endif
     llama_backend_init();
     LOGI("llama_backend_init completed");
 }
