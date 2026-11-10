@@ -76,6 +76,29 @@ synchronized before its duration is finalized, so it is not incorrectly charged 
 the first generated token. `decodeUs` now includes submission plus completion wait,
 with `decodeSubmitUs` and `gpuSyncWaitUs` available separately in the native log.
 
+## Debug Vulkan GPU-operation profiler
+
+Debug builds enable llama.cpp's `GGML_VK_PERF_LOGGER` before
+`llama_backend_init()`. The Android Vulkan compatibility overlay routes each
+per-operation Vulkan timestamp result through the native ggml logger instead
+of `std::cerr`, so the rows are retained in the process-specific native
+diagnostics file and included in the compact export. Each row contains the
+inference-service PID, a graph snapshot ID, operator name, timestamp sample
+count, average GPU time and accumulated GPU time; GFLOPS are included where
+llama.cpp provides matching flop counts.
+
+Release builds explicitly clear the profiler environment variables. Debug
+profiling adds timestamp queries and synchronization/readback overhead, so
+**do not use tokens/s from a profiler-enabled Debug run as a clean performance
+benchmark**. Use it to identify expensive Vulkan operators and compare kernel
+paths; validate any resulting optimization again in a profiler-disabled build.
+
+The diagnostic export summarizes the newest 12 graph snapshots by operator,
+including p50/p90 GPU operation timings, and places the RAM summary before
+verbose token samples. The native log retention limit is 2 MiB per process and
+the compact report limit is 32 KiB. Prompt and response contents remain
+excluded.
+
 ## In-app configuration screening
 
 The Settings screen includes an opt-in on-device screening run for the loaded model and
