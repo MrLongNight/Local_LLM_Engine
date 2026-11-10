@@ -126,6 +126,7 @@ object EngineDiagnostics {
 
     private data class VulkanOperationSample(
         val pid: String,
+        val runId: String,
         val snapshot: String,
         val operation: String,
         val sampleCount: Int,
@@ -173,6 +174,7 @@ object EngineDiagnostics {
         if (!line.contains("LOCAL_LLM_VULKAN_OP_TIMING - ")) return null
         return VulkanOperationSample(
             pid = field(line, "pid") ?: return null,
+            runId = field(line, "runId") ?: return null,
             snapshot = field(line, "snapshot") ?: return null,
             operation = field(line, "op") ?: return null,
             sampleCount = field(line, "samples")?.toIntOrNull()?.takeIf { it > 0 } ?: return null,
@@ -213,8 +215,10 @@ object EngineDiagnostics {
         if (values.isEmpty()) return 0.0
         val sorted = values.sorted()
         val rank = sorted.lastIndex * fraction.coerceIn(0.0, 1.0)
-        val index = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
-        return sorted[index]
+        val lowerIndex = kotlin.math.floor(rank).toInt().coerceIn(0, sorted.lastIndex)
+        val upperIndex = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
+        val fractionBetween = rank - lowerIndex
+        return sorted[lowerIndex] + (sorted[upperIndex] - sorted[lowerIndex]) * fractionBetween
     }
 
     private data class ResourceSample(
@@ -431,7 +435,7 @@ object EngineDiagnostics {
                 appendLine("Keine Vulkan-Per-Operation-Timestamps gefunden. Prüfe VULKAN_PERF_PROFILER_CONFIG und einen Vulkan-Inferenzlauf.")
             } else {
                 val groupedOperations = recentVulkanOperationSamples
-                    .groupBy { it.pid to it.operation }
+                    .groupBy { Triple(it.pid, it.runId, it.operation) }
                     .map { (key, metrics) ->
                         Triple(key, metrics, metrics.sumOf { it.totalUs })
                     }
@@ -442,7 +446,7 @@ object EngineDiagnostics {
                     val totalSamples = metrics.sumOf { it.sampleCount }
                     val gflops = metrics.mapNotNull { it.gflops }
                     appendLine(
-                        "pid=${key.first} op=${key.second} snapshots=$uniqueSnapshots samples=$totalSamples " +
+                        "pid=${key.first} runId=${key.second} op=${key.third} snapshots=$uniqueSnapshots samples=$totalSamples " +
                             doubleTimingSummary("gpuAvg", metrics.map { it.averageUs }) +
                             " gpuSumUs=${String.format(Locale.US, "%.3f", summedUs)}" +
                             (if (gflops.isNotEmpty()) {
