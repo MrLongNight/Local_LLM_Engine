@@ -2,6 +2,7 @@ package com.example.ui
 
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -37,5 +38,41 @@ class BackendBenchmarkPlanTest {
         assertEquals(original.batchThreads, benchmark.batchThreads)
         assertEquals(original.microBatchSize, benchmark.microBatchSize)
         assertEquals(listOf(BackendPreference.VULKAN, BackendPreference.CPU), BackendBenchmarkPlan.BACKENDS)
+    }
+
+    @Test
+    fun vulkanMatvecSweepChangesOnlyWorkgroupAndForcesFullOffload() {
+        val original = EngineConfig(
+            contextSize = 4096,
+            batchSize = 256,
+            threads = 6,
+            backendPreference = BackendPreference.AUTO,
+            gpuLayers = 37,
+            batchThreads = 3,
+            microBatchSize = 64
+        )
+        val profiles = BackendBenchmarkPlan.vulkanMatvecConfigurations(original)
+
+        assertEquals(
+            listOf(
+                VulkanMatvecWorkgroup.AUTO,
+                VulkanMatvecWorkgroup.SUBGROUP,
+                VulkanMatvecWorkgroup.LARGE,
+                VulkanMatvecWorkgroup.AUTO
+            ),
+            profiles.map { it.vulkanMatvecWorkgroup }
+        )
+        profiles.forEach { profile ->
+            assertEquals(BackendPreference.VULKAN, profile.backendPreference)
+            assertEquals(99, profile.gpuLayers)
+            assertEquals(24, profile.maxPredictTokens)
+            assertEquals(0f, profile.temperature, 0f)
+            assertEquals(1f, profile.topP, 0f)
+            assertEquals(original.contextSize, profile.contextSize)
+            assertEquals(original.batchSize, profile.batchSize)
+            assertEquals(original.threads, profile.threads)
+            assertEquals(original.batchThreads, profile.batchThreads)
+            assertEquals(original.microBatchSize, profile.microBatchSize)
+        }
     }
 }
