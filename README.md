@@ -43,7 +43,7 @@ Workflow: `.github/workflows/manual-apk.yml`
 
 The workflow runs automatically on pushes to `main` when Android app/engine source, Gradle/toolchain configuration, or the workflow changes. It can also be started manually through **Actions → Android APK Build → Run workflow** (Debug only).
 
-The workflow builds `:app:assembleDebug`, including the native C++ build and the configured ARM64 Vulkan path, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. A temporary debug keystore is generated inside the runner; no repository signing secret is required. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
+The workflow builds `:app:assembleDebug`, including the native C++ build and the configured ARM64 Vulkan path, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. If the repository Actions secret `LOCAL_LLM_DEBUG_KEYSTORE_BASE64` is configured, CI uses that persistent debug keystore; otherwise it generates a temporary key and warns that a later APK signed with a different key cannot update the same installed package. The Debug variant uses the separate application ID `com.aistudio.localllm.mdoanx.dmmv` and launcher label `Local LLM Engine – DMMV-Test`, so it can be installed beside the original app without uninstalling it. SAF document grants are package-specific, so select the GGUF again in the DMMV-Test app. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
 
 ## Last-model restore
 
@@ -74,7 +74,7 @@ GPU synchronization wait. Vulkan can enqueue compute asynchronously; timing only
 the return of `llama_decode()` under-reports actual GPU work. Prompt prefill is also
 synchronized before its duration is finalized, so it is not incorrectly charged to
 the first generated token. `decodeUs` now includes submission plus completion wait,
-with `decodeSubmitUs` and `gpuSyncWaitUs` available separately in the native log.
+with `decodeSubmitUs` and `backendSyncWaitUs` available separately in the native log. Older exports may call the latter `gpuSyncWaitUs`; that field measures the complete `llama_synchronize()` wait envelope, not isolated GPU-kernel time.
 
 ## Debug Vulkan GPU-operation profiler
 

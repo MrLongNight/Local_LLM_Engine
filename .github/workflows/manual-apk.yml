@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - "app/src/main/**"
+      - "app/src/debug/**"
       - "app/build.gradle.kts"
       - "llm-engine/src/main/**"
       - "llm-engine/src/androidTest/**"
