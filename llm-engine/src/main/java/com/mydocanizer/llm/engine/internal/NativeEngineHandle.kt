@@ -90,6 +90,7 @@ internal object NativeEngineHandle {
         gpuLayers: Int,
         batchThreads: Int,
         microBatchSize: Int,
+        vulkanDmmvWorkgroup: Int,
         progressCallback: NativeModelLoadProgressCallback
     ): Int
 
