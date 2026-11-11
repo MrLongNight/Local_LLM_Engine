@@ -141,18 +141,17 @@ static void ggml_vk_get_physical_device_features2(
     }
 
     static std::atomic<int> local_llm_last_logged_dmmv_override{-1};
-    if (local_llm_dmmv_override == 0) {
-        local_llm_last_logged_dmmv_override.store(0, std::memory_order_relaxed);
-    } else {
-        const int previous_override = local_llm_last_logged_dmmv_override.exchange(
-            local_llm_dmmv_override, std::memory_order_relaxed);
-        if (previous_override != local_llm_dmmv_override) {
-            GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - override=%s,selected=%s,subgroupSize=%u\n",
-                local_llm_dmmv_override == 1 ? "SUBGROUP" : "LARGE",
-                dmmv_wg == DMMV_WG_SIZE_LARGE ? "LARGE" : "SUBGROUP",
-                ctx->device->subgroup_size);
-        }
+    const int previous_override = local_llm_last_logged_dmmv_override.exchange(
+        local_llm_dmmv_override, std::memory_order_relaxed);
+    if (previous_override != local_llm_dmmv_override) {
+        const char* override_name =
+            local_llm_dmmv_override == 0 ? "AUTO" :
+            (local_llm_dmmv_override == 1 ? "SUBGROUP" : "LARGE");
+        GGML_LOG_INFO(
+            "ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - override=%s,selected=%s,subgroupSize=%u\\n",
+            override_name,
+            dmmv_wg == DMMV_WG_SIZE_LARGE ? "LARGE" : "SUBGROUP",
+            ctx->device->subgroup_size);
     }
 ]=])
     string(REPLACE "${_dmmv_anchor}" "${_dmmv_replacement}" _vulkan_contents "${_vulkan_contents}")
