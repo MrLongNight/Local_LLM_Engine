@@ -49,6 +49,11 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
+      // Keep the diagnostic build side-by-side with earlier installs. A previous CI APK
+      // may have been signed with a different one-run key; never force an uninstall that
+      // would delete the user's app-private model data.
+      applicationIdSuffix = ".dmmv"
+      resValue("string", "app_name", "Local LLM Engine – DMMV-Test")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
