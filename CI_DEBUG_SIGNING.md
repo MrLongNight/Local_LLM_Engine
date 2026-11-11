@@ -1,39 +1,41 @@
 # Persistent CI debug signing
 
-The manual APK workflow uses the repository Actions secret
-`LOCAL_LLM_DEBUG_KEYSTORE_BASE64` when it is configured. The secret must contain
-the one-line Base64 encoding of the PKCS#12 debug keystore supplied to the
-maintainer. The expected key settings are:
+The manual APK workflow reads the repository Actions secret
+`LOCAL_LLM_DEBUG_KEYSTORE_BASE64`. The key has been generated for the
+side-by-side DMMV debug application only. It is not a production/release key.
 
+## Key details
+
+- Keystore format: PKCS#12
+- File: `Local_LLM_Engine-DMMV-CI-Debug.p12`
 - Alias: `androiddebugkey`
 - Store password: `android`
 - Key password: `android`
-- Certificate SHA-256: `92:BF:C2:1E:7B:AF:F5:EA:22:12:03:19:0D:F1:99:62:CA:82:0C:2E:61:E7:D9:A0:F7:8E:1C:A6:9A:D8:74:96`
+- Certificate SHA-256:
+  `47:64:8D:F1:70:13:70:57:02:B5:9F:58:71:44:DE:7B:86:A4:75:9E:19:E3:64:12:EE:C5:65:B9:46:00:E5:97`
 
 ## One-time repository setup
 
-1. Open the repository's **Settings → Secrets and variables → Actions**.
+1. Open **Settings → Secrets and variables → Actions** in this repository.
 2. Create a repository secret named `LOCAL_LLM_DEBUG_KEYSTORE_BASE64`.
-3. Paste the complete single-line Base64 content of the supplied
-   `Local_LLM_Engine-CI-Debug-KEYSTORE_BASE64.txt` file as its value.
-4. Keep the original `.p12` keystore in a secure private backup. Never commit
-   the keystore or its Base64 contents to the repository.
+3. Copy the complete single-line content from
+   `Local_LLM_Engine-CI-Debug-KEYSTORE_BASE64.txt` into that secret.
+4. Keep `Local_LLM_Engine-DMMV-CI-Debug.p12` as a private backup. Never commit
+   either file or its Base64 contents to the public repository.
 
-The manual debug variant also uses the separate application ID
-`com.aistudio.localllm.mdoanx.dmmv` and launcher label `Local LLM Engine – DMMV-Test`.
-It can be installed alongside the earlier `com.aistudio.localllm.mdoanx` app, so
-the diagnostic build does not require uninstalling the existing app or deleting
-its private data. The DMMV-Test app needs the GGUF selected once again through
-the Android document picker because SAF grants are package-specific.
+The key itself is not stored in this repository. The build workflow validates
+that the secret decodes to a PKCS#12 keystore with the expected alias. When the
+secret is present, future CI DMMV APKs use the same signing certificate and
+can update an existing DMMV installation without removing its app data.
 
-After the secret is configured, subsequent CI debug APKs use the same signing
-certificate and can update an app installed from another APK signed with this
-same key.
+The workflow currently falls back to a fresh temporary key when the secret is
+absent so CI can still build and run instrumentation tests. Such APKs are
+one-run installs and cannot be updated in place by a later APK signed with a
+different key. The CI log emits a warning when that fallback is used.
 
-If the secret is absent, the workflow still generates a temporary key so the
-CI build remains usable, but it emits a warning: that APK is not update-compatible
-with an APK signed by a different CI run. The APK signed with the previous
-temporary key cannot be converted to the persistent key without rebuilding.
-Android will reject it as an in-place update if the installed app has a different
-signing certificate; uninstalling the existing app can delete app-private models
-and settings, so do not uninstall before protecting any data you need.
+The Debug build uses the separate application ID
+`com.aistudio.localllm.mdoanx.dmmv` and launcher label
+`Local LLM Engine – DMMV-Test`. It installs alongside the original app
+(`com.aistudio.localllm.mdoanx`) and does not require uninstalling or altering
+the original app. SAF document permissions are package-specific, so select
+the GGUF again once in the DMMV-Test app.
