@@ -86,6 +86,12 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property vulkanMatvecWorkgroup Diagnostic DMMV workgroup selector; AUTO includes the Mali Q4_K policy.
  * @property flashAttentionMode Explicit Flash Attention selection.
  */
+private fun readReloadAfterAbort(parcel: Parcel): ReloadAfterAbort {
+    if (parcel.dataAvail() <= 0) return ReloadAfterAbort.LAZY
+    val storedName = parcel.readString() ?: return ReloadAfterAbort.LAZY
+    return ReloadAfterAbort.entries.firstOrNull { it.name == storedName } ?: ReloadAfterAbort.LAZY
+}
+
 data class EngineConfig(
     val contextSize: Int = 4096,
     val batchSize: Int = 512,
@@ -159,10 +165,7 @@ data class EngineConfig(
         flashAttentionMode = if (parcel.dataAvail() > 0) {
             FlashAttentionMode.fromName(parcel.readString())
         } else FlashAttentionMode.AUTO,
-        reloadAfterAbort = if (parcel.dataAvail() > 0) {
-            runCatching { ReloadAfterAbort.valueOf(parcel.readString().orEmpty()) }
-                .getOrDefault(ReloadAfterAbort.LAZY)
-        } else ReloadAfterAbort.LAZY
+        reloadAfterAbort = readReloadAfterAbort(parcel)
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
