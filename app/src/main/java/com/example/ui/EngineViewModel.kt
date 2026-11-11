@@ -20,6 +20,7 @@ import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import com.mydocanizer.llm.engine.InferenceResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -907,6 +908,239 @@ class EngineViewModel(
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: $stoppedReason")
                     append("Die ursprüngliche Modellkonfiguration wurde anschließend wiederhergestellt; Details stehen im Diagnoseexport.")
+                }
+                _isBenchmarking.value = false
+            }
+        }
+    }
+
+    /**
+     * Controlled Vulkan dequantize-matvec workgroup comparison.
+     * Every profile reloads the same GGUF with full Vulkan offload and runs the
+     * same deterministic one-prefill benchmark: AUTO, SUBGROUP, LARGE, AUTO repeat.
+     */
+    fun runVulkanMatvecWorkgroupSweep() {
+        if (_isBenchmarking.value) return
+        if (_isGenerating.value || _isImporting.value) {
+            _errorMessage.value = "Vulkan-MatVec-Test erst starten, wenn keine Inferenz oder Modell-Operation läuft."
+            return
+        }
+
+        val model = currentModel.value
+        if (model == null) {
+            _errorMessage.value = "Bitte zuerst ein GGUF-Modell laden."
+            return
+        }
+
+        val originalConfig = _engineConfig.value
+        val profiles = BackendBenchmarkPlan.vulkanMatvecConfigurations(originalConfig)
+        val systemPromptSnapshot = _systemPrompt.value
+        val source = if (model.path.startsWith("content://", ignoreCase = true)) {
+            ModelSource.ContentUri(model.path, model.name)
+        } else {
+            ModelSource.FilePath(model.path)
+        }
+        val prompt =
+            "Gib die Zahlen 1 bis 40 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
+
+        _isBenchmarking.value = true
+        _benchmarkReport.value = "Vulkan-MatVec-Workgroup-Test wird vorbereitet…"
+        _errorMessage.value = null
+
+        viewModelScope.launch {
+            val rows = mutableListOf<String>()
+            var restoreRequired = false
+            var confirmedTotalLayers: Int? = null
+            var stoppedReason: String? = null
+            EngineDiagnostics.info(
+                "benchmark",
+                "VULKAN_DMMV_SWEEP_STARTED",
+                "model=\${model.name},modelBytes=\${model.sizeBytes},profiles=AUTO,SUBGROUP,LARGE,AUTO_REPEAT," +
+                    "gpuLayersRequested=99,warmupTokens=\${BackendBenchmarkPlan.WARMUP_TOKENS}," +
+                    "measuredTokens=\${BackendBenchmarkPlan.MEASURED_TOKENS},context=\${originalConfig.contextSize}," +
+                    "batch=\${originalConfig.batchSize},threads=\${originalConfig.threads}," +
+                    "batchThreads=\${originalConfig.effectiveBatchThreads}," +
+                    "microBatch=\${originalConfig.effectiveMicroBatchSize},temperature=0.0,topP=1.0"
+            )
+
+            try {
+                val initialSafetyStop = configurationTestSafetyBlock()
+                if (initialSafetyStop != null) {
+                    throw IllegalStateException("Sicherheitsabbruch vor dem ersten Vulkan-MatVec-Lauf: $initialSafetyStop")
+                }
+
+                restoreRequired = true
+                _benchmarkReport.value = "Vulkan AUTO: Lade dasselbe Modell mit maximalem Layer-Offload…"
+                val firstLoadStarted = System.nanoTime()
+                val firstLoaded = engine.loadModel(source, profiles.first()).getOrElse { throw it }
+                val firstLoadMs = (System.nanoTime() - firstLoadStarted) / 1_000_000L
+
+                if (backendFamily(firstLoaded.activeBackend) != "VULKAN") {
+                    throw IllegalStateException(
+                        "Vulkan wurde angefordert, geladen wurde aber: \${firstLoaded.activeBackend}"
+                    )
+                }
+                if (firstLoaded.sizeBytes != model.sizeBytes ||
+                    (!model.sha256.isNullOrBlank() && !firstLoaded.sha256.isNullOrBlank() &&
+                        model.sha256 != firstLoaded.sha256)
+                ) {
+                    throw IllegalStateException("Nach dem Vulkan-AUTO-Load wurde nicht dieselbe Modelldatei bestätigt.")
+                }
+
+                val totalLayers = VulkanLayerSweepPlan.totalLayersFromBackend(firstLoaded.activeBackend)
+                    ?: throw IllegalStateException(
+                        "Die native Backend-Meldung enthält keine bestätigte Gesamtzahl der GPU-Layer: " +
+                            firstLoaded.activeBackend
+                    )
+                confirmedTotalLayers = totalLayers
+                EngineDiagnostics.info(
+                    "benchmark",
+                    "VULKAN_DMMV_SWEEP_PLAN",
+                    "totalLayers=$totalLayers,actualOffload=\${firstLoaded.activeBackend}," +
+                        "workgroups=" + profiles.joinToString(",") { it.vulkanMatvecWorkgroup.name }
+                )
+
+                for ((index, profileConfig) in profiles.withIndex()) {
+                    currentCoroutineContext().ensureActive()
+                    val safetyStop = if (index == 0) null else configurationTestSafetyBlock()
+                    if (safetyStop != null) {
+                        stoppedReason = safetyStop
+                        rows += "ABBRUCH vor \${profileConfig.vulkanMatvecWorkgroup.name}: $safetyStop"
+                        EngineDiagnostics.info("benchmark", "VULKAN_DMMV_SWEEP_SAFETY_STOP", safetyStop)
+                        break
+                    }
+
+                    val workgroup = profileConfig.vulkanMatvecWorkgroup
+                    _benchmarkReport.value =
+                        "Vulkan-MatVec \${index + 1}/\${profiles.size}: \${workgroup.name} " +
+                            "(\${if (index == profiles.lastIndex) "AUTO-Wiederholung" else workgroup.label})…"
+
+                    val loadMs: Long
+                    val loaded: ModelInfo
+                    if (index == 0) {
+                        loadMs = firstLoadMs
+                        loaded = firstLoaded
+                    } else {
+                        val loadStarted = System.nanoTime()
+                        loaded = engine.loadModel(source, profileConfig).getOrElse { throw it }
+                        loadMs = (System.nanoTime() - loadStarted) / 1_000_000L
+                    }
+
+                    if (backendFamily(loaded.activeBackend) != "VULKAN") {
+                        throw IllegalStateException(
+                            "Profil \${workgroup.name} wechselte unerwartet auf: \${loaded.activeBackend}"
+                        )
+                    }
+                    if (loaded.sizeBytes != model.sizeBytes ||
+                        (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() &&
+                            model.sha256 != loaded.sha256)
+                    ) {
+                        throw IllegalStateException("Für \${workgroup.name} wurde nicht dieselbe Modelldatei bestätigt.")
+                    }
+                    val actualLayers = VulkanLayerSweepPlan.totalLayersFromBackend(loaded.activeBackend)
+                    if (actualLayers != totalLayers) {
+                        throw IllegalStateException(
+                            "Layer-Offload änderte sich für \${workgroup.name}: erwartet $totalLayers, erhalten $actualLayers."
+                        )
+                    }
+
+                    val measured = collectBackendBenchmarkSample(
+                        backend = BackendPreference.VULKAN,
+                        maxTokens = BackendBenchmarkPlan.TOTAL_TOKENS,
+                        warmupTokens = BackendBenchmarkPlan.WARMUP_TOKENS,
+                        systemPromptSnapshot = systemPromptSnapshot,
+                        benchmarkPrompt = prompt
+                    )
+                    if (measured.measuredTokens < 8) {
+                        throw IllegalStateException(
+                            "Zu wenige Mess-Tokens für \${workgroup.name}: \${measured.measuredTokens}"
+                        )
+                    }
+
+                    val measuredSpeed = measured.measuredTokensPerSecond
+                    val reportLine = String.format(
+                        java.util.Locale.US,
+                        "%s: layers=%d/%d, load=%dms, promptTokens=%d, prefillMs=%s, " +
+                            "TTFT=%s ms, measuredTokens=%d, measuredWallMs=%s, decode=%.3f tok/s, " +
+                            "native=%.3f tok/s, generationMs=%d, finish=%s",
+                        if (index == profiles.lastIndex) "AUTO (Wiederholung)" else workgroup.name,
+                        totalLayers,
+                        totalLayers,
+                        loadMs,
+                        measured.promptTokens,
+                        measured.promptEvaluationMs?.toString() ?: "n/a",
+                        measured.firstTokenAfterPrefillMs?.toString() ?: "n/a",
+                        measured.measuredTokens,
+                        measured.measuredWallMs?.toString() ?: "n/a",
+                        measuredSpeed,
+                        measured.result.tokensPerSecond,
+                        measured.result.durationMs,
+                        measured.result.finishReason.name
+                    )
+                    rows += reportLine
+                    EngineDiagnostics.info(
+                        "benchmark",
+                        "VULKAN_DMMV_SWEEP_RESULT",
+                        "runIndex=\${index + 1},workgroup=\${workgroup.name},workgroupNativeId=\${workgroup.nativeId}," +
+                            "gpuLayersRequested=\${profileConfig.gpuLayers},actualLayers=$actualLayers," +
+                            "loadMs=$loadMs,promptTokens=\${measured.promptTokens}," +
+                            "prefillMs=\${measured.promptEvaluationMs ?: -1L}," +
+                            "firstTokenAfterPrefillMs=\${measured.firstTokenAfterPrefillMs ?: -1L}," +
+                            "warmupTokens=\${measured.warmupTokens},measuredTokens=\${measured.measuredTokens}," +
+                            "measuredWallMs=\${measured.measuredWallMs ?: -1L}," +
+                            "measuredTokensPerSecond=$measuredSpeed," +
+                            "nativeTokensPerSecond=\${measured.result.tokensPerSecond}," +
+                            "generationMs=\${measured.result.durationMs}," +
+                            "finishReason=\${measured.result.finishReason.name}," +
+                            "context=\${profileConfig.contextSize},batch=\${profileConfig.batchSize}," +
+                            "threads=\${profileConfig.threads},batchThreads=\${profileConfig.effectiveBatchThreads}," +
+                            "microBatch=\${profileConfig.effectiveMicroBatchSize},backend=\${loaded.activeBackend}"
+                    )
+                    if (index < profiles.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
+                }
+            } catch (cancelled: CancellationException) {
+                rows += "Vulkan-MatVec-Test wurde abgebrochen."
+                stoppedReason = "Vom Nutzer abgebrochen."
+                EngineDiagnostics.info("benchmark", "VULKAN_DMMV_SWEEP_CANCELLED")
+                throw cancelled
+            } catch (error: Throwable) {
+                stoppedReason = error.message ?: error.javaClass.simpleName
+                rows += "FEHLER: $stoppedReason"
+                EngineDiagnostics.error("benchmark", "VULKAN_DMMV_SWEEP_FAILED", error)
+            } finally {
+                if (restoreRequired) {
+                    _benchmarkReport.value = "Stelle ursprüngliche Modellkonfiguration wieder her…"
+                    val restore = withContext(NonCancellable) {
+                        runCatching { engine.loadModel(source, originalConfig).getOrThrow() }
+                    }
+                    restore.onSuccess { restored ->
+                        EngineDiagnostics.info(
+                            "benchmark",
+                            "VULKAN_DMMV_SWEEP_RESTORED",
+                            "backendPreference=\${originalConfig.backendPreference}," +
+                                "gpuLayers=\${originalConfig.gpuLayers}," +
+                                "vulkanMatvecWorkgroup=\${originalConfig.vulkanMatvecWorkgroup}," +
+                                "activeBackend=\${restored.activeBackend}"
+                        )
+                    }.onFailure { error ->
+                        rows += "KRITISCH: Restore fehlgeschlagen: " +
+                            (error.message ?: error.javaClass.simpleName)
+                        EngineDiagnostics.error("benchmark", "VULKAN_DMMV_SWEEP_RESTORE_FAILED", error)
+                    }
+                }
+
+                _benchmarkReport.value = buildString {
+                    appendLine("Vulkan DMMV-Workgroup-Vergleich")
+                    appendLine("Modell: \${model.name} (\${model.sizeMb.toInt()} MB)")
+                    appendLine("Native bestätigte Layer-Gesamtzahl: \${confirmedTotalLayers ?: "nicht bestätigt"}")
+                    appendLine(
+                        "Je Profil: 4 Warm-up-Tokens + 20 Mess-Tokens; Temperatur 0; Top-P 1; " +
+                            "gleiche Prompt-, Kontext-, Batch- und Thread-Einstellungen; voller Vulkan-Offload."
+                    )
+                    rows.forEach { appendLine(it) }
+                    if (stoppedReason != null) appendLine("Hinweis: $stoppedReason")
+                    append("AUTO ist Start- und Endreferenz. Native Auswahlmeldungen stehen im Diagnoseexport; " +
+                        "die ursprüngliche Modellkonfiguration wurde anschließend wiederhergestellt.")
                 }
                 _isBenchmarking.value = false
             }
