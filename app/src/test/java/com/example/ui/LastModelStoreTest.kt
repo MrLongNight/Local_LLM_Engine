@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.content.Context
+import android.os.Parcel
 import androidx.test.core.app.ApplicationProvider
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
@@ -54,6 +55,30 @@ class LastModelStoreTest {
         assertNotNull(restored)
         assertEquals(source.copy(displayName = "qwen.gguf"), restored?.source)
         assertEquals(config, restored?.config)
+    }
+
+    @Test
+    fun engineConfigParcelablePreservesVulkanMatvecWorkgroupAcrossIpc() {
+        val config = EngineConfig(
+            contextSize = 8192,
+            batchSize = 512,
+            threads = 6,
+            backendPreference = BackendPreference.VULKAN,
+            gpuLayers = 99,
+            batchThreads = 4,
+            microBatchSize = 128,
+            vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.LARGE
+        )
+        val parcel = Parcel.obtain()
+        try {
+            config.writeToParcel(parcel, 0)
+            parcel.setDataPosition(0)
+            val restored = EngineConfig.CREATOR.createFromParcel(parcel)
+            assertEquals(config, restored)
+            assertEquals(VulkanMatvecWorkgroup.LARGE, restored.vulkanMatvecWorkgroup)
+        } finally {
+            parcel.recycle()
+        }
     }
 
     @Test
