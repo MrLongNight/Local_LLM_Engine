@@ -285,6 +285,7 @@ static void ggml_vk_get_physical_device_features2(
         message(FATAL_ERROR "LocalLLM: upstream Q4_K MMVQ selection anchor changed.")
     endif()
     set(_q4k_base_dmmv_replacement [=[
+    // LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE: mode 3 explicitly forces base DMMV for Q4_K.
     // LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV: Mali Q4_K decode skips Q8_1 conversion in AUTO.
     // Modes 3/4/5 expose explicit Q4_K/Q5_K/Q6_K A/B paths; only Q4_K changes AUTO.
     const int local_llm_quant_override = local_llm_vulkan_dmmv_workgroup_override();

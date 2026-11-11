@@ -144,11 +144,11 @@ fun SettingsScreen(
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            text = "AUTO nutzt unverändert die llama.cpp-Heuristik. SUBGROUP und LARGE erzwingen nur die MatVec-Workgroup-Größe für den Kernelvergleich; die Pipeline-Varianten werden beim Backend-Aufbau bereitgestellt.",
+                            text = "AUTO nutzt für Q4_K auf Mali den gemessenen Basis-MMV-Pfad; SUBGROUP und LARGE erzwingen nur die MatVec-Workgroup-Größe. Die Q4_K/Q5_K/Q6_K- und Prefill-Overrides bleiben interne A/B-Profile.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        VulkanMatvecWorkgroup.entries.filter { it != VulkanMatvecWorkgroup.Q4K_BASE_DMMV }.forEach { workgroup ->
+                        VulkanMatvecWorkgroup.entries.filter { it.nativeId in 0..2 }.forEach { workgroup ->
                             FilterChip(
                                 selected = config.vulkanMatvecWorkgroup == workgroup,
                                 onClick = {
@@ -160,7 +160,10 @@ fun SettingsScreen(
                                             VulkanMatvecWorkgroup.AUTO -> "AUTO – Upstream"
                                             VulkanMatvecWorkgroup.SUBGROUP -> "SUBGROUP – Geräte-Subgroup (Mali-G57: 16)"
                                             VulkanMatvecWorkgroup.LARGE -> "LARGE – 4× Subgroup"
-                                            VulkanMatvecWorkgroup.Q4K_BASE_DMMV -> "Q4_K Basis-DMMV (intern)"
+                                            VulkanMatvecWorkgroup.Q4K_BASE_DMMV -> "Q4_K Basis-DMMV (A/B, intern)"
+                                            VulkanMatvecWorkgroup.Q5K_BASE_DMMV -> "Q5_K Basis-DMMV (A/B, intern)"
+                                            VulkanMatvecWorkgroup.Q6K_BASE_DMMV -> "Q6_K Basis-DMMV (A/B, intern)"
+                                            VulkanMatvecWorkgroup.Q4K_PREFILL_F16 -> "Q4_K Prefill F16/F32 (A/B, intern)"
                                         }
                                     )
                                 },
