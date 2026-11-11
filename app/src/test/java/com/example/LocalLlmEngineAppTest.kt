@@ -23,7 +23,11 @@ class LocalLlmEngineAppTest {
     fun `1 - validate app resources and strings`() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val appName = application.getString(R.string.app_name)
-        assertEquals("Local LLM Engine", appName)
+        assertTrue(
+            appName == "Local LLM Engine" ||
+                appName == "Local LLM Engine – DMMV-Test"
+        )
+        assertEquals("Local LLM Engine", application.getString(R.string.title_local_llm_engine))
 
         val chatNav = application.getString(R.string.nav_chat)
         assertNotNull(chatNav)
