@@ -59,6 +59,8 @@ internal class LastModelStore(context: Context) {
             .putString(KEY_VULKAN_MATVEC_WORKGROUP, config.vulkanMatvecWorkgroup.name)
             .putString(KEY_FLASH_ATTENTION_MODE, config.flashAttentionMode.name)
             .putString(KEY_RELOAD_AFTER_ABORT, config.reloadAfterAbort.name)
+            .putInt(KEY_TOP_K, config.topK)
+            .putFloat(KEY_MIN_P, config.minP)
             .putLong(KEY_TIMEOUT_BIND, config.timeoutConfig.serviceBindMs)
             .putLong(KEY_TIMEOUT_MODEL_LOAD, config.timeoutConfig.modelLoadMs)
             .putLong(KEY_TIMEOUT_PREFILL, config.timeoutConfig.prefillMs)
@@ -130,7 +132,9 @@ internal class LastModelStore(context: Context) {
                     preferences.getString(KEY_RELOAD_AFTER_ABORT, ReloadAfterAbort.LAZY.name)
                         ?: ReloadAfterAbort.LAZY.name
                 )
-            }.getOrDefault(ReloadAfterAbort.LAZY)
+            }.getOrDefault(ReloadAfterAbort.LAZY),
+            topK = preferences.getInt(KEY_TOP_K, 20),
+            minP = preferences.getFloat(KEY_MIN_P, 0.05f)
         )
         return RememberedModel(source, config)
     }
@@ -167,6 +171,8 @@ internal class LastModelStore(context: Context) {
         const val KEY_MICRO_BATCH_SIZE = "micro_batch_size"
         const val KEY_VULKAN_MATVEC_WORKGROUP = "vulkan_matvec_workgroup"
         const val KEY_RELOAD_AFTER_ABORT = "reload_after_abort"
+        const val KEY_TOP_K = "sampler_top_k"
+        const val KEY_MIN_P = "sampler_min_p"
         const val KEY_FLASH_ATTENTION_MODE = "flash_attention_mode"
         const val KEY_TIMEOUT_BIND = "timeout_bind_ms"
         const val KEY_TIMEOUT_MODEL_LOAD = "timeout_model_load_ms"

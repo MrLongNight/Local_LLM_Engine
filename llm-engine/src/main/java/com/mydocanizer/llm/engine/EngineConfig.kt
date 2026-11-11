@@ -85,6 +85,8 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property microBatchSize llama.cpp n_ubatch; 0 follows n_batch.
  * @property vulkanMatvecWorkgroup Diagnostic DMMV workgroup selector; AUTO includes the Mali Q4_K policy.
  * @property flashAttentionMode Explicit Flash Attention selection.
+ * @property topK Maximum candidates retained by the lightweight sampler.
+ * @property minP Minimum relative candidate probability; 0 disables Min-P filtering.
  */
 private fun readReloadAfterAbort(parcel: Parcel): ReloadAfterAbort {
     if (parcel.dataAvail() <= 0) return ReloadAfterAbort.LAZY
@@ -106,7 +108,9 @@ data class EngineConfig(
     val microBatchSize: Int = 0,
     val vulkanMatvecWorkgroup: VulkanMatvecWorkgroup = VulkanMatvecWorkgroup.AUTO,
     val flashAttentionMode: FlashAttentionMode = FlashAttentionMode.AUTO,
-    val reloadAfterAbort: ReloadAfterAbort = ReloadAfterAbort.LAZY
+    val reloadAfterAbort: ReloadAfterAbort = ReloadAfterAbort.LAZY,
+    val topK: Int = 20,
+    val minP: Float = 0.05f
 ) : Parcelable {
     /**
      * Effective llama.cpp thread count for prompt/batch processing.
@@ -137,6 +141,8 @@ data class EngineConfig(
         require(topP.isFinite() && topP in 0f..1f) {
             "topP must be finite and between 0 and 1"
         }
+        require(topK >= 1) { "topK must be at least 1" }
+        require(minP.isFinite() && minP in 0f..1f) { "minP must be finite and between 0 and 1" }
         require(maxPredictTokens >= 1) { "maxPredictTokens must be at least 1" }
     }
 
@@ -165,7 +171,9 @@ data class EngineConfig(
         flashAttentionMode = if (parcel.dataAvail() > 0) {
             FlashAttentionMode.fromName(parcel.readString())
         } else FlashAttentionMode.AUTO,
-        reloadAfterAbort = readReloadAfterAbort(parcel)
+        reloadAfterAbort = readReloadAfterAbort(parcel),
+        topK = if (parcel.dataAvail() > 0) parcel.readInt() else 20,
+        minP = if (parcel.dataAvail() > 0) parcel.readFloat() else 0.05f
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -183,6 +191,8 @@ data class EngineConfig(
         parcel.writeString(vulkanMatvecWorkgroup.name)
         parcel.writeString(flashAttentionMode.name)
         parcel.writeString(reloadAfterAbort.name)
+        parcel.writeInt(topK)
+        parcel.writeFloat(minP)
     }
 
     override fun describeContents(): Int = 0

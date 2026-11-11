@@ -48,6 +48,36 @@ extern "C" int local_llm_vulkan_dmmv_workgroup_override() {
     return g_vulkan_dmmv_workgroup_override.load(std::memory_order_relaxed);
 }
 
+static void configure_local_sampling(
+        common_params_sampling& params,
+        float temperature,
+        float top_p,
+        int top_k,
+        float min_p) {
+    params.temp = temperature;
+    params.top_k = top_k;
+    params.top_p = top_p;
+    params.min_p = min_p;
+    params.typ_p = 1.0f;
+    params.xtc_probability = 0.0f;
+    params.dry_multiplier = 0.0f;
+    params.penalty_repeat = 1.0f;
+    params.penalty_freq = 0.0f;
+    params.penalty_present = 0.0f;
+    params.top_n_sigma = -1.0f;
+    if (temperature <= 0.0f) {
+        // common_sampler_init adds the native greedy sampler for this chain.
+        params.samplers = { COMMON_SAMPLER_TYPE_TEMPERATURE };
+    } else {
+        params.samplers = {
+            COMMON_SAMPLER_TYPE_TOP_K,
+            COMMON_SAMPLER_TYPE_TOP_P,
+            COMMON_SAMPLER_TYPE_MIN_P,
+            COMMON_SAMPLER_TYPE_TEMPERATURE
+        };
+    }
+}
+
 static int recommended_performance_core_count() {
     std::vector<long long> max_frequencies_khz;
     for (int cpu = 0; cpu < 64; ++cpu) {
@@ -209,6 +239,8 @@ struct EngineInstance {
     int32_t micro_batch_size = BATCH_SIZE;
     float default_temperature = DEFAULT_TEMP;
     float default_top_p = 0.9f;
+    int32_t default_top_k = 20;
+    float default_min_p = 0.05f;
     std::string active_backend = "CPU";
     // Correlates native prompt and decode timings with the Kotlin request diagnostics.
     std::string inference_run_id;
@@ -783,6 +815,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jint threads,
         jfloat temperature,
         jfloat top_p,
+        jint top_k,
+        jfloat min_p,
         jint backend_mode,
         jint gpu_layers,
         jint batch_threads,
@@ -802,6 +836,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     }
     if (flash_attention_mode < -1 || flash_attention_mode > 1) {
         LOGE("Invalid Flash Attention mode: %d", flash_attention_mode);
+        return 7;
+    }
+    if (top_k < 1 || !std::isfinite(min_p) || min_p < 0.0f || min_p > 1.0f) {
+        LOGE("Invalid sampler defaults: top_k=%d,min_p=%.4f", top_k, min_p);
         return 7;
     }
     g_vulkan_dmmv_workgroup_override.store(vulkan_dmmv_workgroup, std::memory_order_relaxed);
@@ -1093,9 +1131,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
             std::isfinite(temperature) && temperature >= 0.0f ? temperature : DEFAULT_TEMP;
         engine->default_top_p =
             std::isfinite(top_p) && top_p >= 0.0f && top_p <= 1.0f ? top_p : 0.9f;
+        engine->default_top_k = top_k;
+        engine->default_min_p = min_p;
         common_params_sampling sparams;
-        sparams.temp = engine->default_temperature;
-        sparams.top_p = engine->default_top_p;
+        configure_local_sampling(sparams, engine->default_temperature, engine->default_top_p,
+                                 engine->default_top_k, engine->default_min_p);
         engine->sampler = common_sampler_init(model, sparams);
     } catch (const std::exception& error) {
         LOGE("Native chat-template/sampler setup threw a C++ exception: %s", error.what());
@@ -1233,8 +1273,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
     try {
         common_params_sampling request_sampling;
-        request_sampling.temp = effective_temperature;
-        request_sampling.top_p = effective_top_p;
+        configure_local_sampling(request_sampling, effective_temperature, effective_top_p,
+                                 engine->default_top_k, engine->default_min_p);
         engine->sampler = common_sampler_init(engine->model, request_sampling);
     } catch (const std::exception& error) {
         LOGE("Request sampler initialization failed: %s", error.what());
@@ -1250,8 +1290,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         engine->last_finish_reason = 3;
         return 7;
     }
-    LOGI("Request sampler configured: temperature=%.3f, top_p=%.3f",
-         effective_temperature, effective_top_p);
+    LOGI("Request sampler configured: temperature=%.3f, top_k=%d, top_p=%.3f, min_p=%.3f, chain=%s",
+         effective_temperature, engine->default_top_k, effective_top_p, engine->default_min_p,
+         effective_temperature <= 0.0f ? "GREEDY" : "TOP_K_TOP_P_MIN_P_TEMPERATURE");
 
     engine->last_prompt_template_us = 0;
     engine->last_prompt_tokenization_us = 0;

@@ -201,6 +201,8 @@ internal class LocalLlmEngineImpl(
                 threads = config.threads,
                 temperature = config.temperature,
                 topP = config.topP,
+                topK = config.topK,
+                minP = config.minP,
                 backendMode = config.backendPreference.modeId,
                 gpuLayers = config.gpuLayers,
                 batchThreads = config.batchThreads,

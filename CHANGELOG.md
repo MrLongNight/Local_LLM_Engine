@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added model-specific topK/minP sampler defaults as backwards-compatible EngineConfig/Parcelable settings with persistent storage and UI overrides.
+
+### Changed
+- Replaced llama.cpp's broad default sampler stack with a minimal chain: greedy-only at temperature <= 0, otherwise top_k/top_p/min_p/temperature. DRY, XTC, typical-p, penalties and top-n-sigma are explicitly disabled.
+- Removed a stale fixed GPU-layer recommendation from Settings; the UI now labels the selected value as requested offload rather than claiming one layer count fits a model.
+
+### Added
 - ContentUri/SAF model sources are imported into the private models directory before Binder handoff. Import checks available storage, verifies GGUF magic, hashes content, reports progress, and reuses a cached copy when provider size/mtime metadata is stable.
 - Added a pre-load RAM guard that estimates model + KV-cache + native headroom, reduces context when possible, and rejects unsafe loads before native allocation.
 

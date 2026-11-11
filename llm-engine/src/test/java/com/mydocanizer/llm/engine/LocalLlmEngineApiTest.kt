@@ -22,6 +22,8 @@ class LocalLlmEngineApiTest {
         assertEquals(0, config.microBatchSize) // raw setting: follow n_batch
         assertEquals(4, config.effectiveBatchThreads)
         assertEquals(512, config.effectiveMicroBatchSize)
+        assertEquals(20, config.topK)
+        assertEquals(0.05f, config.minP, 0.0001f)
     }
 
     @Test
@@ -42,6 +44,16 @@ class LocalLlmEngineApiTest {
     @Test(expected = IllegalArgumentException::class)
     fun rejectNegativeMicroBatchSize() {
         EngineConfig(microBatchSize = -1)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectInvalidSamplerTopK() {
+        EngineConfig(topK = 0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectInvalidSamplerMinP() {
+        EngineConfig(minP = Float.NaN)
     }
 
     @Test(expected = IllegalArgumentException::class)

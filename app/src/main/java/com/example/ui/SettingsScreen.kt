@@ -103,7 +103,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Backend, GPU-Layer, Kontext- und Thread-Änderungen werden beim nächsten Modellladen übernommen. Temperatur, Top-P und Ausgabelimit gelten ab der nächsten Anfrage.",
+                        text = "Backend-, GPU-Layer-, Kontext-, Thread- und Sampler-Änderungen werden beim nächsten Modellladen übernommen. Temperatur, Top-P und Ausgabelimit gelten ab der nächsten Anfrage.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -124,7 +124,7 @@ fun SettingsScreen(
                     if (config.backendPreference != BackendPreference.CPU) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "GPU-Layer-Offload: ${config.gpuLayers} Layer (99 = maximal; bei Qwen3-4B genügen 37 für 36 Layer plus Output)",
+                            text = "GPU-Layer-Offload angefordert: ${config.gpuLayers} (99 = maximal)",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
@@ -289,6 +289,35 @@ fun SettingsScreen(
                     )
 
                     Divider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // Top-K
+                    Text(
+                        text = "Top-K (Kandidaten): ${config.topK}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Slider(
+                        value = config.topK.toFloat(),
+                        onValueChange = { viewModel.updateConfig(config.copy(topK = it.roundToInt().coerceAtLeast(1))) },
+                        valueRange = 1f..64f,
+                        steps = 62,
+                        modifier = Modifier.testTag("top_k_slider")
+                    )
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // Min-P
+                    Text(
+                        text = "Min-P (relative Wahrscheinlichkeit): ${String.format("%.2f", config.minP)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Slider(
+                        value = config.minP,
+                        onValueChange = { viewModel.updateConfig(config.copy(minP = it)) },
+                        valueRange = 0f..0.25f,
+                        modifier = Modifier.testTag("min_p_slider")
+                    )
 
                     // Max Predict Tokens
                     Text(

@@ -85,6 +85,8 @@ internal object NativeEngineHandle {
         threads: Int,
         temperature: Float,
         topP: Float,
+        topK: Int,
+        minP: Float,
         backendMode: Int,
         gpuLayers: Int,
         batchThreads: Int,
