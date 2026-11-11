@@ -274,7 +274,8 @@ object EngineDiagnostics {
             "PREFILL_COMPLETED",
             "FIRST_TOKEN_RECEIVED",
             "GENERATION_COMPLETED"
-        ) || event.startsWith("BACKEND_BENCHMARK_") || event.startsWith("GPU_LAYER_SWEEP_")
+        ) || event.startsWith("BACKEND_BENCHMARK_") ||
+            event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_")
     }
 
     private fun isImportantEvent(line: String): Boolean {
@@ -353,10 +354,21 @@ object EngineDiagnostics {
         // prefill/tokenization/decode times, generated tokens, generation wall time,
         // measured tokens/s, and the backend used for each test. Prompts/responses
         // are never included in these structured diagnostic events.
-        val performanceEvents = kotlinLines
-            .filterNot { it.contains("RESOURCE_SNAPSHOT") }
-            .filter(::isPerformanceEvent)
-            .takeLast(12)
+        // Keep the complete low-volume DMMV sweep outcome independently of
+        // repeated per-profile model-load and inference events. Otherwise the
+        // AUTO/SUBGROUP/LARGE result rows can be pushed out of the 12-row tail.
+        val vulkanDmmvSweepEvents = kotlinLines
+            .filter { eventName(it).startsWith("VULKAN_DMMV_SWEEP_") }
+            .takeLast(8)
+        val performanceEvents = (
+            kotlinLines
+                .filterNot { it.contains("RESOURCE_SNAPSHOT") }
+                .filter(::isPerformanceEvent)
+                .filterNot { eventName(it).startsWith("VULKAN_DMMV_SWEEP_") }
+                .takeLast(12) + vulkanDmmvSweepEvents
+            )
+            .distinct()
+            .sorted()
             .map { compactLine(it, 520) }
 
         val nativeKeywords = listOf(
@@ -399,6 +411,9 @@ object EngineDiagnostics {
         val q4kDecodeEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH") }
             .takeLast(4)
+        val dmmvWorkgroupEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_VULKAN_DMMV_WG_SELECTED") }
+            .takeLast(4)
         val memoryBudgetEvidence = nativeLines
             .filter { line ->
                 line.contains("LOCAL_LLM_MEMORY_BUDGET") ||
@@ -410,7 +425,7 @@ object EngineDiagnostics {
             .takeLast(2)
         val nativePriorityEvidence = (
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
-                q4kPrefillEvidence + q4kDecodeEvidence + memoryBudgetEvidence
+                q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence
             ).distinct().map { compactLine(it, 360) }
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.
@@ -590,7 +605,7 @@ object EngineDiagnostics {
             appendLine("Erfasste Logzeilen: ${ordered.size}; RAM-Samples: ${samples.size}")
             appendLine("Zeitraum: ${ordered.firstOrNull()?.substringBefore(" [") ?: "n/a"} bis ${ordered.lastOrNull()?.substringBefore(" [") ?: "n/a"}")
             appendLine()
-            appendLine("[VULKAN-LAUFZEITBELEG – TREIBER, LAYER-OFFLOAD, Q4_K-KERNELPFAD UND SPEICHERBUDGET]")
+            appendLine("[VULKAN-LAUFZEITBELEG – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET]")
             if (nativePriorityEvidence.isEmpty()) {
                 appendLine("Keine passende Runtime-Zeile für Mali-Treiberfähigkeiten oder tatsächliche Layer-Zuweisung im nativen Log gefunden.")
             } else {
