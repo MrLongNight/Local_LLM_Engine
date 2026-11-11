@@ -5,6 +5,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
+import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import java.io.File
 
 /**
@@ -53,6 +54,7 @@ internal class LastModelStore(context: Context) {
             .putInt(KEY_GPU_LAYERS, config.gpuLayers)
             .putInt(KEY_BATCH_THREADS, config.batchThreads)
             .putInt(KEY_MICRO_BATCH_SIZE, config.microBatchSize)
+            .putString(KEY_VULKAN_MATVEC_WORKGROUP, config.vulkanMatvecWorkgroup.name)
             .putLong(KEY_TIMEOUT_BIND, config.timeoutConfig.serviceBindMs)
             .putLong(KEY_TIMEOUT_MODEL_LOAD, config.timeoutConfig.modelLoadMs)
             .putLong(KEY_TIMEOUT_PREFILL, config.timeoutConfig.prefillMs)
@@ -106,7 +108,13 @@ internal class LastModelStore(context: Context) {
             gpuLayers = preferences.getInt(KEY_GPU_LAYERS, 37),
             timeoutConfig = timeout,
             batchThreads = preferences.getInt(KEY_BATCH_THREADS, 0),
-            microBatchSize = preferences.getInt(KEY_MICRO_BATCH_SIZE, 0)
+            microBatchSize = preferences.getInt(KEY_MICRO_BATCH_SIZE, 0),
+            vulkanMatvecWorkgroup = runCatching {
+                VulkanMatvecWorkgroup.valueOf(
+                    preferences.getString(KEY_VULKAN_MATVEC_WORKGROUP, VulkanMatvecWorkgroup.AUTO.name)
+                        ?: VulkanMatvecWorkgroup.AUTO.name
+                )
+            }.getOrDefault(VulkanMatvecWorkgroup.AUTO)
         )
         return RememberedModel(source, config)
     }
@@ -141,6 +149,7 @@ internal class LastModelStore(context: Context) {
         const val KEY_GPU_LAYERS = "gpu_layers"
         const val KEY_BATCH_THREADS = "batch_threads"
         const val KEY_MICRO_BATCH_SIZE = "micro_batch_size"
+        const val KEY_VULKAN_MATVEC_WORKGROUP = "vulkan_matvec_workgroup"
         const val KEY_TIMEOUT_BIND = "timeout_bind_ms"
         const val KEY_TIMEOUT_MODEL_LOAD = "timeout_model_load_ms"
         const val KEY_TIMEOUT_PREFILL = "timeout_prefill_ms"
