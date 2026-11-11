@@ -58,6 +58,10 @@ unloading a model does not clear the remembered selection.
 The source and settings are stored locally in app-private SharedPreferences. The GGUF
 file is not copied or uploaded by this feature.
 
+## Model compatibility catalogue
+
+See [`docs/MODEL_COMPATIBILITY.md`](docs/MODEL_COMPATIBILITY.md) for the model-family catalogue and the distinction between upstream architecture support, backend operator coverage and verified Android-device inference. Qwen3.5 and Gemma 4 are recognized by the pinned llama.cpp source, but neither is marked device-verified for the Mali-G57 until an actual GGUF load, chat-template, inference and backend-offload test has passed.
+
 ## CPU / Vulkan benchmark
 
 The Settings benchmark reloads the same model explicitly on Vulkan and CPU, in that

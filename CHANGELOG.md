@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Documentation
+- Added a pinned-revision model compatibility catalogue. Qwen3.5 and Gemma 4 architecture/model graph support is distinguished from Vulkan/CPU operator coverage and real-device verification; neither is advertised as device-validated without a matching GGUF acceptance run.
+
 ### Added
 - Added model-specific topK/minP sampler defaults as backwards-compatible EngineConfig/Parcelable settings with persistent storage and UI overrides.
 
