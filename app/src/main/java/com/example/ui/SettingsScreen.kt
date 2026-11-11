@@ -315,6 +315,19 @@ fun SettingsScreen(
                     ) {
                         Text(if (isBenchmarking) "Vulkan-Layer-Test läuft…" else "Vulkan-GPU-Layer vergleichen")
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { viewModel.runVulkanMatvecWorkgroupSweep() },
+                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                        modifier = Modifier.fillMaxWidth().testTag("vulkan_matvec_workgroup_sweep_button")
+                    ) {
+                        Text(if (isBenchmarking) "DMMV-Kerneltest läuft…" else "Vulkan-MatVec-Kernel vergleichen")
+                    }
+                    Text(
+                        text = "Vier kontrollierte Läufe: AUTO, SUBGROUP, LARGE und AUTO-Wiederholung. Jeder Lauf lädt dasselbe Modell mit maximalem Vulkan-Offload (z. B. 37/37 Layer), nutzt dieselbe feste Promptfolge und 4 Warm-up- plus 20 Mess-Tokens. AUTO bleibt der unveränderte llama.cpp-Standard.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Text(
                         text = "Testet 100 %, 75 %, 50 % und 25 % des nativen Layer-Offloads, mit Wiederholung von 100 % am Ende. Die ursprünglichen Einstellungen werden danach wiederhergestellt.",
                         style = MaterialTheme.typography.bodySmall,
