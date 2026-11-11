@@ -19,6 +19,13 @@ maintainer. The expected key settings are:
 4. Keep the original `.p12` keystore in a secure private backup. Never commit
    the keystore or its Base64 contents to the repository.
 
+The manual debug variant also uses the separate application ID
+`com.aistudio.localllm.mdoanx.dmmv` and launcher label `Local LLM Engine – DMMV-Test`.
+It can be installed alongside the earlier `com.aistudio.localllm.mdoanx` app, so
+the diagnostic build does not require uninstalling the existing app or deleting
+its private data. The DMMV-Test app needs the GGUF selected once again through
+the Android document picker because SAF grants are package-specific.
+
 After the secret is configured, subsequent CI debug APKs use the same signing
 certificate and can update an app installed from another APK signed with this
 same key.
