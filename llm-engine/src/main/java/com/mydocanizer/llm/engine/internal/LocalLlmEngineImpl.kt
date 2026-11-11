@@ -204,6 +204,7 @@ internal class LocalLlmEngineImpl(
                 gpuLayers = config.gpuLayers,
                 batchThreads = config.batchThreads,
                 microBatchSize = config.microBatchSize,
+                vulkanDmmvWorkgroup = config.vulkanMatvecWorkgroup.nativeId,
                 progressCallback = progressCallback
             )
 
