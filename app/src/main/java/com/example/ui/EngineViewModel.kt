@@ -995,7 +995,7 @@ class EngineViewModel(
                 EngineDiagnostics.info(
                     "benchmark",
                     "VULKAN_DMMV_SWEEP_PLAN",
-                    "totalLayers=$totalLayers,actualOffload=${firstLoaded.activeBackend}," +
+                    "modelLayers=$totalLayers,requestedGpuLayers=99,activeBackend=${firstLoaded.activeBackend}," +
                         "workgroups=" + profiles.joinToString(",") { it.vulkanMatvecWorkgroup.name }
                 )
 
@@ -1036,10 +1036,10 @@ class EngineViewModel(
                     ) {
                         throw IllegalStateException("Für ${workgroup.name} wurde nicht dieselbe Modelldatei bestätigt.")
                     }
-                    val actualLayers = VulkanLayerSweepPlan.totalLayersFromBackend(loaded.activeBackend)
-                    if (actualLayers != totalLayers) {
+                    val modelLayers = VulkanLayerSweepPlan.totalLayersFromBackend(loaded.activeBackend)
+                    if (modelLayers != totalLayers) {
                         throw IllegalStateException(
-                            "Layer-Offload änderte sich für ${workgroup.name}: erwartet $totalLayers, erhalten $actualLayers."
+                            "Layer-Offload änderte sich für ${workgroup.name}: erwartet $totalLayers, erhalten $modelLayers."
                         )
                     }
 
@@ -1059,11 +1059,11 @@ class EngineViewModel(
                     val measuredSpeed = measured.measuredTokensPerSecond
                     val reportLine = String.format(
                         java.util.Locale.US,
-                        "%s: layers=%d/%d, load=%dms, promptTokens=%d, prefillMs=%s, " +
+                        "%s: gpuLayersRequested=%d, modelLayers=%d, load=%dms, promptTokens=%d, prefillMs=%s, " +
                             "TTFT=%s ms, measuredTokens=%d, measuredWallMs=%s, decode=%.3f tok/s, " +
                             "native=%.3f tok/s, generationMs=%d, finish=%s",
                         if (index == profiles.lastIndex) "AUTO (Wiederholung)" else workgroup.name,
-                        totalLayers,
+                        profileConfig.gpuLayers,
                         totalLayers,
                         loadMs,
                         measured.promptTokens,
@@ -1081,7 +1081,7 @@ class EngineViewModel(
                         "benchmark",
                         "VULKAN_DMMV_SWEEP_RESULT",
                         "runIndex=${index + 1},workgroup=${workgroup.name},workgroupNativeId=${workgroup.nativeId}," +
-                            "gpuLayersRequested=${profileConfig.gpuLayers},actualLayers=$actualLayers," +
+                            "gpuLayersRequested=${profileConfig.gpuLayers},modelLayers=$modelLayers," +
                             "loadMs=$loadMs,promptTokens=${measured.promptTokens}," +
                             "prefillMs=${measured.promptEvaluationMs ?: -1L}," +
                             "firstTokenAfterPrefillMs=${measured.firstTokenAfterPrefillMs ?: -1L}," +
@@ -1131,7 +1131,7 @@ class EngineViewModel(
                 _benchmarkReport.value = buildString {
                     appendLine("Vulkan DMMV-Workgroup-Vergleich")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB)")
-                    appendLine("Native bestätigte Layer-Gesamtzahl: ${confirmedTotalLayers ?: "nicht bestätigt"}")
+                    appendLine("Native bestätigte Modell-Layerzahl: ${confirmedTotalLayers ?: "nicht bestätigt"}; je Lauf wurden 99 GPU-Layer angefordert.")
                     appendLine(
                         "Je Profil: 4 Warm-up-Tokens + 20 Mess-Tokens; Temperatur 0; Top-P 1; " +
                             "gleiche Prompt-, Kontext-, Batch- und Thread-Einstellungen; voller Vulkan-Offload."
