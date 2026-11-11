@@ -36,6 +36,14 @@ static std::mutex g_native_log_file_mutex;
 static FILE* g_native_log_file = nullptr;
 static constexpr long MAX_NATIVE_LOG_FILE_BYTES = 2L * 1024L * 1024L;
 
+// This process-wide override is consumed by the generated ggml-vulkan.cpp overlay.
+// 0=AUTO (upstream heuristic), 1=SUBGROUP, 2=LARGE (four times the device subgroup).
+static std::atomic<int> g_vulkan_dmmv_workgroup_override{0};
+
+extern "C" int local_llm_vulkan_dmmv_workgroup_override() {
+    return g_vulkan_dmmv_workgroup_override.load(std::memory_order_relaxed);
+}
+
 // Vulkan graph-compute profiling runs inside the native inference call. Keep
 // the active inference identity visible to the generated ggml-vulkan.cpp
 // translation unit so its GPU timestamp rows can be correlated with Kotlin
@@ -733,12 +741,22 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jint gpu_layers,
         jint batch_threads,
         jint micro_batch_size,
+        jint vulkan_dmmv_workgroup,
         jobject progress_listener) {
     auto* engine = fromHandle(handle);
     if (!engine) return 1;
 
     std::lock_guard<std::mutex> lock(engine->mtx);
     engine->unload_unlocked();
+
+    if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 2) {
+        LOGE("Invalid Vulkan DMMV workgroup mode: %d", vulkan_dmmv_workgroup);
+        return 7;
+    }
+    g_vulkan_dmmv_workgroup_override.store(vulkan_dmmv_workgroup, std::memory_order_relaxed);
+    LOGI("Vulkan DMMV workgroup override: %s",
+        vulkan_dmmv_workgroup == 0 ? "AUTO" :
+        (vulkan_dmmv_workgroup == 1 ? "SUBGROUP" : "LARGE"));
 
     const char* model_path = env->GetStringUTFChars(jmodel_path, nullptr);
     if (!model_path) return 2;
