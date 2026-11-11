@@ -4,9 +4,6 @@ import android.os.Parcel
 import android.os.Parcelable
 
 /**
- * Backend selection policy for native model offloading.
- */
-/**
  * Diagnostic workgroup selector for Vulkan dequantize-matvec kernels.
  * AUTO preserves the exact pinned llama.cpp vendor heuristic.
  */
@@ -21,6 +18,9 @@ enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
     }
 }
 
+/**
+ * Backend selection policy for native model offloading.
+ */
 enum class BackendPreference(val modeId: Int, val label: String) {
     /**
      * Tries Vulkan GPU acceleration first.
