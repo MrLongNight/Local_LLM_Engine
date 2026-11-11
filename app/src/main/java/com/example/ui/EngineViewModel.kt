@@ -164,12 +164,14 @@ class EngineViewModel(
         val previous = _engineConfig.value
         _engineConfig.value = config
         if (previous.backendPreference != config.backendPreference ||
-            previous.gpuLayers != config.gpuLayers
+            previous.gpuLayers != config.gpuLayers ||
+            previous.vulkanMatvecWorkgroup != config.vulkanMatvecWorkgroup
         ) {
             EngineDiagnostics.info(
                 "ui",
                 "EXECUTION_CONFIG_UPDATED",
-                "backendPreference=${config.backendPreference}, gpuLayers=${config.gpuLayers}"
+                "backendPreference=${config.backendPreference}, gpuLayers=${config.gpuLayers}, " +
+                    "vulkanMatvecWorkgroup=${config.vulkanMatvecWorkgroup}"
             )
         }
     }
