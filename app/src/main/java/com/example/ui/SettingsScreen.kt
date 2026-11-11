@@ -158,7 +158,7 @@ fun SettingsScreen(
                                     Text(
                                         when (workgroup) {
                                             VulkanMatvecWorkgroup.AUTO -> "AUTO – Upstream"
-                                            VulkanMatvecWorkgroup.SUBGROUP -> "SUBGROUP – 16 Threads"
+                                            VulkanMatvecWorkgroup.SUBGROUP -> "SUBGROUP – Geräte-Subgroup (Mali-G57: 16)"
                                             VulkanMatvecWorkgroup.LARGE -> "LARGE – 4× Subgroup"
                                         }
                                     )
@@ -324,7 +324,7 @@ fun SettingsScreen(
                         Text(if (isBenchmarking) "DMMV-Kerneltest läuft…" else "Vulkan-MatVec-Kernel vergleichen")
                     }
                     Text(
-                        text = "Vier kontrollierte Läufe: AUTO, SUBGROUP, LARGE und AUTO-Wiederholung. Jeder Lauf lädt dasselbe Modell mit maximalem Vulkan-Offload (z. B. 37/37 Layer), nutzt dieselbe feste Promptfolge und 4 Warm-up- plus 20 Mess-Tokens. AUTO bleibt der unveränderte llama.cpp-Standard.",
+                        text = "Vier kontrollierte Läufe: AUTO, SUBGROUP, LARGE und AUTO-Wiederholung. Jeder Lauf fordert mit n_gpu_layers=99 den vollen Vulkan-Offload für dasselbe Modell an, nutzt dieselbe feste Promptfolge und 4 Warm-up- plus 20 Mess-Tokens. AUTO bleibt der unveränderte llama.cpp-Standard.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
