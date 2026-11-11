@@ -29,6 +29,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.ModelInfo
+import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import kotlin.math.roundToInt
 
 @Composable
@@ -133,6 +134,41 @@ fun SettingsScreen(
                             steps = 98,
                             modifier = Modifier.testTag("gpu_layers_slider")
                         )
+                    }
+
+                    if (config.backendPreference != BackendPreference.CPU) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Vulkan-DMMV-Workgroup (Diagnose)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "AUTO nutzt unverändert die llama.cpp-Heuristik. SUBGROUP und LARGE erzwingen nur die MatVec-Workgroup-Größe für den Kernelvergleich; die Pipeline-Varianten werden beim Backend-Aufbau bereitgestellt.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        VulkanMatvecWorkgroup.entries.forEach { workgroup ->
+                            FilterChip(
+                                selected = config.vulkanMatvecWorkgroup == workgroup,
+                                onClick = {
+                                    viewModel.updateConfig(config.copy(vulkanMatvecWorkgroup = workgroup))
+                                },
+                                label = {
+                                    Text(
+                                        when (workgroup) {
+                                            VulkanMatvecWorkgroup.AUTO -> "AUTO – Upstream"
+                                            VulkanMatvecWorkgroup.SUBGROUP -> "SUBGROUP – 16 Threads"
+                                            VulkanMatvecWorkgroup.LARGE -> "LARGE – 4× Subgroup"
+                                        }
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp)
+                                    .testTag("vulkan_matvec_workgroup_${workgroup.name}")
+                            )
+                        }
                     }
 
                     val activeModel = currentModel
