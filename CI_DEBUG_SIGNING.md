@@ -33,6 +33,13 @@ absent so CI can still build and run instrumentation tests. Such APKs are
 one-run installs and cannot be updated in place by a later APK signed with a
 different key. The CI log emits a warning when that fallback is used.
 
+**Current status:** the CI log for APK build #231 confirmed that the secret was
+empty, so #231 was signed with a one-run temporary key. Do not treat that APK
+as the reusable DMMV installation. Add the secret first, then start
+**Actions → Android APK Build → Run workflow → debug**. The next run should
+state that it is using the persistent key; compare its signing-certificate
+fingerprint with the SHA-256 value above before relying on in-place updates.
+
 The Debug build uses the separate application ID
 `com.aistudio.localllm.mdoanx.dmmv` and launcher label
 `Local LLM Engine – DMMV-Test`. It installs alongside the original app
