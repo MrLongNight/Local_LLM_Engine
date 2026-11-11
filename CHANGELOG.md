@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added host-testable native helpers for exact prompt-prefix reuse and protected-message truncation; host C++ tests run in GitHub Actions.
+- Added native incremental KV-prefix reuse for ordinary attention models, with automatic full-clear fallback for recurrent/hybrid models and failed sequence-removal operations.
+- Added system-prefix-aware context shifting guarded by `llama_memory_can_shift`, and a controlled `PROMPT_TOO_LONG` result instead of cutting off the prompt tail.
+
+### Changed
+- Prompt progress and prefill metrics now count only tokens actually evaluated after prefix reuse; diagnostics also report reused token counts.
+- Prompt truncation removes oldest history messages first while retaining system messages and the latest user message.
+
+### Added
 - Added explicit Vulkan A/B selectors for Q5_K/Q6_K base-MMV decode and Q4_K F16/F32 prefill; original overlay source-anchor guards remain mandatory.
 - Added benchmark profile generation for Vulkan n_ubatch 32/64/128 and Flash Attention ON/OFF on Vulkan and CPU.
 

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 #include <exception>
 #include <stdexcept>
 #include <cstdio>
@@ -23,6 +24,7 @@
 #include "common.h"
 #include "chat.h"
 #include "sampling.h"
+#include "prompt_cache_utils.h"
 
 #define TAG "LocalLlmEngineNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
@@ -194,6 +196,9 @@ struct EngineInstance {
 
     // Chat session state
     std::vector<common_chat_msg> chat_msgs;
+    // Mirrors sequence 0 KV exactly: prompt prefix plus every successfully decoded output token.
+    std::vector<llama_token> cached_tokens;
+    bool supports_incremental_memory_ops = false;
     llama_pos system_prompt_position = 0;
     llama_pos current_position = 0;
     llama_pos stop_generation_position = 0;
@@ -228,6 +233,7 @@ struct EngineInstance {
 
     void reset_long_term(bool clear_kv = true) {
         chat_msgs.clear();
+        cached_tokens.clear();
         system_prompt_position = 0;
         current_position = 0;
         if (clear_kv && context != nullptr) {
@@ -235,14 +241,21 @@ struct EngineInstance {
         }
     }
 
-    void shift_context() {
-        if (!context) return;
+    bool shift_context() {
+        if (!context || !supports_incremental_memory_ops) return false;
+        llama_memory_t memory = llama_get_memory(context);
+        if (!llama_memory_can_shift(memory)) return false;
         const int n_discard = (current_position - system_prompt_position) / 2;
-        if (n_discard <= 0) return;
+        if (n_discard <= 0 || cached_tokens.size() < static_cast<size_t>(current_position)) return false;
         LOGI("Controlled context shift: discarding %d non-system tokens starting at %d",
              n_discard, system_prompt_position);
-        llama_memory_seq_rm(llama_get_memory(context), 0, system_prompt_position, system_prompt_position + n_discard);
-        llama_memory_seq_add(llama_get_memory(context), 0, system_prompt_position + n_discard, current_position, -n_discard);
+        if (!llama_memory_seq_rm(memory, 0, system_prompt_position, system_prompt_position + n_discard)) {
+            LOGW("Context shift refused by llama memory backend; keeping current cache unchanged");
+            return false;
+        }
+        llama_memory_seq_add(memory, 0, system_prompt_position + n_discard, current_position, -n_discard);
+        cached_tokens.erase(cached_tokens.begin() + system_prompt_position,
+                            cached_tokens.begin() + system_prompt_position + n_discard);
         current_position -= n_discard;
         // The generation limit is an absolute KV position too. Move it by the
         // same amount as the retained sequence or a context shift can extend
@@ -251,6 +264,7 @@ struct EngineInstance {
             stop_generation_position = std::max(
                 system_prompt_position, stop_generation_position - n_discard);
         }
+        return true;
     }
 
     // Caller must hold mtx.
@@ -593,8 +607,13 @@ static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, lla
         const int cur_batch_size = std::min((int)tokens.size() - i, engine->batch_size);
         engine->batch.n_tokens = 0;
 
-        if (start_pos + i + cur_batch_size >= engine->context_size - OVERFLOW_HEADROOM) {
-            engine->shift_context();
+        if (start_pos + i + cur_batch_size > engine->context_size - OVERFLOW_HEADROOM) {
+            const llama_pos previous_position = engine->current_position;
+            if (!engine->shift_context()) {
+                LOGW("Prompt cannot shift this model memory safely; stopping before context overflow");
+                return -4;
+            }
+            start_pos -= previous_position - engine->current_position;
         }
 
         for (int j = 0; j < cur_batch_size; j++) {
@@ -1028,6 +1047,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         return 4;
     }
     engine->context = ctx;
+    engine->supports_incremental_memory_ops =
+        !llama_model_is_hybrid(model) && !llama_model_is_recurrent(model);
+    LOGI("Model memory capabilities: hybrid=%d,recurrent=%d,prefixCache=%d,contextShift=%d",
+         llama_model_is_hybrid(model) ? 1 : 0,
+         llama_model_is_recurrent(model) ? 1 : 0,
+         engine->supports_incremental_memory_ops ? 1 : 0,
+         engine->supports_incremental_memory_ops ? 1 : 0);
     report_model_load_stage(&progress_context, 0.80f); // context created
 
     engine->batch = llama_batch_init(b_size, 0, 1);
@@ -1161,7 +1187,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     // before entering JNI. Never clear it here: a Binder cancel racing with
     // nativeProcessChat must not be lost.
     engine->reset_short_term();
-    engine->reset_long_term(true);
 
     jsize count = env->GetArrayLength(jroles);
     if (count == 0 || count != env->GetArrayLength(jcontents)) {
@@ -1248,85 +1273,147 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     std::string full_prompt;
     common_chat_prompt rendered_prompt;
     bool used_chat_template = false;
-    try {
-        common_chat_templates_inputs inputs;
-        inputs.messages = messages;
-        inputs.add_generation_prompt = true;
-        inputs.use_jinja = true;
-        inputs.enable_thinking = (enable_thinking == JNI_TRUE);
-        const auto rendered = common_chat_templates_apply(engine->chat_templates.get(), inputs);
-        rendered_prompt = rendered.prompt;
-        full_prompt = rendered_prompt.str();
-        used_chat_template = true;
-        LOGI("Formatted prompt with llama.cpp Jinja template (%zu messages, enable_thinking=%s)",
-             messages.size(), enable_thinking == JNI_TRUE ? "true" : "false");
-    } catch (const std::exception& jinja_error) {
-        LOGW("Jinja chat-template rendering failed: %s", jinja_error.what());
+
+    auto render_and_tokenize = [&](const std::vector<common_chat_msg>& source_messages,
+                                   bool add_generation_prompt,
+                                   std::string& out_prompt,
+                                   common_chat_prompt& out_rendered,
+                                   bool& out_used_template) -> llama_tokens {
+        out_prompt.clear();
+        out_rendered = common_chat_prompt();
+        out_used_template = false;
         try {
             common_chat_templates_inputs inputs;
-            inputs.messages = messages;
-            inputs.add_generation_prompt = true;
-            inputs.use_jinja = false;
+            inputs.messages = source_messages;
+            inputs.add_generation_prompt = add_generation_prompt;
+            inputs.use_jinja = true;
             inputs.enable_thinking = (enable_thinking == JNI_TRUE);
             const auto rendered = common_chat_templates_apply(engine->chat_templates.get(), inputs);
-            rendered_prompt = rendered.prompt;
-            full_prompt = rendered_prompt.str();
-            used_chat_template = true;
-            LOGI("Formatted prompt with llama.cpp legacy renderer");
-        } catch (const std::exception& legacy_error) {
-            LOGE("Legacy chat-template rendering failed: %s", legacy_error.what());
-            if (has_chat_template) return 5;
+            out_rendered = rendered.prompt;
+            out_prompt = out_rendered.str();
+            out_used_template = true;
+        } catch (const std::exception& jinja_error) {
+            LOGW("Jinja chat-template rendering failed: %s", jinja_error.what());
+            try {
+                common_chat_templates_inputs inputs;
+                inputs.messages = source_messages;
+                inputs.add_generation_prompt = add_generation_prompt;
+                inputs.use_jinja = false;
+                inputs.enable_thinking = (enable_thinking == JNI_TRUE);
+                const auto rendered = common_chat_templates_apply(engine->chat_templates.get(), inputs);
+                out_rendered = rendered.prompt;
+                out_prompt = out_rendered.str();
+                out_used_template = true;
+            } catch (const std::exception& legacy_error) {
+                LOGE("Legacy chat-template rendering failed: %s", legacy_error.what());
+                if (has_chat_template) {
+                    LOGE("Explicit model chat template failed for this message set");
+                    return {};
+                }
+            }
         }
-    }
-
-    if (!used_chat_template) {
-        for (const auto& message : messages) {
-            full_prompt += message.role + ": " + message.content + "\n";
+        if (!out_used_template) {
+            for (const auto& message : source_messages) {
+                out_prompt += message.role + ": " + message.content + "\n";
+            }
+            if (add_generation_prompt) out_prompt += "assistant: ";
         }
-        full_prompt += "assistant: ";
-        LOGW("No usable model chat template; using role/content fallback");
-    }
-    engine->chat_msgs = messages;
-    const int64_t template_duration_ms = (llama_time_us() - prompt_prepare_start_us) / 1000;
-    engine->last_prompt_template_us = template_duration_ms * 1000;
 
-    LOGI("Prompt prepared: messages=%zu, template=%s, characters=%zu, template_ms=%lld",
-         messages.size(), used_chat_template ? "llama.cpp" : "fallback", full_prompt.size(),
-         static_cast<long long>(template_duration_ms));
+        llama_tokens result;
+        if (out_used_template) {
+            // Template-owned text may contain special tokens; message content stays literal.
+            for (const auto& part : out_rendered.parts) {
+                if (part.text.empty()) continue;
+                auto part_tokens = common_tokenize(engine->context, part.text, false, !part.is_input);
+                result.insert(result.end(), part_tokens.begin(), part_tokens.end());
+            }
+        } else {
+            result = common_tokenize(engine->context, out_prompt, false, false);
+        }
+        return result;
+    };
+
     const int64_t tokenization_start_us = llama_time_us();
-    llama_tokens tokens;
-    if (used_chat_template) {
-        // The rendered template already contains model-specific BOS/EOS markers.
-        // Do not add a second BOS during tokenization. Parse control tokens only
-        // in template-owned parts; user input parts must remain literal text.
-        for (const auto& part : rendered_prompt.parts) {
-            if (part.text.empty()) continue;
-            auto part_tokens = common_tokenize(
-                engine->context,
-                part.text,
-                false,
-                !part.is_input
-            );
-            tokens.insert(tokens.end(), part_tokens.begin(), part_tokens.end());
-        }
-    } else {
-        tokens = common_tokenize(engine->context, full_prompt, false, false);
-    }
-    const int64_t tokenization_duration_ms = (llama_time_us() - tokenization_start_us) / 1000;
-    engine->last_prompt_tokenization_us = tokenization_duration_ms * 1000;
+    llama_tokens tokens = render_and_tokenize(
+        messages, true, full_prompt, rendered_prompt, used_chat_template);
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
         return 3;
     }
 
-    int prompt_size = (int)tokens.size();
     const int max_allowed = engine->context_size - OVERFLOW_HEADROOM;
-    if (prompt_size > max_allowed) {
-        LOGW("Prompt size %d exceeds context size %d, controlled truncation", prompt_size, max_allowed);
-        tokens.resize(max_allowed);
-        prompt_size = max_allowed;
+    std::vector<size_t> protected_message_indices;
+    size_t last_user_index = messages.empty() ? 0 : messages.size() - 1;
+    bool found_user_message = false;
+    for (size_t i = 0; i < messages.size(); ++i) {
+        if (messages[i].role == "system") protected_message_indices.push_back(i);
+        if (messages[i].role == "user") {
+            last_user_index = i;
+            found_user_message = true;
+        }
     }
+    if (!found_user_message && !messages.empty()) {
+        LOGW("Prompt contains no user role; preserving the final message during truncation");
+    }
+    const auto truncation_plan = local_llm::build_prompt_truncation_plan(
+        messages.size(), protected_message_indices, last_user_index);
+    size_t removed_history_messages = 0;
+    for (const size_t erase_index : truncation_plan) {
+        if (tokens.size() <= static_cast<size_t>(max_allowed)) break;
+        if (erase_index >= messages.size()) continue;
+        messages.erase(messages.begin() + static_cast<std::ptrdiff_t>(erase_index));
+        ++removed_history_messages;
+        tokens = render_and_tokenize(
+            messages, true, full_prompt, rendered_prompt, used_chat_template);
+        if (tokens.empty()) {
+            LOGE("Prompt became empty after history truncation");
+            return 3;
+        }
+    }
+    if (tokens.size() > static_cast<size_t>(max_allowed)) {
+        LOGE("Prompt too long: %zu tokens exceed safe context budget %d after removing %zu history messages; system and last user message retained",
+             tokens.size(), max_allowed, removed_history_messages);
+        return 8; // PROMPT_TOO_LONG; never truncate the tail of the current user prompt.
+    }
+    if (removed_history_messages > 0) {
+        LOGI("Prompt history truncated by removing %zu oldest non-system message(s); retained system messages and last user message",
+             removed_history_messages);
+    }
+    engine->chat_msgs = messages;
 
+    const int64_t tokenization_duration_ms = (llama_time_us() - tokenization_start_us) / 1000;
+    engine->last_prompt_tokenization_us = tokenization_duration_ms * 1000;
+    const int64_t template_duration_ms = (llama_time_us() - prompt_prepare_start_us) / 1000;
+    engine->last_prompt_template_us = template_duration_ms * 1000;
+    LOGI("Prompt prepared: messages=%zu, template=%s, characters=%zu, tokens=%zu, template_ms=%lld, historyRemoved=%zu",
+         messages.size(), used_chat_template ? "llama.cpp" : "fallback", full_prompt.size(),
+         tokens.size(), static_cast<long long>(template_duration_ms), removed_history_messages);
+
+    // Derive the immutable system prefix from the same model template and tokenizer.
+    std::vector<common_chat_msg> system_messages;
+    for (const auto& message : messages) {
+        if (message.role != "system") break;
+        system_messages.push_back(message);
+    }
+    engine->system_prompt_position = 0;
+    if (!system_messages.empty()) {
+        try {
+            std::string system_prompt_text;
+            common_chat_prompt system_rendered;
+            bool system_used_template = false;
+            const auto system_tokens = render_and_tokenize(
+                system_messages, false, system_prompt_text, system_rendered, system_used_template);
+            engine->system_prompt_position = static_cast<llama_pos>(
+                local_llm::common_prefix_length(system_tokens, tokens));
+            if (engine->system_prompt_position < static_cast<llama_pos>(system_tokens.size())) {
+                LOGW("System-only render differs from full prompt at token %lld/%zu; context shifting will preserve the verified common system prefix",
+                     static_cast<long long>(engine->system_prompt_position), system_tokens.size());
+            }
+        } catch (const std::exception& error) {
+            LOGW("Could not render standalone system prefix; context shifting will preserve position 0: %s", error.what());
+            engine->system_prompt_position = 0;
+        }
+    }
     PromptEvalProgressContext progress_context{env, progress_listener, nullptr};
     if (progress_listener != nullptr) {
         jclass listener_class = env->GetObjectClass(progress_listener);
@@ -1338,12 +1425,44 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             env->ExceptionClear();
         }
     }
-    report_prompt_eval_progress(&progress_context, 0, prompt_size);
-    LOGI("Prompt evaluation started: prompt_tokens=%d, batch_size=%d",
-         prompt_size, engine->batch_size);
+    const bool memory_is_hybrid = llama_model_is_hybrid(engine->model) ||
+                                  llama_model_is_recurrent(engine->model);
+    size_t reused_tokens = 0;
+    if (engine->supports_incremental_memory_ops && !memory_is_hybrid) {
+        reused_tokens = local_llm::reusable_prefix_length(engine->cached_tokens, tokens);
+        llama_memory_t memory = llama_get_memory(engine->context);
+        if (reused_tokens > 0) {
+            if (!llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(reused_tokens), -1)) {
+                LOGW("llama_memory_seq_rm declined partial prefix reuse; falling back to full KV clear");
+                llama_memory_clear(memory, false);
+                reused_tokens = 0;
+            }
+        } else {
+            llama_memory_clear(memory, false);
+        }
+    } else {
+        // Gated/recurrent and hybrid memory layouts are not prefix-removable.
+        llama_memory_clear(llama_get_memory(engine->context), false);
+        if (memory_is_hybrid) {
+            LOGI("Hybrid/recurrent model detected; partial sequence removal and context shifting are disabled");
+        }
+    }
+
+    if (reused_tokens > engine->cached_tokens.size()) reused_tokens = 0;
+    engine->cached_tokens.resize(reused_tokens);
+    engine->current_position = static_cast<llama_pos>(reused_tokens);
+    const llama_tokens tokens_to_evaluate(tokens.begin() + static_cast<std::ptrdiff_t>(reused_tokens), tokens.end());
+    const int evaluated_prompt_tokens = static_cast<int>(tokens_to_evaluate.size());
+    const int prompt_size = static_cast<int>(tokens.size());
+    LOGI("Prompt cache plan: promptTokens=%d,reusedTokens=%zu,evaluatedTokens=%d,hybrid=%d",
+         prompt_size, reused_tokens, evaluated_prompt_tokens, memory_is_hybrid ? 1 : 0);
+
+    report_prompt_eval_progress(&progress_context, 0, evaluated_prompt_tokens);
+    LOGI("Prompt evaluation started: evaluated_tokens=%d, reused_tokens=%zu, batch_size=%d",
+         evaluated_prompt_tokens, reused_tokens, engine->batch_size);
     const int64_t prompt_start_us = llama_time_us();
     int dec_res = decode_tokens(
-        engine, tokens, engine->current_position, true, &progress_context);
+        engine, tokens_to_evaluate, engine->current_position, true, &progress_context);
     // Vulkan may enqueue work asynchronously. Include completion of that GPU work
     // in prefill time rather than charging the wait to the first generated token.
     if (dec_res == 0) {
@@ -1351,25 +1470,33 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
     const int64_t prompt_duration_ms = (llama_time_us() - prompt_start_us) / 1000;
     engine->last_prompt_decode_us = prompt_duration_ms * 1000;
-    engine->last_prompt_tokens = prompt_size;
+    engine->last_prompt_tokens = evaluated_prompt_tokens;
     if (dec_res == -2) {
         engine->last_finish_reason = 2; // CANCELLED during prompt prefill
-        LOGI("Prompt prefill cancelled cooperatively after %d of %d tokens",
-             engine->last_prompt_tokens, prompt_size);
+        llama_memory_clear(llama_get_memory(engine->context), false);
+        engine->cached_tokens.clear();
+        engine->current_position = 0;
+        LOGI("Prompt prefill cancelled cooperatively after %d of %d evaluated tokens",
+             engine->last_prompt_tokens, evaluated_prompt_tokens);
         return 6; // dedicated cancellation result; not a decode error
     }
     if (dec_res != 0) {
+        llama_memory_clear(llama_get_memory(engine->context), false);
+        engine->cached_tokens.clear();
+        engine->current_position = 0;
         LOGE("Prompt decoding failed with code %d", dec_res);
         return 4;
     }
 
-    engine->current_position += prompt_size;
+    engine->cached_tokens.insert(engine->cached_tokens.end(),
+                                  tokens_to_evaluate.begin(), tokens_to_evaluate.end());
+    engine->current_position += evaluated_prompt_tokens;
     LOGI("Prompt stage metrics: template_ms=%lld, tokenization_ms=%lld, "
-         "decode_ms=%lld, prompt_tokens=%d, batch_size=%d, backend=%s",
+         "decode_ms=%lld, prompt_tokens=%d, reused_tokens=%zu, evaluated_tokens=%d, batch_size=%d, backend=%s",
          static_cast<long long>(template_duration_ms),
          static_cast<long long>(tokenization_duration_ms),
          static_cast<long long>(prompt_duration_ms),
-         prompt_size, engine->batch_size, engine->active_backend.c_str());
+         prompt_size, reused_tokens, evaluated_prompt_tokens, engine->batch_size, engine->active_backend.c_str());
     LOGI("Prompt evaluation completed: prompt_tokens=%d, duration_ms=%lld",
          prompt_size, static_cast<long long>(prompt_duration_ms));
     int predict_len = max_predict > 0 ? max_predict : 1024;
@@ -1402,8 +1529,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     }
 
     if (engine->current_position >= engine->context_size - OVERFLOW_HEADROOM) {
-        LOGI("Context full, performing controlled shift...");
-        engine->shift_context();
+        LOGI("Context full, attempting controlled shift...");
+        if (!engine->shift_context()) {
+            LOGW("This model memory cannot shift safely; ending generation before context overflow");
+            engine->last_finish_reason = 1; // controlled MAX_TOKENS stop
+            engine->generation_finished = true;
+            return flush_incomplete_utf8(env, engine);
+        }
     }
 
     if (engine->current_position >= engine->stop_generation_position) {
@@ -1438,13 +1570,21 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const int decode_result = llama_decode(engine->context, engine->batch);
     const int64_t decode_submit_duration_us = llama_time_us() - decode_start_us;
     if (decode_result == 2) {
-        LOGI("Token decode aborted by native cancellation callback");
+        LOGI("Token decode aborted by native cancellation callback; invalidating partially evaluated KV state");
+        llama_memory_clear(llama_get_memory(engine->context), false);
+        engine->cached_tokens.clear();
+        engine->current_position = 0;
+        engine->system_prompt_position = 0;
         engine->last_finish_reason = 2; // CANCELLED
         engine->generation_finished = true;
         return nullptr;
     }
     if (decode_result != 0) {
-        LOGE("llama_decode failed during token generation with code %d", decode_result);
+        LOGE("llama_decode failed during token generation with code %d; invalidating KV state", decode_result);
+        llama_memory_clear(llama_get_memory(engine->context), false);
+        engine->cached_tokens.clear();
+        engine->current_position = 0;
+        engine->system_prompt_position = 0;
         engine->last_finish_reason = 3; // ERROR
         return nullptr;
     }
@@ -1458,6 +1598,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const int64_t decode_duration_us = decode_submit_duration_us + backend_sync_wait_us;
 
     engine->current_position++;
+    engine->cached_tokens.push_back(new_token_id);
 
     const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
     if (llama_vocab_is_eog(vocab, new_token_id)) {

@@ -455,6 +455,7 @@ internal class LocalLlmEngineImpl(
                 4 -> "llama.cpp failed while decoding the prompt"
                 5 -> "The model chat template could not be formatted"
                 7 -> "Native request sampler initialization failed"
+                8 -> "Prompt zu lang: Ältere Chat-Nachrichten wurden bereits entfernt, aber System-Prompt und letzte Nutzernachricht passen nicht gemeinsam in den Modellkontext. Verkleinere die letzte Nachricht oder erhöhe den Kontext."
                 else -> "Native prompt evaluation failed with code $processRes"
             }
             val err = IllegalStateException(message)

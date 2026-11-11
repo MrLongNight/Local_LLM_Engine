@@ -72,6 +72,17 @@ jobs:
       - name: Run unit tests
         run: gradle --no-daemon :app:testDebugUnitTest :llm-engine:testDebugUnitTest
 
+      - name: Run host-only native prompt cache and truncation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/prompt_cache_utils_test.cpp \
+            -o "$RUNNER_TEMP/prompt-cache-utils-test"
+          "$RUNNER_TEMP/prompt-cache-utils-test"
+          echo "Host prompt-cache and truncation tests passed."
+
       - name: Print failed JUnit assertions
         if: always()
         shell: bash
