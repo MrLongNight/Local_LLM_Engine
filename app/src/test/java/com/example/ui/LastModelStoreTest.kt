@@ -6,6 +6,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
+import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -40,7 +41,8 @@ class LastModelStoreTest {
             gpuLayers = 37,
             timeoutConfig = TimeoutConfig(modelLoadMs = 240_000L),
             batchThreads = 3,
-            microBatchSize = 64
+            microBatchSize = 64,
+            vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.LARGE
         )
         val source = ModelSource.ContentUri(
             uriString = "content://com.android.externalstorage.documents/document/primary%3AModels%2Fqwen.gguf"
