@@ -6,6 +6,21 @@ import android.os.Parcelable
 /**
  * Backend selection policy for native model offloading.
  */
+/**
+ * Diagnostic workgroup selector for Vulkan dequantize-matvec kernels.
+ * AUTO preserves the exact pinned llama.cpp vendor heuristic.
+ */
+enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
+    AUTO(0, "AUTO"),
+    SUBGROUP(1, "SUBGROUP"),
+    LARGE(2, "LARGE (4× Subgroup)");
+
+    companion object {
+        fun fromNativeId(id: Int): VulkanMatvecWorkgroup =
+            entries.firstOrNull { it.nativeId == id } ?: AUTO
+    }
+}
+
 enum class BackendPreference(val modeId: Int, val label: String) {
     /**
      * Tries Vulkan GPU acceleration first.
@@ -43,6 +58,7 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property gpuLayers Number of layers offloaded to GPU VRAM (e.g. 99 for full offload).
  * @property batchThreads llama.cpp n_threads_batch; 0 follows n_threads.
  * @property microBatchSize llama.cpp n_ubatch; 0 follows n_batch.
+ * @property vulkanMatvecWorkgroup Diagnostic DMMV workgroup selector; AUTO is the unchanged default.
  */
 data class EngineConfig(
     val contextSize: Int = 4096,
@@ -55,7 +71,8 @@ data class EngineConfig(
     val gpuLayers: Int = 99,
     val timeoutConfig: TimeoutConfig = TimeoutConfig(),
     val batchThreads: Int = 0,
-    val microBatchSize: Int = 0
+    val microBatchSize: Int = 0,
+    val vulkanMatvecWorkgroup: VulkanMatvecWorkgroup = VulkanMatvecWorkgroup.AUTO
 ) : Parcelable {
     /**
      * Effective llama.cpp thread count for prompt/batch processing.
@@ -100,7 +117,10 @@ data class EngineConfig(
         gpuLayers = parcel.readInt(),
         timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader) ?: TimeoutConfig(),
         batchThreads = parcel.readInt(),
-        microBatchSize = parcel.readInt()
+        microBatchSize = parcel.readInt(),
+        vulkanMatvecWorkgroup = runCatching {
+            VulkanMatvecWorkgroup.valueOf(parcel.readString() ?: VulkanMatvecWorkgroup.AUTO.name)
+        }.getOrDefault(VulkanMatvecWorkgroup.AUTO)
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -115,6 +135,7 @@ data class EngineConfig(
         parcel.writeParcelable(timeoutConfig, flags)
         parcel.writeInt(batchThreads)
         parcel.writeInt(microBatchSize)
+        parcel.writeString(vulkanMatvecWorkgroup.name)
     }
 
     override fun describeContents(): Int = 0
