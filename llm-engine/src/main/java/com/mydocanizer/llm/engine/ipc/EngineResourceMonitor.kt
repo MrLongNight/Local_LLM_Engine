@@ -2,7 +2,9 @@ package com.mydocanizer.llm.engine.ipc
 
 import android.app.ActivityManager
 import android.content.Context
+import android.os.Build
 import android.os.Debug
+import android.os.PowerManager
 import android.os.Process
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
@@ -129,6 +131,33 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
     fun inferenceStarted() {
         synchronized(nativeMemoryLock) { phase.set("INFERENCE") }
         logPhase("INFERENCE")
+        logRunEnvironment("INFERENCE_START")
+    }
+
+    private fun logRunEnvironment(event: String) {
+        val memory = ActivityManager.MemoryInfo()
+        activityManager?.getMemoryInfo(memory)
+        val thermal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val power = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            power?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
+        } else -1
+        EngineDiagnostics.info(
+            "memory", "RUN_ENVIRONMENT",
+            "event=$event,pid=${Process.myPid()},availMemMb=${if (activityManager != null) mb(memory.availMem) else "unknown"}," +
+                "lowMemory=${if (activityManager != null) memory.lowMemory else "unknown"}," +
+                "thermalStatus=${thermalName(thermal)},thermalStatusCode=$thermal"
+        )
+    }
+
+    private fun thermalName(status: Int): String = when (status) {
+        PowerManager.THERMAL_STATUS_NONE -> "NONE"
+        PowerManager.THERMAL_STATUS_LIGHT -> "LIGHT"
+        PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE"
+        PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
+        PowerManager.THERMAL_STATUS_CRITICAL -> "CRITICAL"
+        PowerManager.THERMAL_STATUS_EMERGENCY -> "EMERGENCY"
+        PowerManager.THERMAL_STATUS_SHUTDOWN -> "SHUTDOWN"
+        else -> "UNAVAILABLE"
     }
 
     fun inferenceFinished() {
@@ -190,6 +219,12 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 append(",javaHeapUsedMb=${mb(javaUsedBytes)}")
                 append(",javaHeapCommittedMb=${mb(runtime.totalMemory())}")
                 append(",javaHeapMaxMb=${mb(runtime.maxMemory())}")
+                val thermalStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val power = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    power?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
+                } else -1
+                append(",thermalStatus=${thermalName(thermalStatus)}")
+                append(",thermalStatusCode=$thermalStatus")
                 if (activityManager != null) {
                     append(",systemAvailableRamMb=${mb(systemMemory.availMem)}")
                     append(",systemTotalRamMb=${mb(systemMemory.totalMem)}")

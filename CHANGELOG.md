@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added host-testable CPU performance-core thread selection using sysfs maximum frequencies (>=70% of device maximum, clamped to 2..4), shared by Kotlin recommendations and JNI defaults.
+- Added per-run available-RAM and Android thermal-status diagnostics, plus periodic thermal status in resource snapshots.
+
+### Changed
+- Vulkan offload defaults to a 2-thread CPU submission pool when the caller does not set an explicit thread count; CPU defaults use the detected performance-core count.
+- Native INFO/DEBUG log lines are buffered and flushed at WARN/ERROR or on a one-second interval; rotation still flushes before truncation.
+
 ### Changed
 - Increased the default cooperative abort grace period from 300 ms to 3,000 ms; test-only `fast()` timing remains intentionally short.
 - Prefill timeout is now a stall deadline reset by each native prompt-progress callback, while the existing total-inference deadline remains the hard overall cap.

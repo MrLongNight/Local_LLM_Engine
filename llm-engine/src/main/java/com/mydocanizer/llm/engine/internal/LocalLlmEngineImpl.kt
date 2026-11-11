@@ -108,7 +108,7 @@ internal class LocalLlmEngineImpl(
             engineHandle.set(handle)
 
             val sysInfo = runCatching { NativeEngineHandle.nativeGetSystemInfo() }.getOrDefault("")
-            val recThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+            val recThreads = CpuThreadPolicy.recommendedThreads()
             _backendInfo.value = BackendInfo(
                 backendName = "llama.cpp (Vulkan / ARM NEON / KleidiAI / AVX)",
                 systemInfo = sysInfo,

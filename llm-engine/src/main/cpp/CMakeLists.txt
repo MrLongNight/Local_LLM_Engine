@@ -554,6 +554,12 @@ set(LLAMA_OPENSSL OFF CACHE BOOL "llama: use openssl" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "ggml: native" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "ggml: backend dl" FORCE)
 set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "ggml: build all variants of the CPU backend" FORCE)
+# Do not turn GGML_BACKEND_DL/CPU_ALL_VARIANTS on here: in the pinned upstream
+# CMake, CPU_ALL_VARIANTS requires BACKEND_DL, BUILD_SHARED_LIBS and converts
+# every backend created by ggml_add_backend_library (including Vulkan) into a
+# MODULE target. This project intentionally links the Vulkan backend statically.
+# Keep the ARM CPU backend baseline-safe until a CPU-only variant loader is added;
+# never compile the sole CPU backend with dotprod/i8mm flags without runtime dispatch.
 set(GGML_LLAMAFILE OFF CACHE BOOL "ggml: llamafile" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "ggml: use OpenMP" FORCE)
 

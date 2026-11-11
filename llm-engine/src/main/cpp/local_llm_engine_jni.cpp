@@ -13,6 +13,7 @@
 #include <exception>
 #include <stdexcept>
 #include <cstdio>
+#include <fstream>
 #include <cerrno>
 #include <cstring>
 #include <ctime>
@@ -46,6 +47,31 @@ static std::atomic<int> g_vulkan_dmmv_workgroup_override{0};
 extern "C" int local_llm_vulkan_dmmv_workgroup_override() {
     return g_vulkan_dmmv_workgroup_override.load(std::memory_order_relaxed);
 }
+
+static int recommended_performance_core_count() {
+    std::vector<long long> max_frequencies_khz;
+    for (int cpu = 0; cpu < 64; ++cpu) {
+        const std::string path = "/sys/devices/system/cpu/cpu" +
+            std::to_string(cpu) + "/cpufreq/cpuinfo_max_freq";
+        std::ifstream input(path);
+        long long frequency = 0;
+        if (input >> frequency && frequency > 0) {
+            max_frequencies_khz.push_back(frequency);
+        }
+    }
+    if (max_frequencies_khz.empty()) {
+        return std::clamp(static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN)) - 2, 2, 4);
+    }
+    const long long max_frequency =
+        *std::max_element(max_frequencies_khz.begin(), max_frequencies_khz.end());
+    const int performance_cores = static_cast<int>(std::count_if(
+        max_frequencies_khz.begin(), max_frequencies_khz.end(),
+        [max_frequency](long long frequency) {
+            return frequency * 10 >= max_frequency * 7;
+        }));
+    return std::clamp(performance_cores, 2, 4);
+}
+
 
 // Vulkan graph-compute profiling runs inside the native inference call. Keep
 // the active inference identity visible to the generated ggml-vulkan.cpp

@@ -418,7 +418,7 @@ class InferenceService : Service() {
                 backendName = "llama.cpp",
                 systemInfo = "Process PID ${Process.myPid()}",
                 isAvailable = true,
-                recommendedThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+                recommendedThreads = com.mydocanizer.llm.engine.internal.CpuThreadPolicy.recommendedThreads()
             )
         }
 
