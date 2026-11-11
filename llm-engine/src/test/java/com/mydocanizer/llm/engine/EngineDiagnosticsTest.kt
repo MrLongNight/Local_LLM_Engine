@@ -152,6 +152,42 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun compactReportRetainsDmmvWorkgroupSelectionAndAllSweepResults() {
+        val nativeSelections = listOf(
+            "2026-11-11 16:00:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - " +
+                "override=AUTO,selected=SUBGROUP,subgroupSize=16",
+            "2026-11-11 16:01:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - " +
+                "override=SUBGROUP,selected=SUBGROUP,subgroupSize=16",
+            "2026-11-11 16:02:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - " +
+                "override=LARGE,selected=LARGE,subgroupSize=16",
+            "2026-11-11 16:03:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - " +
+                "override=AUTO,selected=SUBGROUP,subgroupSize=16"
+        )
+        val sweepEvents = listOf(
+            "2026-11-11 16:00:00.000 [INFO] [benchmark] VULKAN_DMMV_SWEEP_STARTED - profiles=AUTO,SUBGROUP,LARGE,AUTO_REPEAT",
+            "2026-11-11 16:00:01.000 [INFO] [benchmark] VULKAN_DMMV_SWEEP_PLAN - modelLayers=37,requestedGpuLayers=99",
+            "2026-11-11 16:01:00.000 [INFO] [benchmark] VULKAN_DMMV_SWEEP_RESULT - runIndex=1,workgroup=AUTO,workgroupNativeId=0,measuredTokensPerSecond=1.6",
+            "2026-11-11 16:02:00.000 [INFO] [benchmark] VULKAN_DMMV_SWEEP_RESULT - runIndex=2,workgroup=SUBGROUP,workgroupNativeId=1,measuredTokensPerSecond=1.8",
+            "2026-11-11 16:03:00.000 [INFO] [benchmark] VULKAN_DMMV_SWEEP_RESULT - runIndex=3,workgroup=LARGE,workgroupNativeId=2,measuredTokensPerSecond=2.0",
+            "2026-11-11 16:04:00.000 [INFO] [benchmark] VULKAN_DMMV_SWEEP_RESULT - runIndex=4,workgroup=AUTO,workgroupNativeId=0,measuredTokensPerSecond=1.6",
+            "2026-11-11 16:04:01.000 [INFO] [benchmark] VULKAN_DMMV_SWEEP_RESTORED - gpuLayers=37"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(nativeSelections + sweepEvents)
+
+        assertTrue(report.contains("Q4_K-/DMMV-KERNELPFAD"))
+        assertTrue(report.contains("override=AUTO,selected=SUBGROUP,subgroupSize=16"))
+        assertTrue(report.contains("override=SUBGROUP,selected=SUBGROUP,subgroupSize=16"))
+        assertTrue(report.contains("override=LARGE,selected=LARGE,subgroupSize=16"))
+        assertTrue(report.contains("VULKAN_DMMV_SWEEP_STARTED"))
+        assertTrue(report.contains("VULKAN_DMMV_SWEEP_PLAN"))
+        assertTrue(report.contains("workgroup=AUTO,workgroupNativeId=0"))
+        assertTrue(report.contains("workgroup=SUBGROUP,workgroupNativeId=1"))
+        assertTrue(report.contains("workgroup=LARGE,workgroupNativeId=2"))
+        assertTrue(report.contains("VULKAN_DMMV_SWEEP_RESTORED"))
+    }
+
+    @Test
     fun vulkanPerOperationGpuTimestampsAreGroupedByProcessRunAndOperator() {
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(
