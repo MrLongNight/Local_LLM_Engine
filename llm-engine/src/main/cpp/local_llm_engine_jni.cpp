@@ -37,7 +37,7 @@ static FILE* g_native_log_file = nullptr;
 static constexpr long MAX_NATIVE_LOG_FILE_BYTES = 2L * 1024L * 1024L;
 
 // This process-wide override is consumed by the generated ggml-vulkan.cpp overlay.
-// 0=AUTO (upstream heuristic), 1=SUBGROUP, 2=LARGE (four times the device subgroup).
+// 0=AUTO, 1=SUBGROUP, 2=LARGE, 3=Q4_K base DMMV fallback (A/B-only).
 static std::atomic<int> g_vulkan_dmmv_workgroup_override{0};
 
 extern "C" int local_llm_vulkan_dmmv_workgroup_override() {
@@ -749,14 +749,16 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     std::lock_guard<std::mutex> lock(engine->mtx);
     engine->unload_unlocked();
 
-    if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 2) {
+    if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 3) {
         LOGE("Invalid Vulkan DMMV workgroup mode: %d", vulkan_dmmv_workgroup);
         return 7;
     }
     g_vulkan_dmmv_workgroup_override.store(vulkan_dmmv_workgroup, std::memory_order_relaxed);
-    LOGI("Vulkan DMMV workgroup override: %s",
+    const char* dmmv_mode_name =
         vulkan_dmmv_workgroup == 0 ? "AUTO" :
-        (vulkan_dmmv_workgroup == 1 ? "SUBGROUP" : "LARGE"));
+        (vulkan_dmmv_workgroup == 1 ? "SUBGROUP" :
+        (vulkan_dmmv_workgroup == 2 ? "LARGE" : "Q4K_BASE_DMMV"));
+    LOGI("Vulkan DMMV workgroup override: %s", dmmv_mode_name);
 
     const char* model_path = env->GetStringUTFChars(jmodel_path, nullptr);
     if (!model_path) return 2;

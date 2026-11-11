@@ -10,7 +10,9 @@ import android.os.Parcelable
 enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
     AUTO(0, "AUTO"),
     SUBGROUP(1, "SUBGROUP"),
-    LARGE(2, "LARGE (4× Subgroup)");
+    LARGE(2, "LARGE (4× Subgroup)"),
+    // Internal A/B-only mode: use base DMMV for Q4_K decode instead of Q8_1 integer-dot MMVQ.
+    Q4K_BASE_DMMV(3, "Q4_K Basis-DMMV (ohne Integer-Dot)");
 
     companion object {
         fun fromNativeId(id: Int): VulkanMatvecWorkgroup =

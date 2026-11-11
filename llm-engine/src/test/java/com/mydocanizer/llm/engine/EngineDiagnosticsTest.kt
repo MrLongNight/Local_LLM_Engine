@@ -188,6 +188,35 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun compactReportRetainsQ4kDecodePathSweepAndNativePathTransitions() {
+        val mmvqPath =
+            "2026-11-11 17:00:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - " +
+                "device=Mali-G57,intDot=1,quantizeY=1,selected=Q8_1_INTEGER_DOT_MMVQ"
+        val basePath =
+            "2026-11-11 17:01:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - " +
+                "device=Mali-G57,intDot=1,quantizeY=0,selected=BASE_TYPE_MMV"
+        val sweepEvents = listOf(
+            "2026-11-11 17:00:00.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_STARTED - profiles=MMVQ,BASE,BASE_REPEAT,MMVQ_REPEAT",
+            "2026-11-11 17:00:01.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_PLAN - modelLayers=37,requestedGpuLayers=99",
+            "2026-11-11 17:00:30.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_RESULT - runIndex=1,path=MMVQ_INTEGER_DOT,pathNativeId=0,measuredTokensPerSecond=1.6",
+            "2026-11-11 17:01:00.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_RESULT - runIndex=2,path=BASE_DMMV,pathNativeId=3,measuredTokensPerSecond=2.0",
+            "2026-11-11 17:01:30.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_RESULT - runIndex=3,path=BASE_DMMV,pathNativeId=3,measuredTokensPerSecond=2.1",
+            "2026-11-11 17:02:00.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_RESULT - runIndex=4,path=MMVQ_INTEGER_DOT,pathNativeId=0,measuredTokensPerSecond=1.6",
+            "2026-11-11 17:02:01.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_RESTORED - gpuLayers=37"
+        )
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(mmvqPath, basePath) + sweepEvents
+        )
+
+        assertTrue(report.contains("selected=Q8_1_INTEGER_DOT_MMVQ"))
+        assertTrue(report.contains("selected=BASE_TYPE_MMV"))
+        assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_STARTED"))
+        assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_PLAN"))
+        assertTrue(report.contains("path=MMVQ_INTEGER_DOT,pathNativeId=0"))
+        assertTrue(report.contains("path=BASE_DMMV,pathNativeId=3"))
+        assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_RESTORED"))
+    }
+    @Test
     fun vulkanPerOperationGpuTimestampsAreGroupedByProcessRunAndOperator() {
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(

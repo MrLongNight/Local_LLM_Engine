@@ -148,7 +148,7 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        VulkanMatvecWorkgroup.entries.forEach { workgroup ->
+                        VulkanMatvecWorkgroup.entries.filter { it != VulkanMatvecWorkgroup.Q4K_BASE_DMMV }.forEach { workgroup ->
                             FilterChip(
                                 selected = config.vulkanMatvecWorkgroup == workgroup,
                                 onClick = {
@@ -160,6 +160,7 @@ fun SettingsScreen(
                                             VulkanMatvecWorkgroup.AUTO -> "AUTO – Upstream"
                                             VulkanMatvecWorkgroup.SUBGROUP -> "SUBGROUP – Geräte-Subgroup (Mali-G57: 16)"
                                             VulkanMatvecWorkgroup.LARGE -> "LARGE – 4× Subgroup"
+                                            VulkanMatvecWorkgroup.Q4K_BASE_DMMV -> "Q4_K Basis-DMMV (intern)"
                                         }
                                     )
                                 },
@@ -317,19 +318,19 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
-                        onClick = { viewModel.runVulkanMatvecWorkgroupSweep() },
+                        onClick = { viewModel.runVulkanQ4kDecodePathSweep() },
                         enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
                         modifier = Modifier.fillMaxWidth().testTag("vulkan_matvec_workgroup_sweep_button")
                     ) {
-                        Text(if (isBenchmarking) "DMMV-Kerneltest läuft…" else "Vulkan-MatVec-Kernel vergleichen")
+                        Text(if (isBenchmarking) "Q4_K-Kerneltest läuft…" else "Q4_K Integer-Dot gegen Basis-DMMV testen")
                     }
                     Text(
-                        text = "Vier kontrollierte Läufe: AUTO, SUBGROUP, LARGE und AUTO-Wiederholung. Jeder Lauf fordert mit n_gpu_layers=99 den vollen Vulkan-Offload für dasselbe Modell an, nutzt dieselbe feste Promptfolge und 4 Warm-up- plus 20 Mess-Tokens. AUTO bleibt der unveränderte llama.cpp-Standard.",
+                        text = "Vier kontrollierte Läufe im ABBA-Ablauf: Q4_K Integer-Dot-MMVQ, Basis-DMMV ohne Q8_1-Integer-Dot, Basis-DMMV-Wiederholung und Integer-Dot-Wiederholung. Nur Q4_K-Decode wird umgeschaltet; alle anderen Tensor-Typen, Modell-Layer, Threads und Promptparameter bleiben gleich.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Testet 100 %, 75 %, 50 % und 25 % des nativen Layer-Offloads, mit Wiederholung von 100 % am Ende. Die ursprünglichen Einstellungen werden danach wiederhergestellt.",
+                        text = "Der Workgroup-Test zeigte auf dem Mali-G57 keinen messbaren Vorteil für SUBGROUP gegenüber AUTO; LARGE war langsamer. Dieser Test untersucht deshalb den eigentlichen Q4_K-Rechenpfad. Die ursprünglichen Einstellungen werden danach wiederhergestellt.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

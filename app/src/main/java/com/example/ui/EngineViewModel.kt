@@ -920,10 +920,10 @@ class EngineViewModel(
      * Every profile reloads the same GGUF with full Vulkan offload and runs the
      * same deterministic one-prefill benchmark: AUTO, SUBGROUP, LARGE, AUTO repeat.
      */
-    fun runVulkanMatvecWorkgroupSweep() {
+    fun runVulkanQ4kDecodePathSweep() {
         if (_isBenchmarking.value) return
         if (_isGenerating.value || _isImporting.value) {
-            _errorMessage.value = "Vulkan-MatVec-Test erst starten, wenn keine Inferenz oder Modell-Operation läuft."
+            _errorMessage.value = "Q4_K-Kerneltest erst starten, wenn keine Inferenz oder Modell-Operation läuft."
             return
         }
 
@@ -934,7 +934,7 @@ class EngineViewModel(
         }
 
         val originalConfig = _engineConfig.value
-        val profiles = BackendBenchmarkPlan.vulkanMatvecConfigurations(originalConfig)
+        val profiles = BackendBenchmarkPlan.vulkanQ4kDecodeConfigurations(originalConfig)
         val systemPromptSnapshot = _systemPrompt.value
         val source = if (model.path.startsWith("content://", ignoreCase = true)) {
             ModelSource.ContentUri(model.path, model.name)
@@ -945,7 +945,7 @@ class EngineViewModel(
             "Gib die Zahlen 1 bis 40 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
 
         _isBenchmarking.value = true
-        _benchmarkReport.value = "Vulkan-MatVec-Workgroup-Test wird vorbereitet…"
+        _benchmarkReport.value = "Q4_K-Integer-Dot gegen Basis-DMMV wird vorbereitet…"
         _errorMessage.value = null
 
         viewModelScope.launch {
@@ -955,8 +955,8 @@ class EngineViewModel(
             var stoppedReason: String? = null
             EngineDiagnostics.info(
                 "benchmark",
-                "VULKAN_DMMV_SWEEP_STARTED",
-                "model=${model.name},modelBytes=${model.sizeBytes},profiles=AUTO,SUBGROUP,LARGE,AUTO_REPEAT," +
+                "VULKAN_Q4K_PATH_SWEEP_STARTED",
+                "model=${model.name},modelBytes=${model.sizeBytes},profiles=MMVQ_INTEGER_DOT,BASE_DMMV,BASE_DMMV_REPEAT,MMVQ_INTEGER_DOT_REPEAT," +
                     "gpuLayersRequested=99,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
                     "batch=${originalConfig.batchSize},threads=${originalConfig.threads}," +
@@ -967,11 +967,11 @@ class EngineViewModel(
             try {
                 val initialSafetyStop = configurationTestSafetyBlock()
                 if (initialSafetyStop != null) {
-                    throw IllegalStateException("Sicherheitsabbruch vor dem ersten Vulkan-MatVec-Lauf: $initialSafetyStop")
+                    throw IllegalStateException("Sicherheitsabbruch vor dem ersten Q4_K-Kernel-Lauf: $initialSafetyStop")
                 }
 
                 restoreRequired = true
-                _benchmarkReport.value = "Vulkan AUTO: Lade dasselbe Modell mit maximalem Layer-Offload…"
+                _benchmarkReport.value = "Q4_K Integer-Dot-MMVQ: Lade Modell mit vollem Vulkan-Offload…"
                 val firstLoadStarted = System.nanoTime()
                 val firstLoaded = engine.loadModel(source, profiles.first()).getOrElse { throw it }
                 val firstLoadMs = (System.nanoTime() - firstLoadStarted) / 1_000_000L
@@ -985,7 +985,7 @@ class EngineViewModel(
                     (!model.sha256.isNullOrBlank() && !firstLoaded.sha256.isNullOrBlank() &&
                         model.sha256 != firstLoaded.sha256)
                 ) {
-                    throw IllegalStateException("Nach dem Vulkan-AUTO-Load wurde nicht dieselbe Modelldatei bestätigt.")
+                    throw IllegalStateException("Nach dem Q4_K-MMVQ-Load wurde nicht dieselbe Modelldatei bestätigt.")
                 }
 
                 val totalLayers = VulkanLayerSweepPlan.totalLayersFromBackend(firstLoaded.activeBackend)
@@ -996,9 +996,9 @@ class EngineViewModel(
                 confirmedTotalLayers = totalLayers
                 EngineDiagnostics.info(
                     "benchmark",
-                    "VULKAN_DMMV_SWEEP_PLAN",
+                    "VULKAN_Q4K_PATH_SWEEP_PLAN",
                     "modelLayers=$totalLayers,requestedGpuLayers=99,activeBackend=${firstLoaded.activeBackend}," +
-                        "workgroups=" + profiles.joinToString(",") { it.vulkanMatvecWorkgroup.name }
+                        "pathOrder=MMVQ_INTEGER_DOT,BASE_DMMV,BASE_DMMV,MMVQ_INTEGER_DOT"
                 )
 
                 for ((index, profileConfig) in profiles.withIndex()) {
@@ -1007,14 +1007,20 @@ class EngineViewModel(
                     if (safetyStop != null) {
                         stoppedReason = safetyStop
                         rows += "ABBRUCH vor ${profileConfig.vulkanMatvecWorkgroup.name}: $safetyStop"
-                        EngineDiagnostics.info("benchmark", "VULKAN_DMMV_SWEEP_SAFETY_STOP", safetyStop)
+                        EngineDiagnostics.info("benchmark", "VULKAN_Q4K_PATH_SWEEP_SAFETY_STOP", safetyStop)
                         break
                     }
 
                     val workgroup = profileConfig.vulkanMatvecWorkgroup
-                    _benchmarkReport.value =
-                        "Vulkan-MatVec ${index + 1}/${profiles.size}: ${workgroup.name} " +
-                            "(${if (index == profiles.lastIndex) "AUTO-Wiederholung" else workgroup.label})…"
+                    val baseDmmv = workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV
+                    val pathName = if (baseDmmv) "BASE_DMMV" else "MMVQ_INTEGER_DOT"
+                    val displayName = when (index) {
+                        0 -> "MMVQ Integer-Dot"
+                        1 -> "Basis-DMMV"
+                        2 -> "Basis-DMMV (Wiederholung)"
+                        else -> "MMVQ Integer-Dot (Wiederholung)"
+                    }
+                    _benchmarkReport.value = "Q4_K-Kerneltest ${index + 1}/${profiles.size}: $displayName…"
 
                     val loadMs: Long
                     val loaded: ModelInfo
@@ -1064,7 +1070,7 @@ class EngineViewModel(
                         "%s: gpuLayersRequested=%d, modelLayers=%d, load=%dms, promptTokens=%d, prefillMs=%s, " +
                             "TTFT=%s ms, measuredTokens=%d, measuredWallMs=%s, decode=%.3f tok/s, " +
                             "native=%.3f tok/s, generationMs=%d, finish=%s",
-                        if (index == profiles.lastIndex) "AUTO (Wiederholung)" else workgroup.name,
+                        displayName,
                         profileConfig.gpuLayers,
                         totalLayers,
                         loadMs,
@@ -1081,8 +1087,8 @@ class EngineViewModel(
                     rows += reportLine
                     EngineDiagnostics.info(
                         "benchmark",
-                        "VULKAN_DMMV_SWEEP_RESULT",
-                        "runIndex=${index + 1},workgroup=${workgroup.name},workgroupNativeId=${workgroup.nativeId}," +
+                        "VULKAN_Q4K_PATH_SWEEP_RESULT",
+                        "runIndex=${index + 1},path=$pathName,pathNativeId=${workgroup.nativeId}," +
                             "gpuLayersRequested=${profileConfig.gpuLayers},modelLayers=$modelLayers," +
                             "loadMs=$loadMs,promptTokens=${measured.promptTokens}," +
                             "prefillMs=${measured.promptEvaluationMs ?: -1L}," +
@@ -1100,14 +1106,14 @@ class EngineViewModel(
                     if (index < profiles.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
                 }
             } catch (cancelled: CancellationException) {
-                rows += "Vulkan-MatVec-Test wurde abgebrochen."
+                rows += "Q4_K-Kerneltest wurde abgebrochen."
                 stoppedReason = "Vom Nutzer abgebrochen."
-                EngineDiagnostics.info("benchmark", "VULKAN_DMMV_SWEEP_CANCELLED")
+                EngineDiagnostics.info("benchmark", "VULKAN_Q4K_PATH_SWEEP_CANCELLED")
                 throw cancelled
             } catch (error: Throwable) {
                 stoppedReason = error.message ?: error.javaClass.simpleName
                 rows += "FEHLER: $stoppedReason"
-                EngineDiagnostics.error("benchmark", "VULKAN_DMMV_SWEEP_FAILED", error)
+                EngineDiagnostics.error("benchmark", "VULKAN_Q4K_PATH_SWEEP_FAILED", error)
             } finally {
                 if (restoreRequired) {
                     _benchmarkReport.value = "Stelle ursprüngliche Modellkonfiguration wieder her…"
@@ -1117,7 +1123,7 @@ class EngineViewModel(
                     restore.onSuccess { restored ->
                         EngineDiagnostics.info(
                             "benchmark",
-                            "VULKAN_DMMV_SWEEP_RESTORED",
+                            "VULKAN_Q4K_PATH_SWEEP_RESTORED",
                             "backendPreference=${originalConfig.backendPreference}," +
                                 "gpuLayers=${originalConfig.gpuLayers}," +
                                 "vulkanMatvecWorkgroup=${originalConfig.vulkanMatvecWorkgroup}," +
@@ -1131,16 +1137,17 @@ class EngineViewModel(
                 }
 
                 _benchmarkReport.value = buildString {
-                    appendLine("Vulkan DMMV-Workgroup-Vergleich")
+                    appendLine("Vulkan Q4_K-Decodepfad-Vergleich")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB)")
                     appendLine("Native bestätigte Modell-Layerzahl: ${confirmedTotalLayers ?: "nicht bestätigt"}; je Lauf wurden 99 GPU-Layer angefordert.")
                     appendLine(
-                        "Je Profil: 4 Warm-up-Tokens + 20 Mess-Tokens; Temperatur 0; Top-P 1; " +
-                            "gleiche Prompt-, Kontext-, Batch- und Thread-Einstellungen; voller Vulkan-Offload."
+                        "Vergleicht Q8_1 Integer-Dot-MMVQ mit Basis-DMMV nur für Q4_K-Decode. " +
+                            "Ablauf: MMVQ, Basis-DMMV, Basis-DMMV-Wiederholung, MMVQ-Wiederholung. " +
+                            "Je Profil 4 Warm-up- und 20 Mess-Tokens; Temperatur 0; Top-P 1; voller Vulkan-Offload."
                     )
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: $stoppedReason")
-                    append("AUTO ist Start- und Endreferenz. Native Auswahlmeldungen stehen im Diagnoseexport; " +
+                    append("Die nativen Q4_K_DECODE_PATH-Meldungen bestätigen den tatsächlich aktiven Shaderpfad; " +
                         "die ursprüngliche Modellkonfiguration wurde anschließend wiederhergestellt.")
                 }
                 _isBenchmarking.value = false

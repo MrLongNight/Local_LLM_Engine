@@ -38,4 +38,22 @@ internal object BackendBenchmarkPlan {
         )
         return workgroups.map { base.copy(vulkanMatvecWorkgroup = it) }
     }
+
+    /**
+     * Isolates Q4_K decode arithmetic: integer-dot MMVQ, base DMMV, base repeat, MMVQ repeat.
+     * Only Q4_K decode changes; all other tensor types and inference settings remain fixed.
+     */
+    fun vulkanQ4kDecodeConfigurations(original: EngineConfig): List<EngineConfig> {
+        val paths = listOf(
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO
+        )
+        val base = configuration(original).copy(
+            backendPreference = BackendPreference.VULKAN,
+            gpuLayers = 99
+        )
+        return paths.map { base.copy(vulkanMatvecWorkgroup = it) }
+    }
 }

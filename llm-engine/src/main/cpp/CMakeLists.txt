@@ -95,8 +95,8 @@ static void ggml_vk_get_physical_device_features2(
     string(REPLACE "${_include_anchor}" "${_include_anchor}\n${_helper}" _vulkan_contents "${_vulkan_contents}")
     string(REPLACE "vkGetPhysicalDeviceFeatures2(" "ggml_vk_get_physical_device_features2(" _vulkan_contents "${_vulkan_contents}")
 
-    # Optional diagnostic override for the dequantize-matvec workgroup. AUTO leaves
-    # the pinned llama.cpp vendor heuristic untouched; SUBGROUP/LARGE are A/B-only.
+    # Diagnostic selectors: AUTO/SUBGROUP/LARGE compare workgroups; Q4K_BASE_DMMV
+    # additionally disables Q8_1 integer-dot MMVQ for Q4_K decode only.
     set(_dmmv_anchor [=[
     // heuristic to choose workgroup size
     uint32_t dmmv_wg = DMMV_WG_SIZE_SUBGROUP;
@@ -146,7 +146,8 @@ static void ggml_vk_get_physical_device_features2(
     if (previous_override != local_llm_dmmv_override) {
         const char* override_name =
             local_llm_dmmv_override == 0 ? "AUTO" :
-            (local_llm_dmmv_override == 1 ? "SUBGROUP" : "LARGE");
+            (local_llm_dmmv_override == 1 ? "SUBGROUP" :
+             (local_llm_dmmv_override == 2 ? "LARGE" : "Q4K_BASE_DMMV"));
         GGML_LOG_INFO(
             "ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - override=%s,selected=%s,subgroupSize=%u\n",
             override_name,
@@ -255,6 +256,24 @@ static void ggml_vk_get_physical_device_features2(
     }]=])
     string(REPLACE "${_q4_prefill_anchor}" "${_q4_prefill_replacement}" _vulkan_contents "${_vulkan_contents}")
 
+    # Force only Q4_K decode to use the existing base DMMV implementation.
+    # Q4_K prefill and all non-Q4_K tensor types retain their normal MMVQ selection.
+    set(_q4k_base_dmmv_anchor [=[
+    // Check for mmq first
+    vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
+    string(FIND "${_vulkan_contents}" "${_q4k_base_dmmv_anchor}" _q4k_base_dmmv_position)
+    if(_q4k_base_dmmv_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Q4_K MMVQ selection anchor changed.")
+    endif()
+    set(_q4k_base_dmmv_replacement [=[
+    // LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE: controlled Q4_K decode A/B path.
+    if (src0->type == GGML_TYPE_Q4_K && ne11 == 1 &&
+        local_llm_vulkan_dmmv_workgroup_override() == 3) {
+        quantize_y = false;
+    }
+    // Check for mmq first
+    vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
+    string(REPLACE "${_q4k_base_dmmv_anchor}" "${_q4k_base_dmmv_replacement}" _vulkan_contents "${_vulkan_contents}")
     set(_q4_decode_anchor [=[
     if (dmmv == nullptr) {
         // Fall back to f16 dequant mul mat
@@ -272,9 +291,11 @@ static void ggml_vk_get_physical_device_features2(
         quantize_y = false;
     }
     if (src0->type == GGML_TYPE_Q4_K) {
-        static std::atomic<uint32_t> local_llm_q4k_decode_log_count{0};
-        const uint32_t sample_index = local_llm_q4k_decode_log_count.fetch_add(1, std::memory_order_relaxed);
-        if (sample_index < 12) {
+        static std::atomic<int> local_llm_last_q4k_decode_path{-1};
+        const int selected_path = quantize_y ? 1 : 0;
+        const int previous_path = local_llm_last_q4k_decode_path.exchange(
+            selected_path, std::memory_order_relaxed);
+        if (previous_path != selected_path) {
             GGML_LOG_INFO(
                 "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - device=%s,intDot=%d,quantizeY=%d,selected=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
                 ctx->device->name.c_str(),
@@ -474,6 +495,7 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_OP_TIMING" OR
        NOT _vulkan_contents MATCHES "local_llm_vulkan_dmmv_workgroup_override" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_DMMV_WG_SELECTED" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()

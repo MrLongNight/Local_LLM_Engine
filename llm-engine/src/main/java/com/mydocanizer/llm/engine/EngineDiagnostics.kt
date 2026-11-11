@@ -275,7 +275,8 @@ object EngineDiagnostics {
             "FIRST_TOKEN_RECEIVED",
             "GENERATION_COMPLETED"
         ) || event.startsWith("BACKEND_BENCHMARK_") ||
-            event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_")
+            event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
+            event.startsWith("VULKAN_Q4K_PATH_SWEEP_")
     }
 
     private fun isImportantEvent(line: String): Boolean {
@@ -357,15 +358,23 @@ object EngineDiagnostics {
         // Keep the complete low-volume DMMV sweep outcome independently of
         // repeated per-profile model-load and inference events. Otherwise the
         // AUTO/SUBGROUP/LARGE result rows can be pushed out of the 12-row tail.
-        val vulkanDmmvSweepEvents = kotlinLines
-            .filter { eventName(it).startsWith("VULKAN_DMMV_SWEEP_") }
-            .takeLast(8)
+        val vulkanKernelSweepEvents = kotlinLines
+            .filter {
+                val event = eventName(it)
+                event.startsWith("VULKAN_DMMV_SWEEP_") ||
+                    event.startsWith("VULKAN_Q4K_PATH_SWEEP_")
+            }
+            .takeLast(12)
         val performanceEvents = (
             kotlinLines
                 .filterNot { it.contains("RESOURCE_SNAPSHOT") }
                 .filter(::isPerformanceEvent)
-                .filterNot { eventName(it).startsWith("VULKAN_DMMV_SWEEP_") }
-                .takeLast(12) + vulkanDmmvSweepEvents
+                .filterNot {
+                    val event = eventName(it)
+                    event.startsWith("VULKAN_DMMV_SWEEP_") ||
+                        event.startsWith("VULKAN_Q4K_PATH_SWEEP_")
+                }
+                .takeLast(12) + vulkanKernelSweepEvents
             )
             .distinct()
             .sorted()

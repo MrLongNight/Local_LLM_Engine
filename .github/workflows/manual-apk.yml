@@ -262,6 +262,8 @@ jobs:
                           "local_llm_vulkan_dmmv_workgroup_override()",
                       "Vulkan DMMV workgroup selection diagnostics":
                           "LOCAL_LLM_VULKAN_DMMV_WG_SELECTED",
+                      "Q4_K base DMMV path override":
+                          "LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE",
                   }
                   for vulkan_entry in vulkan_sources:
                       vulkan_file = vulkan_entry.get("file", "")

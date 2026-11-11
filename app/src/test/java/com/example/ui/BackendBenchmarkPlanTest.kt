@@ -8,6 +8,41 @@ import org.junit.Test
 
 class BackendBenchmarkPlanTest {
     @Test
+    fun q4kDecodePathSweepChangesOnlyTheInternalQ4kKernelModeAndForcesFullOffload() {
+        val original = EngineConfig(
+            contextSize = 4096,
+            batchSize = 256,
+            threads = 6,
+            backendPreference = BackendPreference.AUTO,
+            gpuLayers = 37,
+            batchThreads = 3,
+            microBatchSize = 64
+        )
+        val profiles = BackendBenchmarkPlan.vulkanQ4kDecodeConfigurations(original)
+
+        assertEquals(
+            listOf(
+                VulkanMatvecWorkgroup.AUTO,
+                VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+                VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+                VulkanMatvecWorkgroup.AUTO
+            ),
+            profiles.map { it.vulkanMatvecWorkgroup }
+        )
+        profiles.forEach { profile ->
+            assertEquals(BackendPreference.VULKAN, profile.backendPreference)
+            assertEquals(99, profile.gpuLayers)
+            assertEquals(24, profile.maxPredictTokens)
+            assertEquals(0f, profile.temperature, 0f)
+            assertEquals(1f, profile.topP, 0f)
+            assertEquals(original.contextSize, profile.contextSize)
+            assertEquals(original.batchSize, profile.batchSize)
+            assertEquals(original.threads, profile.threads)
+            assertEquals(original.batchThreads, profile.batchThreads)
+            assertEquals(original.microBatchSize, profile.microBatchSize)
+        }
+    }
+    @Test
     fun usesShortDeterministicRunAndPreservesLoadParameters() {
         val original = EngineConfig(
             contextSize = 4096,
