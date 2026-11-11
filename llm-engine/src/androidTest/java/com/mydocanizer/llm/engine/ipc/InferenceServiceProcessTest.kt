@@ -33,6 +33,7 @@ import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.TimeoutConfig
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.internal.ModelSourceResolver
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
@@ -315,7 +316,9 @@ class InferenceServiceProcessTest {
             maxPredictTokens = 16,
             backendPreference = BackendPreference.CPU,
             gpuLayers = 0,
-            timeoutConfig = timeoutConfig
+            timeoutConfig = timeoutConfig,
+            // This test explicitly validates eager recovery of a real GGUF after process death.
+            reloadAfterAbort = ReloadAfterAbort.EAGER
         )
         val client = InferenceClient(context, timeoutConfig = timeoutConfig)
         var directBinding: BoundInferenceService? = null
