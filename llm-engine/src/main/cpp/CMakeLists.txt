@@ -73,6 +73,8 @@ function(local_llm_prepare_android_vulkan source_dir)
 #include <atomic>
 #include <unistd.h>
 
+extern "C" int local_llm_vulkan_dmmv_workgroup_override();
+
 // LOCAL_LLM_ANDROID_VULKAN_COMPAT: resolve the Vulkan 1.1 promoted command
 // through the instance dispatcher; API-24 libvulkan.so may not export it.
 static void ggml_vk_get_physical_device_features2(
@@ -92,6 +94,86 @@ static void ggml_vk_get_physical_device_features2(
     endif()
     string(REPLACE "${_include_anchor}" "${_include_anchor}\n${_helper}" _vulkan_contents "${_vulkan_contents}")
     string(REPLACE "vkGetPhysicalDeviceFeatures2(" "ggml_vk_get_physical_device_features2(" _vulkan_contents "${_vulkan_contents}")
+
+    # Optional diagnostic override for the dequantize-matvec workgroup. AUTO leaves
+    # the pinned llama.cpp vendor heuristic untouched; SUBGROUP/LARGE are A/B-only.
+    set(_dmmv_anchor [=[
+    // heuristic to choose workgroup size
+    uint32_t dmmv_wg = DMMV_WG_SIZE_SUBGROUP;
+    if ((ctx->device->vendor_id == VK_VENDOR_ID_NVIDIA && ctx->device->architecture != vk_device_architecture::NVIDIA_PRE_TURING) || ctx->device->vendor_id == VK_VENDOR_ID_INTEL) {
+        // Prefer larger workgroups when M is small, to spread the work out more
+        // and keep more SMs busy.
+        // q6_k seems to prefer small workgroup size even for "medium" values of M.
+        if (a_type == GGML_TYPE_Q6_K) {
+            if (m < 4096 && k >= 1024) {
+                dmmv_wg = DMMV_WG_SIZE_LARGE;
+            }
+        } else {
+            if (m <= 8192 && k >= 1024) {
+                dmmv_wg = DMMV_WG_SIZE_LARGE;
+            }
+        }
+    }
+]=])
+    string(FIND "${_vulkan_contents}" "${_dmmv_anchor}" _dmmv_anchor_position)
+    if(_dmmv_anchor_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream DMMV workgroup heuristic changed; review the diagnostic override.")
+    endif()
+    set(_dmmv_replacement [=[
+    // heuristic to choose workgroup size
+    const int local_llm_dmmv_override = local_llm_vulkan_dmmv_workgroup_override();
+    uint32_t dmmv_wg = DMMV_WG_SIZE_SUBGROUP;
+    if (local_llm_dmmv_override == 0 &&
+        ((ctx->device->vendor_id == VK_VENDOR_ID_NVIDIA && ctx->device->architecture != vk_device_architecture::NVIDIA_PRE_TURING) || ctx->device->vendor_id == VK_VENDOR_ID_INTEL)) {
+        // Preserve the pinned llama.cpp vendor heuristic in AUTO mode.
+        // q6_k seems to prefer small workgroup size even for "medium" values of M.
+        if (a_type == GGML_TYPE_Q6_K) {
+            if (m < 4096 && k >= 1024) {
+                dmmv_wg = DMMV_WG_SIZE_LARGE;
+            }
+        } else {
+            if (m <= 8192 && k >= 1024) {
+                dmmv_wg = DMMV_WG_SIZE_LARGE;
+            }
+        }
+    } else if (local_llm_dmmv_override == 2) {
+        dmmv_wg = DMMV_WG_SIZE_LARGE;
+    }
+
+    static std::atomic<int> local_llm_last_logged_dmmv_override{-1};
+    if (local_llm_dmmv_override == 0) {
+        local_llm_last_logged_dmmv_override.store(0, std::memory_order_relaxed);
+    } else {
+        const int previous_override = local_llm_last_logged_dmmv_override.exchange(
+            local_llm_dmmv_override, std::memory_order_relaxed);
+        if (previous_override != local_llm_dmmv_override) {
+            GGML_LOG_INFO(
+                "ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - override=%s,selected=%s,subgroupSize=%u\n",
+                local_llm_dmmv_override == 1 ? "SUBGROUP" : "LARGE",
+                dmmv_wg == DMMV_WG_SIZE_LARGE ? "LARGE" : "SUBGROUP",
+                ctx->device->subgroup_size);
+        }
+    }
+]=])
+    string(REPLACE "${_dmmv_anchor}" "${_dmmv_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    # The Intel Q8_1 fallback is part of the upstream AUTO heuristic. Do not
+    # let it undo an explicit diagnostic override.
+    set(_intel_dmmv_anchor [=[
+        if (ctx->device->vendor_id == VK_VENDOR_ID_INTEL) {
+            dmmv_wg = DMMV_WG_SIZE_SUBGROUP;
+        }
+]=])
+    set(_intel_dmmv_replacement [=[
+        if (ctx->device->vendor_id == VK_VENDOR_ID_INTEL && local_llm_dmmv_override == 0) {
+            dmmv_wg = DMMV_WG_SIZE_SUBGROUP;
+        }
+]=])
+    string(FIND "${_vulkan_contents}" "${_intel_dmmv_anchor}" _intel_dmmv_position)
+    if(_intel_dmmv_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Intel DMMV workgroup fallback changed.")
+    endif()
+    string(REPLACE "${_intel_dmmv_anchor}" "${_intel_dmmv_replacement}" _vulkan_contents "${_vulkan_contents}")
 
     # Android/Mali drivers can expose Vulkan 1.2 features while advertising an
     # API version below 1.2. Enable the promoted KHR extension names explicitly.
@@ -391,6 +473,8 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_OP_TIMING" OR
+       NOT _vulkan_contents MATCHES "local_llm_vulkan_dmmv_workgroup_override" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_DMMV_WG_SELECTED" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
