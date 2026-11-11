@@ -3,7 +3,9 @@ package com.example.ui
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
+import com.mydocanizer.llm.engine.FlashAttentionMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackendBenchmarkPlanTest {
@@ -42,6 +44,46 @@ class BackendBenchmarkPlanTest {
             assertEquals(original.microBatchSize, profile.microBatchSize)
         }
     }
+    @Test
+    fun q5Q6BasePathsAreAvailableForMeasurementButAutoIsRetained() {
+        val profiles = BackendBenchmarkPlan.vulkanQ5Q6DecodeConfigurations(EngineConfig())
+        assertEquals(listOf(VulkanMatvecWorkgroup.AUTO, VulkanMatvecWorkgroup.Q5K_BASE_DMMV,
+            VulkanMatvecWorkgroup.AUTO, VulkanMatvecWorkgroup.Q6K_BASE_DMMV),
+            profiles.map { it.vulkanMatvecWorkgroup })
+        assertTrue(profiles.all { it.backendPreference == BackendPreference.VULKAN && it.gpuLayers == 99 })
+    }
+
+    @Test
+    fun q4kPrefillSweepHasExplicitF16Profiles() {
+        val profiles = BackendBenchmarkPlan.vulkanQ4kPrefillConfigurations(EngineConfig())
+        assertEquals(listOf(VulkanMatvecWorkgroup.AUTO, VulkanMatvecWorkgroup.Q4K_PREFILL_F16,
+            VulkanMatvecWorkgroup.Q4K_PREFILL_F16, VulkanMatvecWorkgroup.AUTO),
+            profiles.map { it.vulkanMatvecWorkgroup })
+    }
+
+    @Test
+    fun microBatchSweepCovers32_64_128() {
+        val profiles = BackendBenchmarkPlan.vulkanMicroBatchConfigurations(EngineConfig(batchSize = 128))
+        assertEquals(listOf(32, 64, 128), profiles.map { it.microBatchSize })
+        assertTrue(profiles.all { it.backendPreference == BackendPreference.VULKAN && it.gpuLayers == 99 })
+    }
+
+    @Test
+    fun flashAttentionSweepForcesOnAndOffForBothBackends() {
+        val profiles = BackendBenchmarkPlan.flashAttentionConfigurations(EngineConfig())
+        assertEquals(8, profiles.size)
+        assertEquals(listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED,
+            FlashAttentionMode.ENABLED, FlashAttentionMode.DISABLED,
+            FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED,
+            FlashAttentionMode.ENABLED, FlashAttentionMode.DISABLED),
+            profiles.map { it.flashAttentionMode })
+        assertEquals(listOf(BackendPreference.VULKAN, BackendPreference.VULKAN,
+            BackendPreference.VULKAN, BackendPreference.VULKAN,
+            BackendPreference.CPU, BackendPreference.CPU,
+            BackendPreference.CPU, BackendPreference.CPU),
+            profiles.map { it.backendPreference })
+    }
+
     @Test
     fun usesShortDeterministicRunAndPreservesLoadParameters() {
         val original = EngineConfig(

@@ -95,8 +95,8 @@ static void ggml_vk_get_physical_device_features2(
     string(REPLACE "${_include_anchor}" "${_include_anchor}\n${_helper}" _vulkan_contents "${_vulkan_contents}")
     string(REPLACE "vkGetPhysicalDeviceFeatures2(" "ggml_vk_get_physical_device_features2(" _vulkan_contents "${_vulkan_contents}")
 
-    # Diagnostic selectors: AUTO/SUBGROUP/LARGE compare workgroups; Q4K_BASE_DMMV
-    # additionally disables Q8_1 integer-dot MMVQ for Q4_K decode only.
+    # Diagnostic selectors: AUTO/SUBGROUP/LARGE compare workgroups; modes 3-5
+    # select base-type MMV for Q4_K/Q5_K/Q6_K decode; mode 6 selects Q4_K F16 prefill.
     set(_dmmv_anchor [=[
     // heuristic to choose workgroup size
     uint32_t dmmv_wg = DMMV_WG_SIZE_SUBGROUP;
@@ -231,6 +231,25 @@ static void ggml_vk_get_physical_device_features2(
 
     # These anchors are checked against the pinned upstream Vulkan source, then
     # injected only into the generated Android build copy (the submodule remains pristine).
+    # Q4_K prefill F16/F32 selection for a controlled A/B run.
+    set(_q4_prefill_type_anchor [=[
+    const ggml_type y_kernel_type = ggml_vk_mul_mat_b_type(ctx, src0->type, src1, f16_type,
+                                        ggml_prec_get_acc(dst), false, can_quantize_y, prefer_f16_b);]=])
+    string(FIND "${_vulkan_contents}" "${_q4_prefill_type_anchor}" _q4_prefill_type_position)
+    if(_q4_prefill_type_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Q4_K prefill activation-type anchor changed.")
+    endif()
+    set(_q4_prefill_type_replacement [=[
+    // LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE: explicitly prefer F16/F32 activation matmul.
+    const bool local_llm_force_q4k_prefill_f16 =
+        src0->type == GGML_TYPE_Q4_K && ne11 > 1 &&
+        local_llm_vulkan_dmmv_workgroup_override() == 6;
+    const ggml_type y_kernel_type = local_llm_force_q4k_prefill_f16
+        ? f16_type
+        : ggml_vk_mul_mat_b_type(ctx, src0->type, src1, f16_type,
+                                 ggml_prec_get_acc(dst), false, can_quantize_y, prefer_f16_b);]=])
+    string(REPLACE "${_q4_prefill_type_anchor}" "${_q4_prefill_type_replacement}" _vulkan_contents "${_vulkan_contents}")
+
     set(_q4_prefill_anchor [=[    vk_pipeline pipeline = ggml_vk_guess_matmul_pipeline_map(ctx, *mmp_map, ne01, ne11, aligned, false);]=])
     string(FIND "${_vulkan_contents}" "${_q4_prefill_anchor}" _q4_prefill_position)
     if(_q4_prefill_position LESS 0)
@@ -266,9 +285,17 @@ static void ggml_vk_get_physical_device_features2(
         message(FATAL_ERROR "LocalLLM: upstream Q4_K MMVQ selection anchor changed.")
     endif()
     set(_q4k_base_dmmv_replacement [=[
-    // LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE: controlled Q4_K decode A/B path.
+    // LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV: Mali Q4_K decode skips Q8_1 conversion in AUTO.
+    // Modes 3/4/5 expose explicit Q4_K/Q5_K/Q6_K A/B paths; only Q4_K changes AUTO.
+    const int local_llm_quant_override = local_llm_vulkan_dmmv_workgroup_override();
+    const bool local_llm_mali_q4k_auto =
+        local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;
     if (src0->type == GGML_TYPE_Q4_K && ne11 == 1 &&
-        local_llm_vulkan_dmmv_workgroup_override() == 3) {
+        (local_llm_quant_override == 3 || local_llm_mali_q4k_auto)) {
+        quantize_y = false;
+    } else if (src0->type == GGML_TYPE_Q5_K && ne11 == 1 && local_llm_quant_override == 4) {
+        quantize_y = false;
+    } else if (src0->type == GGML_TYPE_Q6_K && ne11 == 1 && local_llm_quant_override == 5) {
         quantize_y = false;
     }
     // Check for mmq first
@@ -496,6 +523,8 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "local_llm_vulkan_dmmv_workgroup_override" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_DMMV_WG_SELECTED" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
@@ -526,6 +555,30 @@ set(GGML_BACKEND_DL OFF CACHE BOOL "ggml: backend dl" FORCE)
 set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "ggml: build all variants of the CPU backend" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "ggml: llamafile" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "ggml: use OpenMP" FORCE)
+
+# Release native kernels use -O3 and NDEBUG. Debug keeps the verified -O2 policy.
+# LTO remains opt-in until APK size and device behavior are measured.
+foreach(_local_llm_lang C CXX)
+    set(_local_llm_release_flags "${CMAKE_${_local_llm_lang}_FLAGS_RELEASE}")
+    if(NOT _local_llm_release_flags MATCHES "(^| )-O3($| )")
+        string(APPEND _local_llm_release_flags " -O3")
+    endif()
+    if(NOT _local_llm_release_flags MATCHES "(^| )-DNDEBUG($| )")
+        string(APPEND _local_llm_release_flags " -DNDEBUG")
+    endif()
+    set(CMAKE_${_local_llm_lang}_FLAGS_RELEASE "${_local_llm_release_flags}" CACHE STRING
+        "Optimized native Release ${_local_llm_lang} flags" FORCE)
+    string(FIND "${CMAKE_${_local_llm_lang}_FLAGS_RELEASE}" "-O3" _local_llm_release_o3)
+    string(FIND "${CMAKE_${_local_llm_lang}_FLAGS_RELEASE}" "-DNDEBUG" _local_llm_release_ndebug)
+    if(_local_llm_release_o3 EQUAL -1 OR _local_llm_release_ndebug EQUAL -1)
+        message(FATAL_ERROR "LocalLLM: native Release ${_local_llm_lang} flags must include -O3 and -DNDEBUG")
+    endif()
+endforeach()
+option(LOCAL_LLM_ENABLE_NATIVE_LTO "Enable Release LTO for llama.cpp/GGML" OFF)
+if(LOCAL_LLM_ENABLE_NATIVE_LTO)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    message(STATUS "LocalLLM: Release LTO enabled")
+endif()
 
 # Enable the static Vulkan backend only for Android arm64 builds where the
 # target NDK loader and host shader/SPIR-V tools are all available. CPU remains

@@ -264,6 +264,10 @@ jobs:
                           "LOCAL_LLM_VULKAN_DMMV_WG_SELECTED",
                       "Q4_K base DMMV path override":
                           "LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE",
+                      "Mali AUTO Q4_K decode policy":
+                          "LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV",
+                      "Q4_K prefill F16/F32 override":
+                          "LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE",
                   }
                   for vulkan_entry in vulkan_sources:
                       vulkan_file = vulkan_entry.get("file", "")

@@ -11,8 +11,11 @@ enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
     AUTO(0, "AUTO"),
     SUBGROUP(1, "SUBGROUP"),
     LARGE(2, "LARGE (4× Subgroup)"),
-    // Internal A/B-only mode: use base DMMV for Q4_K decode instead of Q8_1 integer-dot MMVQ.
-    Q4K_BASE_DMMV(3, "Q4_K Basis-DMMV (ohne Integer-Dot)");
+    // A/B-only base-type MMV selectors; AUTO applies the Mali Q4_K policy.
+    Q4K_BASE_DMMV(3, "Q4_K Basis-DMMV (ohne Integer-Dot)"),
+    Q5K_BASE_DMMV(4, "Q5_K Basis-DMMV (A/B)"),
+    Q6K_BASE_DMMV(5, "Q6_K Basis-DMMV (A/B)"),
+    Q4K_PREFILL_F16(6, "Q4_K Prefill F16/F32 (A/B)");
 
     companion object {
         fun fromNativeId(id: Int): VulkanMatvecWorkgroup =
@@ -20,6 +23,16 @@ enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
 
         fun fromName(name: String?): VulkanMatvecWorkgroup =
             entries.firstOrNull { it.name == name } ?: AUTO
+    }
+}
+
+/** Explicit Flash Attention policy passed to llama_context_params. */
+enum class FlashAttentionMode(val nativeId: Int) {
+    AUTO(-1), DISABLED(0), ENABLED(1);
+
+    companion object {
+        fun fromNativeId(id: Int): FlashAttentionMode = entries.firstOrNull { it.nativeId == id } ?: AUTO
+        fun fromName(name: String?): FlashAttentionMode = entries.firstOrNull { it.name == name } ?: AUTO
     }
 }
 
@@ -63,7 +76,8 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property gpuLayers Number of layers offloaded to GPU VRAM (e.g. 99 for full offload).
  * @property batchThreads llama.cpp n_threads_batch; 0 follows n_threads.
  * @property microBatchSize llama.cpp n_ubatch; 0 follows n_batch.
- * @property vulkanMatvecWorkgroup Diagnostic DMMV workgroup selector; AUTO is the unchanged default.
+ * @property vulkanMatvecWorkgroup Diagnostic DMMV workgroup selector; AUTO includes the Mali Q4_K policy.
+ * @property flashAttentionMode Explicit Flash Attention selection.
  */
 data class EngineConfig(
     val contextSize: Int = 4096,
@@ -77,7 +91,8 @@ data class EngineConfig(
     val timeoutConfig: TimeoutConfig = TimeoutConfig(),
     val batchThreads: Int = 0,
     val microBatchSize: Int = 0,
-    val vulkanMatvecWorkgroup: VulkanMatvecWorkgroup = VulkanMatvecWorkgroup.AUTO
+    val vulkanMatvecWorkgroup: VulkanMatvecWorkgroup = VulkanMatvecWorkgroup.AUTO,
+    val flashAttentionMode: FlashAttentionMode = FlashAttentionMode.AUTO
 ) : Parcelable {
     /**
      * Effective llama.cpp thread count for prompt/batch processing.
@@ -118,12 +133,24 @@ data class EngineConfig(
         temperature = parcel.readFloat(),
         topP = parcel.readFloat(),
         maxPredictTokens = parcel.readInt(),
-        backendPreference = BackendPreference.valueOf(parcel.readString() ?: BackendPreference.AUTO.name),
+        backendPreference = parcel.readString()?.let { name ->
+            BackendPreference.entries.firstOrNull { it.name == name } ?: BackendPreference.AUTO
+        } ?: BackendPreference.AUTO,
         gpuLayers = parcel.readInt(),
-        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader) ?: TimeoutConfig(),
+        timeoutConfig = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            parcel.readParcelable(TimeoutConfig::class.java.classLoader, TimeoutConfig::class.java) ?: TimeoutConfig()
+        } else {
+            @Suppress("DEPRECATION")
+            parcel.readParcelable(TimeoutConfig::class.java.classLoader) ?: TimeoutConfig()
+        },
         batchThreads = parcel.readInt(),
         microBatchSize = parcel.readInt(),
-        vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.fromName(parcel.readString())
+        vulkanMatvecWorkgroup = if (parcel.dataAvail() > 0) {
+            VulkanMatvecWorkgroup.fromName(parcel.readString())
+        } else VulkanMatvecWorkgroup.AUTO,
+        flashAttentionMode = if (parcel.dataAvail() > 0) {
+            FlashAttentionMode.fromName(parcel.readString())
+        } else FlashAttentionMode.AUTO
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -139,6 +166,7 @@ data class EngineConfig(
         parcel.writeInt(batchThreads)
         parcel.writeInt(microBatchSize)
         parcel.writeString(vulkanMatvecWorkgroup.name)
+        parcel.writeString(flashAttentionMode.name)
     }
 
     override fun describeContents(): Int = 0

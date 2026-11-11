@@ -1,7 +1,6 @@
 package com.mydocanizer.llm.engine.internal
 
 import android.util.Log
-import com.mydocanizer.llm.engine.BuildConfig
 import java.io.File
 
 /**
@@ -41,12 +40,12 @@ internal object NativeEngineHandle {
     }
 
     @Synchronized
-    fun ensureLoaded(diagnosticsLogFile: File): Boolean {
+    fun ensureLoaded(diagnosticsLogFile: File, enableVulkanPerfProfiler: Boolean = false): Boolean {
         if (!isLoaded) {
             try {
                 System.loadLibrary(LIB_NAME)
                 nativeSetDiagnosticsLogFile(diagnosticsLogFile.absolutePath)
-                nativeInitBackend(enableVulkanPerfProfiler = BuildConfig.DEBUG)
+                nativeInitBackend(enableVulkanPerfProfiler = enableVulkanPerfProfiler)
                 isLoaded = true
                 Log.i(TAG, "Native library $LIB_NAME successfully loaded and backend initialized")
             } catch (t: Throwable) {
@@ -90,6 +89,7 @@ internal object NativeEngineHandle {
         gpuLayers: Int,
         batchThreads: Int,
         microBatchSize: Int,
+        flashAttentionMode: Int,
         vulkanDmmvWorkgroup: Int,
         progressCallback: NativeModelLoadProgressCallback
     ): Int

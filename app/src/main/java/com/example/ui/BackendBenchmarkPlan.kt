@@ -2,6 +2,7 @@ package com.example.ui
 
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.FlashAttentionMode
 
 /**
  * Single-request backend comparison: the initial generated tokens warm the execution
@@ -37,6 +38,52 @@ internal object BackendBenchmarkPlan {
             gpuLayers = 99
         )
         return workgroups.map { base.copy(vulkanMatvecWorkgroup = it) }
+    }
+
+    /** Q5_K/Q6_K base-MMV A/B paths; AUTO remains unchanged until measurements justify it. */
+    fun vulkanQ5Q6DecodeConfigurations(original: EngineConfig): List<EngineConfig> {
+        val paths = listOf(
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q5K_BASE_DMMV,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q6K_BASE_DMMV
+        )
+        val base = configuration(original).copy(backendPreference = BackendPreference.VULKAN, gpuLayers = 99)
+        return paths.map { base.copy(vulkanMatvecWorkgroup = it) }
+    }
+
+    /** Q4_K prompt matmul conversion A/B sweep: upstream AUTO versus explicit F16/F32. */
+    fun vulkanQ4kPrefillConfigurations(original: EngineConfig): List<EngineConfig> {
+        val paths = listOf(
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_PREFILL_F16,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_PREFILL_F16,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO
+        )
+        val base = configuration(original).copy(backendPreference = BackendPreference.VULKAN, gpuLayers = 99)
+        return paths.map { base.copy(vulkanMatvecWorkgroup = it) }
+    }
+
+    /** Vulkan n_ubatch sweep for prompt throughput and cancellation granularity. */
+    fun vulkanMicroBatchConfigurations(original: EngineConfig): List<EngineConfig> {
+        val base = configuration(original).copy(backendPreference = BackendPreference.VULKAN, gpuLayers = 99)
+        return listOf(32, 64, 128).map { size ->
+            base.copy(batchSize = maxOf(base.batchSize, size), microBatchSize = size)
+        }
+    }
+
+    /** Explicit Flash Attention ON/OFF profiles for each execution backend. */
+    fun flashAttentionConfigurations(original: EngineConfig): List<EngineConfig> {
+        val modes = listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED,
+            FlashAttentionMode.ENABLED, FlashAttentionMode.DISABLED)
+        val base = configuration(original)
+        return listOf(BackendPreference.VULKAN, BackendPreference.CPU).flatMap { backend ->
+            modes.map { mode -> base.copy(
+                backendPreference = backend,
+                gpuLayers = if (backend == BackendPreference.VULKAN) 99 else 0,
+                flashAttentionMode = mode
+            ) }
+        }
     }
 
     /**

@@ -37,7 +37,8 @@ static FILE* g_native_log_file = nullptr;
 static constexpr long MAX_NATIVE_LOG_FILE_BYTES = 2L * 1024L * 1024L;
 
 // This process-wide override is consumed by the generated ggml-vulkan.cpp overlay.
-// 0=AUTO, 1=SUBGROUP, 2=LARGE, 3=Q4_K base DMMV fallback (A/B-only).
+// 0=AUTO, 1=SUBGROUP, 2=LARGE, 3=Q4_K base, 4=Q5_K base,
+// 5=Q6_K base, 6=Q4_K prefill F16 (A/B-only).
 static std::atomic<int> g_vulkan_dmmv_workgroup_override{0};
 
 extern "C" int local_llm_vulkan_dmmv_workgroup_override() {
@@ -741,6 +742,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jint gpu_layers,
         jint batch_threads,
         jint micro_batch_size,
+        jint flash_attention_mode,
         jint vulkan_dmmv_workgroup,
         jobject progress_listener) {
     auto* engine = fromHandle(handle);
@@ -749,15 +751,22 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     std::lock_guard<std::mutex> lock(engine->mtx);
     engine->unload_unlocked();
 
-    if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 3) {
-        LOGE("Invalid Vulkan DMMV workgroup mode: %d", vulkan_dmmv_workgroup);
+    if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 6) {
+        LOGE("Invalid Vulkan matvec override mode: %d", vulkan_dmmv_workgroup);
+        return 7;
+    }
+    if (flash_attention_mode < -1 || flash_attention_mode > 1) {
+        LOGE("Invalid Flash Attention mode: %d", flash_attention_mode);
         return 7;
     }
     g_vulkan_dmmv_workgroup_override.store(vulkan_dmmv_workgroup, std::memory_order_relaxed);
     const char* dmmv_mode_name =
         vulkan_dmmv_workgroup == 0 ? "AUTO" :
         (vulkan_dmmv_workgroup == 1 ? "SUBGROUP" :
-        (vulkan_dmmv_workgroup == 2 ? "LARGE" : "Q4K_BASE_DMMV"));
+        (vulkan_dmmv_workgroup == 2 ? "LARGE" :
+        (vulkan_dmmv_workgroup == 3 ? "Q4K_BASE_DMMV" :
+        (vulkan_dmmv_workgroup == 4 ? "Q5K_BASE_DMMV" :
+        (vulkan_dmmv_workgroup == 5 ? "Q6K_BASE_DMMV" : "Q4K_PREFILL_F16")))));
     LOGI("Vulkan DMMV workgroup override: %s", dmmv_mode_name);
 
     const char* model_path = env->GetStringUTFChars(jmodel_path, nullptr);
@@ -960,9 +969,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     int b_size = batch_size > 0 ? batch_size : BATCH_SIZE;
     engine->batch_size = b_size;
     const int resolved_batch_threads = batch_threads > 0 ? batch_threads : n_threads;
+    // Default Vulkan ubatch is bounded for finer progress/cancel granularity.
+    // Explicit values always win, enabling a controlled 32/64/128 sweep.
     const int resolved_micro_batch = micro_batch_size > 0
         ? std::min(micro_batch_size, b_size)
-        : b_size;
+        : (use_vulkan ? std::min(64, b_size) : b_size);
     engine->n_threads_batch = resolved_batch_threads;
     engine->micro_batch_size = resolved_micro_batch;
 
@@ -972,6 +983,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     ctx_params.n_ubatch = resolved_micro_batch;
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = resolved_batch_threads;
+    ctx_params.flash_attn_type = static_cast<llama_flash_attn_type>(flash_attention_mode);
+    LOGI("Context policy: backend=%s,n_ctx=%d,n_batch=%d,n_ubatch=%d,flash_attn_type=%d",
+         use_vulkan ? "VULKAN" : "CPU", ctx_size, b_size, resolved_micro_batch,
+         flash_attention_mode);
     if (!use_vulkan) {
         ctx_params.abort_callback = llama_decode_abort_requested;
         ctx_params.abort_callback_data = engine;
