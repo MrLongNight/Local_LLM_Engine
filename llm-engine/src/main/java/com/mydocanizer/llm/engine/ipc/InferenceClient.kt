@@ -555,32 +555,31 @@ internal class InferenceClient(
             _state.value = EngineState.LoadingModel(source)
             val modelPath: String
             val displayName: String
+            var recoverySource: ModelSource = source
             // Hold the opened descriptor in a non-null local for the complete Binder
             // handoff. The nullable field exists only so the outer catch can clean up
             // if any operation between opening and the handoff fails.
             val openedDescriptor: ParcelFileDescriptor = when (source) {
                 is ModelSource.ContentUri -> {
-                    val uri = Uri.parse(source.uriString)
-                    val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
-                        ?: throw IllegalArgumentException("Android could not open the selected GGUF file directly")
-                    displayName = source.displayName ?: runCatching {
-                        context.contentResolver.query(
-                            uri,
-                            arrayOf(OpenableColumns.DISPLAY_NAME),
-                            null,
-                            null,
-                            null
-                        )?.use { cursor ->
-                            if (cursor.moveToFirst()) cursor.getString(0) else null
-                        }
-                    }.getOrNull() ?: uri.lastPathSegment ?: "model.gguf"
-                    modelPath = source.uriString
+                    // SAF/FUSE is used only during import. Native inference receives a
+                    // regular file in filesDir/models, never the provider-backed descriptor.
+                    val file = ModelSourceResolver.resolveToFile(context, source) { importPercent ->
+                        val scaled = (importPercent.coerceIn(0, 100) * 20) / 100
+                        _modelLoadProgress.value = scaled
+                        _modelLoadProgressEvents.tryEmit(scaled)
+                    }
+                    modelPath = file.absolutePath
+                    displayName = source.displayName
+                        ?: file.name.substringAfter('-', missingDelimiterValue = file.name)
+                            .takeIf { file.name.indexOf('-') == 64 }
+                        ?: file.name
+                    recoverySource = ModelSource.FilePath(file.absolutePath)
                     EngineDiagnostics.info(
                         "ipc_client",
-                        "MODEL_SOURCE_OPENED_DIRECTLY",
-                        "source=SAF,displayName=$displayName,copy=false"
+                        "MODEL_SOURCE_IMPORTED_TO_PRIVATE_STORAGE",
+                        "source=SAF,displayName=$displayName,privatePath=${file.name},sizeBytes=${file.length()}"
                     )
-                    descriptor
+                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
                 }
                 else -> {
                     val file: File = ModelSourceResolver.resolveToFile(context, source)
@@ -605,7 +604,7 @@ internal class InferenceClient(
                     if (modelInfo != null) {
                         // Keep only a model confirmed by the service as the automatic
                         // recovery target after a later process restart.
-                        lastLoadedSource = source
+                        lastLoadedSource = recoverySource
                         lastLoadedConfig = config
                         _modelLoadProgress.value = 100
                         _modelLoadProgressEvents.tryEmit(100)
@@ -636,7 +635,10 @@ internal class InferenceClient(
 
                 override fun onModelLoadProgress(progressPercent: Int) {
                     if (pendingModelLoad.get() !== pending) return
-                    val percent = progressPercent.coerceIn(0, 99)
+                    val nativePercent = progressPercent.coerceIn(0, 99)
+                    val percent = if (source is ModelSource.ContentUri) {
+                        20 + (nativePercent * 79 / 99)
+                    } else nativePercent
                     _modelLoadProgress.value = percent
                     _modelLoadProgressEvents.tryEmit(percent)
                 }

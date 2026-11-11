@@ -1,5 +1,6 @@
 package com.mydocanizer.llm.engine.ipc
 
+import android.app.ActivityManager
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
@@ -18,6 +19,7 @@ import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.internal.LocalLlmEngineImpl
+import com.mydocanizer.llm.engine.internal.ModelMemoryGuard
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
@@ -32,6 +34,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -208,20 +211,46 @@ class InferenceService : Service() {
                         previous.close()
                     }
 
+                    // Preflight after releasing the previous model: estimate GGUF + KV +
+                    // allocator headroom and reduce context before native model allocation.
+                    val memoryManager = getSystemService(ActivityManager::class.java)
+                        ?: throw IllegalStateException("Android ActivityManager is unavailable; cannot safely estimate model-load memory")
+                    val memoryInfo = ActivityManager.MemoryInfo()
+                    memoryManager.getMemoryInfo(memoryInfo)
+                    val modelBytes = modelDescriptor.statSize.takeIf { it > 0L }
+                        ?: File(modelPath).length().takeIf { it > 0L }
+                        ?: throw IllegalArgumentException("Could not determine GGUF file size for the model memory guard")
+                    val memoryPlan = ModelMemoryGuard.plan(
+                        modelBytes = modelBytes,
+                        requestedContextTokens = config.contextSize,
+                        availableBytes = memoryInfo.availMem,
+                        lowMemory = memoryInfo.lowMemory
+                    )
+                    val effectiveConfig = if (memoryPlan.contextReduced) {
+                        config.copy(contextSize = memoryPlan.effectiveContextTokens)
+                    } else config
+                    EngineDiagnostics.info(
+                        "memory", "MODEL_LOAD_MEMORY_PLAN",
+                        "modelBytes=${memoryPlan.modelBytes},kvEstimateBytes=${memoryPlan.estimatedKvBytes}," +
+                            "requiredBytes=${memoryPlan.requiredBytes},availableBytes=${memoryPlan.availableBytes}," +
+                            "requestedContext=${config.contextSize},effectiveContext=${effectiveConfig.contextSize}," +
+                            "contextReduced=${memoryPlan.contextReduced}"
+                    )
+
                     val result = e.loadModel(
                         ModelSource.FilePath(
                             path = nativePath,
                             descriptor = modelDescriptor.fileDescriptor,
                             descriptorFd = modelDescriptor.fd
                         ),
-                        config
+                        effectiveConfig
                     )
                     result.onSuccess { info ->
                         modelLoadedSuccessfully = true
                         activeModelDescriptor = modelDescriptor
                         descriptorTransferred = true
                         val publicInfo = info.copy(name = displayName, path = modelPath)
-                        resourceMonitor?.modelLoaded(publicInfo, config)
+                        resourceMonitor?.modelLoaded(publicInfo, effectiveConfig)
                         EngineDiagnostics.info(
                             "ipc",
                             "MODEL_LOADED",

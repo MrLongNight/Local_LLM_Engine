@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- ContentUri/SAF model sources are imported into the private models directory before Binder handoff. Import checks available storage, verifies GGUF magic, hashes content, reports progress, and reuses a cached copy when provider size/mtime metadata is stable.
+- Added a pre-load RAM guard that estimates model + KV-cache + native headroom, reduces context when possible, and rejects unsafe loads before native allocation.
+
+### Changed
+- Reconnect recovery for imported SAF models now remembers the private file path rather than reopening the provider-backed FUSE URI.
+- Model-load progress combines SAF copy progress and native model-load progress.
+
+
+### Added
 - Added host-testable CPU performance-core thread selection using sysfs maximum frequencies (>=70% of device maximum, clamped to 2..4), shared by Kotlin recommendations and JNI defaults.
 - Added per-run available-RAM and Android thermal-status diagnostics, plus periodic thermal status in resource snapshots.
 

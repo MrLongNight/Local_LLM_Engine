@@ -2,6 +2,8 @@ package com.mydocanizer.llm.engine.internal
 
 import android.content.Context
 import android.net.Uri
+import android.os.StatFs
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.system.Os
 import android.system.OsConstants
@@ -26,8 +28,19 @@ internal object ModelSourceResolver {
     private const val MAX_REDIRECTS = 5
     private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
     private val PROC_SELF_FD_PATH = Regex("^/proc/self/fd/([0-9]+)$")
+    private const val IMPORT_RESERVE_BYTES = 64L * 1024L * 1024L
 
-    suspend fun resolveToFile(context: Context, source: ModelSource): File =
+    private data class ContentMetadata(
+        val displayName: String?,
+        val sizeBytes: Long?,
+        val lastModified: Long?
+    )
+
+    suspend fun resolveToFile(
+        context: Context,
+        source: ModelSource,
+        onProgress: ((Int) -> Unit)? = null
+    ): File =
         withContext(Dispatchers.IO) {
             when (source) {
                 is ModelSource.FilePath -> {
@@ -59,12 +72,46 @@ internal object ModelSourceResolver {
                 is ModelSource.ContentUri -> {
                     val targetDir = ensureModelDirectory(context)
                     val uri = Uri.parse(source.uriString)
+                    val metadata = queryContentMetadata(context, uri)
                     val displayName = source.displayName
+                        ?: metadata?.displayName
                         ?: queryFileName(context, uri)
                         ?: "imported_model.gguf"
+
+                    // Reuse an existing private copy only when the provider supplies both
+                    // size and modification time. Unknown metadata never trusts a stale URI.
+                    findCachedContentUriImport(context, targetDir, source.uriString, metadata)?.let {
+                        android.util.Log.i("ModelSourceResolver", "SAF_IMPORT_CACHE_HIT path=${it.name}")
+                        onProgress?.invoke(100)
+                        return@withContext it
+                    }
+
+                    metadata?.sizeBytes?.takeIf { it > 0L }?.let { expectedBytes ->
+                        val available = StatFs(targetDir.absolutePath).availableBytes
+                        val required = expectedBytes + IMPORT_RESERVE_BYTES
+                        require(available >= required) {
+                            "Nicht genügend Speicher für den Modellimport: benötigt ${required / (1024L * 1024L)} MiB, " +
+                                "verfügbar ${available / (1024L * 1024L)} MiB."
+                        }
+                    }
+
                     val input = context.contentResolver.openInputStream(uri)
                         ?: throw IllegalArgumentException("Could not open Content URI: ${source.uriString}")
-                    copyAndPublish(targetDir, displayName, input)
+                    val imported = copyAndPublish(
+                        targetDir = targetDir,
+                        displayName = displayName,
+                        input = input,
+                        expectedBytes = metadata?.sizeBytes,
+                        onProgress = { percent ->
+                            onProgress?.invoke(percent)
+                            com.mydocanizer.llm.engine.EngineDiagnostics.info(
+                                "model_import", "IMPORT_PROGRESS",
+                                "source=SAF,percent=$percent,name=$displayName"
+                            )
+                        }
+                    )
+                    rememberContentUriImport(context, imported, source.uriString, metadata)
+                    imported
                 }
 
                 is ModelSource.AssetPath -> {
@@ -159,7 +206,9 @@ internal object ModelSourceResolver {
     private suspend fun copyAndPublish(
         targetDir: File,
         displayName: String,
-        input: InputStream
+        input: InputStream,
+        expectedBytes: Long? = null,
+        onProgress: ((Int) -> Unit)? = null
     ): File {
         val coroutineContext = currentCoroutineContext()
         var temporaryFile: File? = null
@@ -171,6 +220,9 @@ internal object ModelSourceResolver {
                 temporaryFile = stage
                 FileOutputStream(stage).use { destination ->
                     val buffer = ByteArray(1024 * 1024)
+                    var copiedBytes = 0L
+                    var lastProgressBucket = -1
+                    onProgress?.invoke(0)
                     while (true) {
                         coroutineContext.ensureActive()
                         val count = source.read(buffer)
@@ -178,12 +230,23 @@ internal object ModelSourceResolver {
                         if (count == 0) continue
                         digest.update(buffer, 0, count)
                         destination.write(buffer, 0, count)
+                        copiedBytes += count
+                        if (expectedBytes != null && expectedBytes > 0L && onProgress != null) {
+                            val percent = ((copiedBytes.toDouble() / expectedBytes.toDouble()) * 100.0)
+                                .toInt().coerceIn(0, 99)
+                            val bucket = percent / 5
+                            if (bucket > lastProgressBucket) {
+                                lastProgressBucket = bucket
+                                onProgress(percent)
+                            }
+                        }
                     }
                     destination.fd.sync()
                 }
                 coroutineContext.ensureActive()
                 validateGgufMagic(stage)
                 sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                onProgress?.invoke(100)
             }
 
             coroutineContext.ensureActive()
@@ -320,6 +383,81 @@ internal object ModelSourceResolver {
             .take(120)
             .ifBlank { "model" }
         return if (cleaned.endsWith(".gguf", ignoreCase = true)) cleaned else "$cleaned.gguf"
+    }
+
+    private fun queryContentMetadata(context: Context, uri: Uri): ContentMetadata? {
+        if (uri.scheme != "content") return null
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    OpenableColumns.DISPLAY_NAME,
+                    OpenableColumns.SIZE,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                val modifiedIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                ContentMetadata(
+                    displayName = nameIndex.takeIf { it >= 0 }?.let { cursor.getString(it) },
+                    sizeBytes = sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                        ?.let { cursor.getLong(it) }?.takeIf { it > 0L },
+                    lastModified = modifiedIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                        ?.let { cursor.getLong(it) }?.takeIf { it > 0L }
+                )
+            }
+        }.getOrNull()
+    }
+
+    private fun findCachedContentUriImport(
+        context: Context,
+        targetDir: File,
+        uriString: String,
+        metadata: ContentMetadata?
+    ): File? {
+        val size = metadata?.sizeBytes ?: return null
+        val modified = metadata.lastModified ?: return null
+        val key = contentUriPreferenceKey(uriString)
+        val preferences = context.getSharedPreferences("local_llm_model_imports", Context.MODE_PRIVATE)
+        if (preferences.getLong("$key.size", -1L) != size ||
+            preferences.getLong("$key.modified", -1L) != modified
+        ) return null
+        val storedName = preferences.getString("$key.file", null) ?: return null
+        val file = File(targetDir, storedName).canonicalFile
+        if (file.parentFile != targetDir.canonicalFile || !file.isFile || file.length() != size) return null
+        return runCatching {
+            validateGgufMagic(file)
+            file
+        }.getOrNull()
+    }
+
+    private fun rememberContentUriImport(
+        context: Context,
+        file: File,
+        uriString: String,
+        metadata: ContentMetadata?
+    ) {
+        val size = metadata?.sizeBytes ?: return
+        val modified = metadata.lastModified ?: return
+        val key = contentUriPreferenceKey(uriString)
+        context.getSharedPreferences("local_llm_model_imports", Context.MODE_PRIVATE)
+            .edit()
+            .putLong("$key.size", size)
+            .putLong("$key.modified", modified)
+            .putString("$key.file", file.name)
+            .apply()
+    }
+
+    private fun contentUriPreferenceKey(uriString: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(uriString.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return "uri_$digest"
     }
 
     private fun queryFileName(context: Context, uri: Uri): String? {
