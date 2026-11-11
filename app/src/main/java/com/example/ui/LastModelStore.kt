@@ -3,7 +3,9 @@ package com.example.ui
 import android.content.Context
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.FlashAttentionMode
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.TimeoutConfig
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import java.io.File
@@ -55,6 +57,8 @@ internal class LastModelStore(context: Context) {
             .putInt(KEY_BATCH_THREADS, config.batchThreads)
             .putInt(KEY_MICRO_BATCH_SIZE, config.microBatchSize)
             .putString(KEY_VULKAN_MATVEC_WORKGROUP, config.vulkanMatvecWorkgroup.name)
+            .putString(KEY_FLASH_ATTENTION_MODE, config.flashAttentionMode.name)
+            .putString(KEY_RELOAD_AFTER_ABORT, config.reloadAfterAbort.name)
             .putLong(KEY_TIMEOUT_BIND, config.timeoutConfig.serviceBindMs)
             .putLong(KEY_TIMEOUT_MODEL_LOAD, config.timeoutConfig.modelLoadMs)
             .putLong(KEY_TIMEOUT_PREFILL, config.timeoutConfig.prefillMs)
@@ -114,7 +118,19 @@ internal class LastModelStore(context: Context) {
                     preferences.getString(KEY_VULKAN_MATVEC_WORKGROUP, VulkanMatvecWorkgroup.AUTO.name)
                         ?: VulkanMatvecWorkgroup.AUTO.name
                 )
-            }.getOrDefault(VulkanMatvecWorkgroup.AUTO)
+            }.getOrDefault(VulkanMatvecWorkgroup.AUTO),
+            flashAttentionMode = runCatching {
+                FlashAttentionMode.valueOf(
+                    preferences.getString(KEY_FLASH_ATTENTION_MODE, FlashAttentionMode.AUTO.name)
+                        ?: FlashAttentionMode.AUTO.name
+                )
+            }.getOrDefault(FlashAttentionMode.AUTO),
+            reloadAfterAbort = runCatching {
+                ReloadAfterAbort.valueOf(
+                    preferences.getString(KEY_RELOAD_AFTER_ABORT, ReloadAfterAbort.LAZY.name)
+                        ?: ReloadAfterAbort.LAZY.name
+                )
+            }.getOrDefault(ReloadAfterAbort.LAZY)
         )
         return RememberedModel(source, config)
     }
@@ -150,6 +166,8 @@ internal class LastModelStore(context: Context) {
         const val KEY_BATCH_THREADS = "batch_threads"
         const val KEY_MICRO_BATCH_SIZE = "micro_batch_size"
         const val KEY_VULKAN_MATVEC_WORKGROUP = "vulkan_matvec_workgroup"
+        const val KEY_RELOAD_AFTER_ABORT = "reload_after_abort"
+        const val KEY_FLASH_ATTENTION_MODE = "flash_attention_mode"
         const val KEY_TIMEOUT_BIND = "timeout_bind_ms"
         const val KEY_TIMEOUT_MODEL_LOAD = "timeout_model_load_ms"
         const val KEY_TIMEOUT_PREFILL = "timeout_prefill_ms"

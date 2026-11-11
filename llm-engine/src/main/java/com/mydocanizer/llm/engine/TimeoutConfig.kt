@@ -27,7 +27,7 @@ data class TimeoutConfig(
     val firstTokenMs: Long = 120_000L,
     val interTokenMs: Long = 30_000L,
     val totalInferenceMs: Long = 600_000L,
-    val abortGracePeriodMs: Long = 300L,
+    val abortGracePeriodMs: Long = 3_000L,
     val reconnectMs: Long = 15_000L
 ) : Parcelable {
 
@@ -106,7 +106,7 @@ data class TimeoutConfig(
             firstToken: Duration = 120.seconds,
             interToken: Duration = 30.seconds,
             totalInference: Duration = 600.seconds,
-            abortGracePeriod: Duration = 300.milliseconds,
+            abortGracePeriod: Duration = 3.seconds,
             reconnect: Duration = 15.seconds
         ): TimeoutConfig = TimeoutConfig(
             serviceBindMs = serviceBind.inWholeMilliseconds,

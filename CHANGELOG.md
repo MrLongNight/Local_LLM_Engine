@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Increased the default cooperative abort grace period from 300 ms to 3,000 ms; test-only `fast()` timing remains intentionally short.
+- Prefill timeout is now a stall deadline reset by each native prompt-progress callback, while the existing total-inference deadline remains the hard overall cap.
+- Added persisted `reloadAfterAbort` policy (`LAZY` by default, `EAGER` optional) so reconnect does not automatically reload a large model unless selected.
+- Added cooperative-cancel and process-kill request counters to IPC diagnostics.
+
+### Added
+- Added host-JVM timeout policy tests covering long prompts with regular progress and true no-progress stalls.
+- Added persisted Flash Attention and reload-after-abort settings to the remembered-model configuration.
+
 ### Added
 - Added host-testable native helpers for exact prompt-prefix reuse and protected-message truncation; host C++ tests run in GitHub Actions.
 - Added native incremental KV-prefix reuse for ordinary attention models, with automatic full-clear fallback for recurrent/hybrid models and failed sequence-removal operations.

@@ -20,7 +20,7 @@ class TimeoutConfigTest {
         assertEquals(120_000L, config.firstTokenMs)
         assertEquals(30_000L, config.interTokenMs)
         assertEquals(600_000L, config.totalInferenceMs)
-        assertEquals(300L, config.abortGracePeriodMs)
+        assertEquals(3_000L, config.abortGracePeriodMs)
         assertEquals(15_000L, config.reconnectMs)
 
         assertTrue(config.firstTokenMs < config.totalInferenceMs)
@@ -34,7 +34,7 @@ class TimeoutConfigTest {
         assertEquals(120.seconds, config.firstToken)
         assertEquals(30.seconds, config.interToken)
         assertEquals(600.seconds, config.totalInference)
-        assertEquals(300.milliseconds, config.abortGracePeriod)
+        assertEquals(3.seconds, config.abortGracePeriod)
         assertEquals(15.seconds, config.reconnect)
     }
 

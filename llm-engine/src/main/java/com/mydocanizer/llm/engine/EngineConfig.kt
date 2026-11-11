@@ -27,6 +27,13 @@ enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
 }
 
 /** Explicit Flash Attention policy passed to llama_context_params. */
+enum class ReloadAfterAbort {
+    /** Leave the model unloaded after process recovery; reload on the next inference request. */
+    LAZY,
+    /** Reload the remembered model immediately after the inference process reconnects. */
+    EAGER
+}
+
 enum class FlashAttentionMode(val nativeId: Int) {
     AUTO(-1), DISABLED(0), ENABLED(1);
 
@@ -92,7 +99,8 @@ data class EngineConfig(
     val batchThreads: Int = 0,
     val microBatchSize: Int = 0,
     val vulkanMatvecWorkgroup: VulkanMatvecWorkgroup = VulkanMatvecWorkgroup.AUTO,
-    val flashAttentionMode: FlashAttentionMode = FlashAttentionMode.AUTO
+    val flashAttentionMode: FlashAttentionMode = FlashAttentionMode.AUTO,
+    val reloadAfterAbort: ReloadAfterAbort = ReloadAfterAbort.LAZY
 ) : Parcelable {
     /**
      * Effective llama.cpp thread count for prompt/batch processing.
@@ -150,7 +158,11 @@ data class EngineConfig(
         } else VulkanMatvecWorkgroup.AUTO,
         flashAttentionMode = if (parcel.dataAvail() > 0) {
             FlashAttentionMode.fromName(parcel.readString())
-        } else FlashAttentionMode.AUTO
+        } else FlashAttentionMode.AUTO,
+        reloadAfterAbort = if (parcel.dataAvail() > 0) {
+            runCatching { ReloadAfterAbort.valueOf(parcel.readString().orEmpty()) }
+                .getOrDefault(ReloadAfterAbort.LAZY)
+        } else ReloadAfterAbort.LAZY
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -167,6 +179,7 @@ data class EngineConfig(
         parcel.writeInt(microBatchSize)
         parcel.writeString(vulkanMatvecWorkgroup.name)
         parcel.writeString(flashAttentionMode.name)
+        parcel.writeString(reloadAfterAbort.name)
     }
 
     override fun describeContents(): Int = 0

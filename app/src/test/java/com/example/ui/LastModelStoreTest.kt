@@ -5,6 +5,8 @@ import android.os.Parcel
 import androidx.test.core.app.ApplicationProvider
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.FlashAttentionMode
+import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
@@ -43,7 +45,9 @@ class LastModelStoreTest {
             timeoutConfig = TimeoutConfig(modelLoadMs = 240_000L),
             batchThreads = 3,
             microBatchSize = 64,
-            vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.LARGE
+            vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.LARGE,
+            flashAttentionMode = FlashAttentionMode.ENABLED,
+            reloadAfterAbort = ReloadAfterAbort.EAGER
         )
         val source = ModelSource.ContentUri(
             uriString = "content://com.android.externalstorage.documents/document/primary%3AModels%2Fqwen.gguf"

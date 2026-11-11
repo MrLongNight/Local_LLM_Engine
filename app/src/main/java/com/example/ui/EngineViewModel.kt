@@ -165,13 +165,16 @@ class EngineViewModel(
         _engineConfig.value = config
         if (previous.backendPreference != config.backendPreference ||
             previous.gpuLayers != config.gpuLayers ||
-            previous.vulkanMatvecWorkgroup != config.vulkanMatvecWorkgroup
+            previous.vulkanMatvecWorkgroup != config.vulkanMatvecWorkgroup ||
+            previous.flashAttentionMode != config.flashAttentionMode ||
+            previous.reloadAfterAbort != config.reloadAfterAbort
         ) {
             EngineDiagnostics.info(
                 "ui",
                 "EXECUTION_CONFIG_UPDATED",
                 "backendPreference=${config.backendPreference}, gpuLayers=${config.gpuLayers}, " +
-                    "vulkanMatvecWorkgroup=${config.vulkanMatvecWorkgroup}"
+                    "vulkanMatvecWorkgroup=${config.vulkanMatvecWorkgroup}, " +
+                    "flashAttentionMode=${config.flashAttentionMode}, reloadAfterAbort=${config.reloadAfterAbort}"
             )
         }
     }

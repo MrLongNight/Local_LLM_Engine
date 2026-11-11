@@ -27,6 +27,7 @@ import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
+import com.mydocanizer.llm.engine.internal.InferenceTimeoutPolicy
 import com.mydocanizer.llm.engine.internal.ModelSourceResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -121,6 +122,8 @@ internal class InferenceClient(
     @Volatile private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
 
     private val activeRequestId = AtomicReference<String?>(null)
+    private val cooperativeCancelCount = AtomicLong(0L)
+    private val processKillCount = AtomicLong(0L)
     private val activeStreamControl = AtomicReference<ActiveStreamControl?>(null)
     private val pendingModelLoad = AtomicReference<PendingModelLoad?>(null)
     private val reconnectInProgress = AtomicBoolean(false)
@@ -431,6 +434,13 @@ internal class InferenceClient(
             } else if (source == null || config == null) {
                 _state.value = EngineState.Ready
                 null
+            } else if (config.reloadAfterAbort == com.mydocanizer.llm.engine.ReloadAfterAbort.LAZY) {
+                _state.value = EngineState.Ready
+                EngineDiagnostics.info(
+                    "ipc_client", "MODEL_RELOAD_DEFERRED",
+                    "reason=reloadAfterAbort_LAZY,model=${source.javaClass.simpleName}"
+                )
+                null
             } else {
                 _state.value = EngineState.LoadingModel(source)
                 loadModelInternal(connectedService, source, config)
@@ -735,6 +745,28 @@ internal class InferenceClient(
     }
 
     override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = callbackFlow {
+        // LAZY recovery avoids loading a large GGUF merely because :inference restarted.
+        // The next real chat request restores the last successful model before it is sent.
+        if (_currentModel.value == null) {
+            val rememberedSource = lastLoadedSource
+            val rememberedConfig = lastLoadedConfig
+            if (rememberedSource != null && rememberedConfig != null &&
+                rememberedConfig.reloadAfterAbort == com.mydocanizer.llm.engine.ReloadAfterAbort.LAZY) {
+                EngineDiagnostics.info(
+                    "ipc_client", "LAZY_MODEL_RESTORE_STARTED",
+                    "source=${rememberedSource.javaClass.simpleName},backend=${rememberedConfig.backendPreference}"
+                )
+                val restore = loadModel(rememberedSource, rememberedConfig)
+                val restoreError = restore.exceptionOrNull()
+                if (restoreError != null) {
+                    EngineDiagnostics.error("ipc_client", "LAZY_MODEL_RESTORE_FAILED", restoreError)
+                    trySend(InferenceEvent.Error(restoreError))
+                    channel.close()
+                    return@callbackFlow
+                }
+                EngineDiagnostics.info("ipc_client", "LAZY_MODEL_RESTORE_COMPLETED")
+            }
+        }
         val currentModelInfo = _currentModel.value
         val requestId = UUID.randomUUID().toString()
         if (!activeRequestId.compareAndSet(null, requestId)) {
@@ -751,6 +783,8 @@ internal class InferenceClient(
         val startNano = System.nanoTime()
         val prefillCompletedNano = AtomicLong(0L)
         val lastTokenNano = AtomicLong(startNano)
+        // Prefill is a stall deadline: every native prompt-progress callback restarts it.
+        val lastPromptProgressNano = AtomicLong(startNano)
         val receivedFirstToken = AtomicBoolean(false)
         val receivedStarted = AtomicBoolean(false)
         val tokenCount = AtomicInteger(0)
@@ -868,8 +902,12 @@ internal class InferenceClient(
 
                 // Prefill ends only when the native service reports successful prompt evaluation.
                 if (!receivedStarted.get()) {
-                    val elapsedPrefillMs = (now - startNano) / 1_000_000L
-                    if (elapsedPrefillMs > effectiveTimeout.prefillMs) {
+                    val elapsedPrefillMs = InferenceTimeoutPolicy.prefillStallElapsedMs(
+                        now, lastPromptProgressNano.get()
+                    )
+                    if (InferenceTimeoutPolicy.isPrefillStalled(
+                            now, lastPromptProgressNano.get(), effectiveTimeout.prefillMs
+                        )) {
                         triggerTimeout(FinishReason.TIMEOUT_PREFILL, elapsedPrefillMs)
                         break
                     }
@@ -1035,6 +1073,7 @@ internal class InferenceClient(
                     if (processed == 0) promptDecodeStartNano.set(System.nanoTime())
                     promptTokensProcessed.set(processed)
                     promptTokensTotal.set(total)
+                    lastPromptProgressNano.set(System.nanoTime())
                     val decodeStart = promptDecodeStartNano.get()
                     val measuredElapsedMs = if (decodeStart > 0L) {
                         ((System.nanoTime() - decodeStart) / 1_000_000L).coerceAtLeast(1L)
@@ -1095,6 +1134,11 @@ internal class InferenceClient(
 
             override fun onCancelled(reqId: String?, partialText: String?, tokensGenerated: Int) {
                 if (reqId == activeRequestId.get()) {
+                    val cooperativeCount = cooperativeCancelCount.incrementAndGet()
+                    EngineDiagnostics.info(
+                        "ipc_client", "CANCEL_STRATEGY_COUNTS",
+                        "cooperativeCancels=$cooperativeCount,processKillRequests=${processKillCount.get()}"
+                    )
                     if (completeTimeoutIfPending()) return
                     val localPartial = synchronized(streamBuilder) { streamBuilder.toString() }
                     finishStream(
@@ -1267,6 +1311,11 @@ internal class InferenceClient(
             // One-way Binder call: it must not wait for native cleanup in the service process.
             try {
                 service?.killProcess()
+                val count = processKillCount.incrementAndGet()
+                EngineDiagnostics.info(
+                    "ipc_client", "PROCESS_KILL_REQUESTED",
+                    "reason=$reason,pid=$targetPid,processKillRequests=$count,cooperativeCancels=${cooperativeCancelCount.get()}"
+                )
             } catch (e: Exception) {
                 Log.w(TAG, "Remote inference process may already have exited", e)
             }
@@ -1297,6 +1346,11 @@ internal class InferenceClient(
                     EngineDiagnostics.info("ipc_client", "HARD_KILL", "Client-side kill for inference PID=$targetPid")
                     try {
                         Process.killProcess(targetPid)
+                        val count = processKillCount.incrementAndGet()
+                        EngineDiagnostics.info(
+                            "ipc_client", "PROCESS_KILL_REQUESTED",
+                            "reason=client_side_fallback,pid=$targetPid,processKillRequests=$count,cooperativeCancels=${cooperativeCancelCount.get()}"
+                        )
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed client-side kill of inference PID=$targetPid", e)
                     }

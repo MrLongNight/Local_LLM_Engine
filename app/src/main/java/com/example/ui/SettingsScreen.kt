@@ -29,6 +29,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.ModelInfo
+import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import kotlin.math.roundToInt
 
@@ -215,6 +216,27 @@ fun SettingsScreen(
                                 selected = config.contextSize == size,
                                 onClick = { viewModel.updateConfig(config.copy(contextSize = size)) },
                                 label = { Text("$size") }
+                            )
+                        }
+                    }
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    Text(
+                        text = "Modell nach Prozessabbruch wiederherstellen",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        ReloadAfterAbort.entries.forEach { mode ->
+                            FilterChip(
+                                selected = config.reloadAfterAbort == mode,
+                                onClick = { viewModel.updateConfig(config.copy(reloadAfterAbort = mode)) },
+                                label = { Text(if (mode == ReloadAfterAbort.LAZY) "LAZY – beim nächsten Chat" else "EAGER – sofort neu laden") },
+                                modifier = Modifier.testTag("reload_after_abort_${mode.name.lowercase()}")
                             )
                         }
                     }
