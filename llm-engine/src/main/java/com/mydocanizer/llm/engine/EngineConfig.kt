@@ -15,6 +15,9 @@ enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
     companion object {
         fun fromNativeId(id: Int): VulkanMatvecWorkgroup =
             entries.firstOrNull { it.nativeId == id } ?: AUTO
+
+        fun fromName(name: String?): VulkanMatvecWorkgroup =
+            entries.firstOrNull { it.name == name } ?: AUTO
     }
 }
 
@@ -118,9 +121,7 @@ data class EngineConfig(
         timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader) ?: TimeoutConfig(),
         batchThreads = parcel.readInt(),
         microBatchSize = parcel.readInt(),
-        vulkanMatvecWorkgroup = runCatching {
-            VulkanMatvecWorkgroup.valueOf(parcel.readString() ?: VulkanMatvecWorkgroup.AUTO.name)
-        }.getOrDefault(VulkanMatvecWorkgroup.AUTO)
+        vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.fromName(parcel.readString())
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
