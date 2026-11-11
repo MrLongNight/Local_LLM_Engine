@@ -95,15 +95,15 @@ class EngineViewModel(
         EngineConfig(
             contextSize = 2048,
             batchSize = 128,
-            threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6),
+            // Vulkan offload is the default path; keep host-side Vulkan threads low.
+            // CPU-only users can raise this explicitly in Settings.
+            threads = 2,
             temperature = 0.7f,
             topP = 0.9f,
             maxPredictTokens = 512,
             backendPreference = BackendPreference.VULKAN,
-            // Qwen3-4B has 36 transformer layers plus the output layer.
-            // 37 requests full offload for that class of model; llama.cpp caps
-            // the value to the actual layer count for smaller models.
-            gpuLayers = 37
+            // Request full offload; llama.cpp caps this to the actual model layer count.
+            gpuLayers = 99
         )
     )
     val engineConfig: StateFlow<EngineConfig> = _engineConfig.asStateFlow()
@@ -167,14 +167,24 @@ class EngineViewModel(
             previous.gpuLayers != config.gpuLayers ||
             previous.vulkanMatvecWorkgroup != config.vulkanMatvecWorkgroup ||
             previous.flashAttentionMode != config.flashAttentionMode ||
-            previous.reloadAfterAbort != config.reloadAfterAbort
+            previous.reloadAfterAbort != config.reloadAfterAbort ||
+            previous.threads != config.threads ||
+            previous.batchThreads != config.batchThreads ||
+            previous.microBatchSize != config.microBatchSize ||
+            previous.batchSize != config.batchSize ||
+            previous.contextSize != config.contextSize ||
+            previous.topK != config.topK ||
+            previous.minP != config.minP
         ) {
             EngineDiagnostics.info(
                 "ui",
                 "EXECUTION_CONFIG_UPDATED",
                 "backendPreference=${config.backendPreference}, gpuLayers=${config.gpuLayers}, " +
                     "vulkanMatvecWorkgroup=${config.vulkanMatvecWorkgroup}, " +
-                    "flashAttentionMode=${config.flashAttentionMode}, reloadAfterAbort=${config.reloadAfterAbort}"
+                    "flashAttentionMode=${config.flashAttentionMode}, reloadAfterAbort=${config.reloadAfterAbort}, " +
+                    "threads=${config.threads}, batchThreads=${config.effectiveBatchThreads}, " +
+                    "batch=${config.batchSize}, microBatch=${config.effectiveMicroBatchSize}, " +
+                    "context=${config.contextSize}, topK=${config.topK}, minP=${config.minP}"
             )
         }
     }
@@ -236,7 +246,9 @@ class EngineViewModel(
             "MODEL_LOAD_CONFIGURATION",
             "operation=$operationLabel, backendPreference=${loadConfig.backendPreference}, " +
                 "gpuLayers=${loadConfig.gpuLayers}, context=${loadConfig.contextSize}, " +
-                "batch=${loadConfig.batchSize}, threads=${loadConfig.threads}"
+                "batch=${loadConfig.batchSize}, threads=${loadConfig.threads}, " +
+                "batchThreads=${loadConfig.effectiveBatchThreads}, microBatch=${loadConfig.effectiveMicroBatchSize}, " +
+                "topK=${loadConfig.topK}, minP=${loadConfig.minP}"
         )
 
         viewModelScope.launch {
