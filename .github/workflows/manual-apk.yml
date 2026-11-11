@@ -142,19 +142,29 @@ jobs:
           echo "VULKAN_HEADERS_INCLUDE_DIR=$VULKAN_SDK/include" >> "$GITHUB_ENV"
           echo "LOCAL_LLM_REQUIRE_VULKAN=1" >> "$GITHUB_ENV"
 
-      - name: Create temporary debug signing key
+      - name: Prepare persistent debug signing key
         shell: bash
+        env:
+          LOCAL_LLM_DEBUG_KEYSTORE_BASE64: ${{ secrets.LOCAL_LLM_DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [[ -n "${LOCAL_LLM_DEBUG_KEYSTORE_BASE64:-}" ]]; then
+            printf '%s' "$LOCAL_LLM_DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+            keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
+            echo "Using the persistent CI debug signing key from repository Actions secrets."
+          else
+            echo "::warning::LOCAL_LLM_DEBUG_KEYSTORE_BASE64 is not configured. This APK gets a one-run key and cannot update APKs signed by previous CI runs."
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -s debug.keystore
 
       - name: Download pinned tiny GGUF integration fixture
         shell: bash
