@@ -12,6 +12,7 @@ import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.TimeoutConfig
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -506,7 +507,9 @@ class InferenceIpcTest {
             writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46) + ByteArray(96))
             deleteOnExit()
         }
-        val originalConfig = EngineConfig()
+        // This test exercises the opt-in eager-reload compatibility path. LAZY is now
+        // the default and is covered separately by restoreLastModelAfterReconnect tests.
+        val originalConfig = EngineConfig(reloadAfterAbort = ReloadAfterAbort.EAGER)
         val cpuConfig = originalConfig.copy(backendPreference = com.mydocanizer.llm.engine.BackendPreference.CPU)
 
         try {
@@ -617,6 +620,7 @@ class InferenceIpcTest {
         val client = InferenceClient(
             context = object : android.content.ContextWrapper(null) {},
             mockService = fakeService,
+            timeoutConfig = TimeoutConfig.fast(),
             processLivenessCheck = { pid ->
                 pid == initialServicePid && !fakeService.isKilled.get()
             }
