@@ -148,7 +148,7 @@ static void ggml_vk_get_physical_device_features2(
             local_llm_dmmv_override == 0 ? "AUTO" :
             (local_llm_dmmv_override == 1 ? "SUBGROUP" : "LARGE");
         GGML_LOG_INFO(
-            "ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - override=%s,selected=%s,subgroupSize=%u\\n",
+            "ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - override=%s,selected=%s,subgroupSize=%u\n",
             override_name,
             dmmv_wg == DMMV_WG_SIZE_LARGE ? "LARGE" : "SUBGROUP",
             ctx->device->subgroup_size);
