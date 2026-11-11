@@ -20,4 +20,22 @@ internal object BackendBenchmarkPlan {
         temperature = 0f,
         topP = 1f
     )
+
+    /**
+     * Same deterministic benchmark settings and full Vulkan offload for every
+     * profile. AUTO is repeated at the end to expose simple thermal/frequency drift.
+     */
+    fun vulkanMatvecConfigurations(original: EngineConfig): List<EngineConfig> {
+        val workgroups = listOf(
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.SUBGROUP,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.LARGE,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO
+        )
+        val base = configuration(original).copy(
+            backendPreference = BackendPreference.VULKAN,
+            gpuLayers = 99
+        )
+        return workgroups.map { base.copy(vulkanMatvecWorkgroup = it) }
+    }
 }
