@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Updated the app initialization test for the explicit 99-layer full-offload request (actual Vulkan offload remains determined by native backend diagnostics).
+- Made InferenceRequest Parcelable reading backward-compatible when older clients omit the appended enableThinking field, and use the typed Parcelable reader on Android 13+.
+- Kept token events lossless with an unlimited output buffer, added coroutine cancellation checks during decode, and moved prompt progress through a conflated channel; a closed token collector now requests native cancellation.
+
 ### Changed
 - Default Vulkan configuration now requests full layer offload and uses two host threads; configuration diagnostics include sampler and context/batch/thread settings.
 

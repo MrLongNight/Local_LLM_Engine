@@ -35,8 +35,15 @@ data class InferenceRequest(
         maxPredictTokens = parcel.readInt(),
         temperature = if (parcel.readByte() != 0.toByte()) parcel.readFloat() else null,
         topP = if (parcel.readByte() != 0.toByte()) parcel.readFloat() else null,
-        timeoutConfig = parcel.readParcelable(TimeoutConfig::class.java.classLoader),
-        enableThinking = parcel.readInt() != 0
+        timeoutConfig = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            parcel.readParcelable(TimeoutConfig::class.java.classLoader, TimeoutConfig::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            parcel.readParcelable(TimeoutConfig::class.java.classLoader)
+        },
+        // Appended after the original request parcel layout. Older callers did not
+        // write this field, so default to non-thinking mode when no bytes remain.
+        enableThinking = parcel.dataAvail() >= Int.SIZE_BYTES && parcel.readInt() != 0
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {

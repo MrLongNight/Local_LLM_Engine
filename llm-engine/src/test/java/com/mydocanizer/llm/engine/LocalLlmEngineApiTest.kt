@@ -90,6 +90,26 @@ class LocalLlmEngineApiTest {
         assertEquals(true, thinkingRequest.enableThinking)
     }
 
+
+    @Test
+    fun inferenceRequestParcelDefaultsThinkingToFalseForLegacyPayload() {
+        val parcel = android.os.Parcel.obtain()
+        try {
+            parcel.writeTypedList(listOf(ChatMessage.user("legacy request")))
+            parcel.writeInt(128)
+            parcel.writeByte(0) // temperature absent
+            parcel.writeByte(0) // topP absent
+            parcel.writeParcelable(null, 0) // timeout config absent; legacy layout ends here
+            parcel.setDataPosition(0)
+
+            val restored = InferenceRequest.CREATOR.createFromParcel(parcel)
+            assertEquals(false, restored.enableThinking)
+            assertEquals("legacy request", restored.messages.single().content)
+        } finally {
+            parcel.recycle()
+        }
+    }
+
     @Test
     fun testInferenceRequestAcceptsSamplingOverrides() {
         val request = InferenceRequest(

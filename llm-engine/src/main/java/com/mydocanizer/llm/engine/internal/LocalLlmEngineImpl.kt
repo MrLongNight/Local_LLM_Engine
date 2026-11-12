@@ -16,6 +16,7 @@ import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Channel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -32,6 +33,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
@@ -373,12 +376,34 @@ internal class LocalLlmEngineImpl(
             return@callbackFlow
         }
 
+        // Token events must never be dropped when the UI/Binder collector is slower
+        // than native decode. Prompt progress is independently conflated so only the
+        // latest pending progress sample is forwarded while native prefill is busy.
+        val progressEvents = Channel<InferenceEvent.Progress>(Channel.CONFLATED)
+        val nativeWorkActive = AtomicBoolean(false)
+        channel.invokeOnClose {
+            progressEvents.close()
+            if (nativeWorkActive.get()) {
+                isCancelled.set(true)
+                NativeEngineHandle.nativeCancel(handle)
+            }
+        }
+        launch(Dispatchers.Default) {
+            for (progress in progressEvents) {
+                if (trySend(progress).isFailure) {
+                    isCancelled.set(true)
+                    NativeEngineHandle.nativeCancel(handle)
+                    break
+                }
+            }
+        }
+
         _state.value = EngineState.Inferring(request)
         val requestStartNano = System.nanoTime()
         val roles = request.messages.map { it.role.roleName }.toTypedArray()
         val contents = request.messages.map { it.content }.toTypedArray()
 
-        trySend(
+        progressEvents.trySend(
             InferenceEvent.Progress(
                 tokensGenerated = 0,
                 elapsedMs = 0L,
@@ -400,7 +425,7 @@ internal class LocalLlmEngineImpl(
             val etaMs = if (speed > 0.0 && safeTotal > safeProcessed) {
                 (((safeTotal - safeProcessed) * 1000.0) / speed).toLong()
             } else null
-            trySend(
+            progressEvents.trySend(
                 InferenceEvent.Progress(
                     tokensGenerated = 0,
                     elapsedMs = elapsedMs,
@@ -424,6 +449,7 @@ internal class LocalLlmEngineImpl(
             return@callbackFlow
         }
 
+        nativeWorkActive.set(true)
         val processRes = NativeEngineHandle.nativeProcessChat(
             handle = handle,
             inferenceRunId = inferenceRunId,
@@ -437,6 +463,7 @@ internal class LocalLlmEngineImpl(
         )
 
         if (processRes == 6 || isCancelled.get()) {
+            nativeWorkActive.set(false)
             val cancelledTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
             EngineDiagnostics.info(
                 "inference",
@@ -451,6 +478,7 @@ internal class LocalLlmEngineImpl(
         }
 
         if (processRes != 0) {
+            nativeWorkActive.set(false)
             val message = when (processRes) {
                 1 -> "Native prompt evaluation has no valid model/context handle"
                 2 -> "The native prompt message list is invalid"
@@ -493,6 +521,7 @@ internal class LocalLlmEngineImpl(
 
         try {
             while (!isCancelled.get()) {
+                currentCoroutineContext().ensureActive()
                 val tokenStepStartNano = System.nanoTime()
                 val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
                 val tokenStepDurationUs = (System.nanoTime() - tokenStepStartNano) / 1_000L
@@ -522,7 +551,12 @@ internal class LocalLlmEngineImpl(
                         )
                     }
                     outputBuilder.append(tokenPiece)
-                    trySend(InferenceEvent.Token(tokenPiece, tokenCount))
+                    val tokenSend = trySend(InferenceEvent.Token(tokenPiece, tokenCount))
+                    if (tokenSend.isFailure) {
+                        isCancelled.set(true)
+                        NativeEngineHandle.nativeCancel(handle)
+                        throw CancellationException("Token collector is no longer active")
+                    }
                     tokenCount++
                     if (tokenCount >= request.maxPredictTokens) {
                         break
@@ -583,11 +617,13 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.error("inference", "GENERATION_LOOP_FAILED", t)
             trySend(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
+            nativeWorkActive.set(false)
+            progressEvents.close()
             isCancelled.set(false)
             _state.value = EngineState.ModelLoaded(modelInfo)
             close()
         }
-    }.flowOn(llamaDispatcher)
+    }.buffer(Channel.UNLIMITED).flowOn(llamaDispatcher)
 
     override suspend fun generateChat(request: InferenceRequest): Result<InferenceResult> {
         return runCatching {

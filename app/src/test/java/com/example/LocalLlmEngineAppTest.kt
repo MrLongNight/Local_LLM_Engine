@@ -61,7 +61,7 @@ class LocalLlmEngineAppTest {
         assertTrue(viewModel.chatMessages.value.isEmpty())
         assertTrue(viewModel.systemPrompt.value.isNotBlank())
         assertEquals(BackendPreference.VULKAN, viewModel.engineConfig.value.backendPreference)
-        assertEquals(37, viewModel.engineConfig.value.gpuLayers)
+        assertEquals(99, viewModel.engineConfig.value.gpuLayers) // requested full offload; actual offload is read from native backend diagnostics
 
         viewModel.selectTab(AppTab.IMPORT)
         assertEquals(AppTab.IMPORT, viewModel.currentTab.value)
