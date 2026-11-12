@@ -183,7 +183,7 @@ class EngineViewModel(
                     "vulkanMatvecWorkgroup=${config.vulkanMatvecWorkgroup}, " +
                     "flashAttentionMode=${config.flashAttentionMode}, reloadAfterAbort=${config.reloadAfterAbort}, " +
                     "threads=${config.threads}, batchThreads=${config.effectiveBatchThreads}, " +
-                    "batch=${config.batchSize}, microBatch=${config.effectiveMicroBatchSize}, " +
+                    "batch=${config.batchSize}, microBatchRequested=${config.microBatchSize}, " +
                     "context=${config.contextSize}, topK=${config.topK}, minP=${config.minP}"
             )
         }
@@ -247,7 +247,7 @@ class EngineViewModel(
             "operation=$operationLabel, backendPreference=${loadConfig.backendPreference}, " +
                 "gpuLayers=${loadConfig.gpuLayers}, context=${loadConfig.contextSize}, " +
                 "batch=${loadConfig.batchSize}, threads=${loadConfig.threads}, " +
-                "batchThreads=${loadConfig.effectiveBatchThreads}, microBatch=${loadConfig.effectiveMicroBatchSize}, " +
+                "batchThreads=${loadConfig.effectiveBatchThreads}, microBatchRequested=${loadConfig.microBatchSize}, " +
                 "topK=${loadConfig.topK}, minP=${loadConfig.minP}"
         )
 
@@ -562,8 +562,7 @@ class EngineViewModel(
                                 "nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
                                 "generationMs=${measured.result.durationMs},finishReason=${measured.result.finishReason.name}," +
                                 "batch=${profile.config.batchSize},threads=${profile.config.threads}," +
-                                "batchThreads=${profile.config.effectiveBatchThreads},activeBackend=${loaded.activeBackend}," +
-                                "activeBackend=${loaded.activeBackend}"
+                                "batchThreads=${profile.config.effectiveBatchThreads},activeBackend=${loaded.activeBackend}"
                         )
                     } catch (cancelled: CancellationException) {
                         throw cancelled
@@ -658,7 +657,7 @@ class EngineViewModel(
                     "backendOrder=VULKAN,CPU,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},totalTokens=${BackendBenchmarkPlan.TOTAL_TOKENS}," +
                     "context=${benchmarkConfig.contextSize},batch=${benchmarkConfig.batchSize},threads=${benchmarkConfig.threads}," +
-                    "batchThreads=${benchmarkConfig.effectiveBatchThreads},microBatch=${benchmarkConfig.effectiveMicroBatchSize}," +
+                    "batchThreads=${benchmarkConfig.effectiveBatchThreads},microBatchRequested=${benchmarkConfig.microBatchSize}," +
                     "gpuLayers=${benchmarkConfig.gpuLayers},temperature=0.0,topP=1.0"
             )
 
@@ -725,7 +724,7 @@ class EngineViewModel(
                             "BACKEND_BENCHMARK_RESULT",
                             reportLine + ",context=${backendConfig.contextSize},batch=${backendConfig.batchSize}," +
                                 "threads=${backendConfig.threads},batchThreads=${backendConfig.effectiveBatchThreads}," +
-                                "microBatch=${backendConfig.effectiveMicroBatchSize},gpuLayers=${backendConfig.gpuLayers}," +
+                                "microBatchRequested=${backendConfig.microBatchSize},gpuLayers=${backendConfig.gpuLayers}," +
                                 "temperature=0.0,topP=1.0,maxPredictTokens=${BackendBenchmarkPlan.TOTAL_TOKENS}"
                         )
                     } catch (cancelled: CancellationException) {
@@ -1073,7 +1072,7 @@ class EngineViewModel(
                             "generationMs=${measured.result.durationMs},finishReason=${measured.result.finishReason.name}," +
                             "context=${originalConfig.contextSize},batch=${originalConfig.batchSize}," +
                             "threads=${originalConfig.threads},batchThreads=${originalConfig.effectiveBatchThreads}," +
-                            "microBatch=${originalConfig.effectiveMicroBatchSize},backend=${loaded.activeBackend}"
+                            "microBatchRequested=${originalConfig.microBatchSize},backend=${loaded.activeBackend}"
                     )
                     if (index < runLayers.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
                 }
@@ -1169,7 +1168,7 @@ class EngineViewModel(
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
                     "batch=${originalConfig.batchSize},threads=${originalConfig.threads}," +
                     "batchThreads=${originalConfig.effectiveBatchThreads}," +
-                    "microBatch=${originalConfig.effectiveMicroBatchSize},temperature=0.0,topP=1.0"
+                    "microBatchRequested=${originalConfig.microBatchSize},temperature=0.0,topP=1.0"
             )
 
             try {

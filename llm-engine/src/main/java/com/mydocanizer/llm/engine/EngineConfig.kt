@@ -82,7 +82,7 @@ enum class BackendPreference(val modeId: Int, val label: String) {
  * @property backendPreference Target execution backend (AUTO, VULKAN, CPU).
  * @property gpuLayers Number of layers offloaded to GPU VRAM (e.g. 99 for full offload).
  * @property batchThreads llama.cpp n_threads_batch; 0 follows n_threads.
- * @property microBatchSize llama.cpp n_ubatch; 0 follows n_batch.
+ * @property microBatchSize explicit llama.cpp n_ubatch; 0 delegates to backend default (Vulkan 64, CPU n_batch).
  * @property vulkanMatvecWorkgroup Diagnostic DMMV workgroup selector; AUTO includes the Mali Q4_K policy.
  * @property flashAttentionMode Explicit Flash Attention selection.
  * @property topK Maximum candidates retained by the lightweight sampler.
@@ -120,8 +120,8 @@ data class EngineConfig(
         get() = batchThreads.takeIf { it > 0 } ?: threads
 
     /**
-     * Effective llama.cpp micro-batch size.
-     * A configured value of zero means "follow the configured batch size".
+     * Backend-agnostic fallback size for presentation/tests. Native loading passes the
+     * raw microBatchSize so zero can select Vulkan's mobile default (64) or CPU n_batch.
      */
     val effectiveMicroBatchSize: Int
         get() = microBatchSize.takeIf { it > 0 } ?: batchSize

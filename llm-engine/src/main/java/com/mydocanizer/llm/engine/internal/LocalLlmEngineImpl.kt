@@ -162,7 +162,7 @@ internal class LocalLlmEngineImpl(
                 "MODEL_LOAD_STARTED",
                 "fileBytes=${file.length()}, directDescriptorFd=$directDescriptorFd, backendPreference=${config.backendPreference}, " +
                     "threads=${config.threads}, batchThreads=${config.effectiveBatchThreads}, " +
-                    "batch=${config.batchSize}, microBatch=${config.effectiveMicroBatchSize}, " +
+                    "batch=${config.batchSize}, microBatchRequested=${config.microBatchSize}, " +
                     "context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
             )
             val backendPreflight = runCatching {
@@ -241,7 +241,7 @@ internal class LocalLlmEngineImpl(
                 "MODEL_NATIVE_RUNTIME_READY",
                 "durationMs=$nativeLoadDurationMs, backend=${NativeEngineHandle.nativeGetActiveBackend(handle)}, " +
                     "threads=${config.threads}, batchThreads=${config.effectiveBatchThreads}, " +
-                    "batch=${config.batchSize}, microBatch=${config.effectiveMicroBatchSize}, " +
+                    "batch=${config.batchSize}, microBatchRequested=${config.microBatchSize}, " +
                     "context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
             )
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)

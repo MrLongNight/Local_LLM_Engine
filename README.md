@@ -123,6 +123,9 @@ the same file, verifies the requested backend actually loaded, uses the same
 system prompt and deterministic fixed prompt, warms up four tokens and measures
 twenty tokens. The original configuration is restored in non-cancellable cleanup.
 
+When `microBatchSize=0` (AUTO), JNI resolves Vulkan to `min(64, n_batch)`
+and CPU to `n_batch`; explicit 32/64/128 sweep values are passed unchanged.
+
 Each result records load time, prompt token count and prefill time, TTFT,
 measured and native decode tok/s, graph-split count, profile settings and an
 inference request ID. That ID joins the result to the exact

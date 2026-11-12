@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Kept the raw n_ubatch AUTO value at the JNI boundary so Vulkan uses its 64-token mobile default instead of accidentally receiving n_batch=512; resource snapshots separate effective and requested micro-batch values.
+- Native prompt evaluation now calls llama_decode in n_ubatch-sized chunks, reporting progress and checking cancellation at each completed micro-batch. The Kotlin prefill start performs a final cancellation handshake before JNI.
+- Native INFO/DEBUG log writes are buffered and flushed at most every 500 ms; WARN/ERROR still flush immediately. Fixed native handle destruction logging to capture its address before delete.
+- Corrected README documentation for the opt-in Vulkan profiler and the private SAF import/recovery path.
+
+
+### Fixed
 - Replaced the stale remembered-model GPU-layer fallback of 37 with the explicit full-offload request value 99.
 - Native CPU thread fallback now uses the performance-core frequency policy; Vulkan offload caps host and batch submission pools to 1–2 threads.
 - Added explicit NEON, DOTPROD, I8MM and FP16 runtime-feature diagnostics. Pinned llama.cpp's CPU-only abort-callback limitation is logged for Vulkan rather than implying cooperative Vulkan abort.
