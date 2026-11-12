@@ -6,6 +6,9 @@ plugins {
 val localLlmVulkanPerfProfiler = providers.gradleProperty("localLlmVulkanPerfProfiler")
     .map { it.equals("true", ignoreCase = true) }
     .getOrElse(false)
+val localLlmReleaseTextDiagnostics = providers.gradleProperty("localLlmReleaseTextDiagnostics")
+    .map { it.equals("true", ignoreCase = true) }
+    .getOrElse(false)
 
 android {
     namespace = "com.mydocanizer.llm.engine"
@@ -15,17 +18,25 @@ android {
     buildTypes {
         getByName("debug") {
             buildConfigField("boolean", "VULKAN_PERF_PROFILER_ENABLED", localLlmVulkanPerfProfiler.toString())
+            buildConfigField("boolean", "TEXT_DIAGNOSTICS_ENABLED", "true")
             externalNativeBuild {
                 cmake {
-                    arguments += listOf("-DLOCAL_LLM_ENABLE_TEST_HOOKS=ON")
+                    arguments += listOf(
+                        "-DLOCAL_LLM_ENABLE_TEST_HOOKS=ON",
+                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=ON"
+                    )
                 }
             }
         }
         getByName("release") {
             buildConfigField("boolean", "VULKAN_PERF_PROFILER_ENABLED", "false")
+            buildConfigField("boolean", "TEXT_DIAGNOSTICS_ENABLED", localLlmReleaseTextDiagnostics.toString())
             externalNativeBuild {
                 cmake {
-                    arguments += listOf("-DLOCAL_LLM_ENABLE_TEST_HOOKS=OFF")
+                    arguments += listOf(
+                        "-DLOCAL_LLM_ENABLE_TEST_HOOKS=OFF",
+                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=" + localLlmReleaseTextDiagnostics.toString().uppercase()
+                    )
                 }
             }
         }
