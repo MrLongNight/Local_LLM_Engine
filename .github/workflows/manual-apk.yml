@@ -27,6 +27,11 @@ on:
         options:
           - debug
         default: debug
+      enable_vulkan_perf_profiler:
+        description: "Separate diagnostic APK with Vulkan operator timestamps (not for throughput benchmarks)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -181,7 +186,34 @@ jobs:
           ls -lh "$MODEL_PATH"
 
       - name: Build APK and process-isolation test APK
-        run: gradle --no-daemon :app:assembleDebug :llm-engine:assembleDebugAndroidTest
+        shell: bash
+        env:
+          ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
+        run: |
+          set -euo pipefail
+          gradle_args=()
+          if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
+            echo "Building separate Vulkan per-operation profiler APK."
+            gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
+          else
+            echo "Building profiler-disabled APK for normal use and throughput comparisons."
+          fi
+          gradle --no-daemon "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
+
+      - name: Verify explicit profiler BuildConfig selection
+        shell: bash
+        env:
+          ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
+        run: |
+          set -euo pipefail
+          expected=false
+          if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
+            expected=true
+          fi
+          build_config="$(find llm-engine/build/generated -type f -name BuildConfig.java -print -quit)"
+          test -n "$build_config"
+          grep -Eq "VULKAN_PERF_PROFILER_ENABLED[[:space:]]*=[[:space:]]*${expected};" "$build_config"
+          echo "Verified VULKAN_PERF_PROFILER_ENABLED=${expected} in ${build_config}"
 
       - name: Verify instrumentation test APK exists
         shell: bash

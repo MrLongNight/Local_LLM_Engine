@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- The Android APK workflow exposes the Vulkan per-operation profiler as an explicit manual boolean input and verifies the generated Debug BuildConfig value; normal push builds keep it disabled.
+
+
 ### Added
 - Added a separate Debug-only opt-in for Vulkan per-operation profiling via `-PlocalLlmVulkanPerfProfiler=true`; normal builds remain profiler-free and Release forcibly disables it.
 - Added an explicit logger diagnostic recording whether the profiler opt-in is active.

@@ -100,7 +100,10 @@ The property defaults to `false`; Release builds forcibly keep it disabled.
 The library passes this build-time opt-in to JNI, which sets
 `GGML_VK_PERF_LOGGER` before `llama_backend_init()`. The generated profiler
 rows are retained in the native diagnostics export. Build a separate
-profiler-disabled APK for every throughput comparison. The Android Vulkan compatibility overlay routes
+profiler-disabled APK for every throughput comparison. The GitHub Actions
+workflow also exposes this as an explicit boolean input when started with
+“Run workflow”.
+The Android Vulkan compatibility overlay routes
 each profiler result through the native ggml logger instead of `std::cerr`,
 so explicitly enabled diagnostic rows are retained in the process-specific
 native diagnostics file and included in the compact export. Each row contains the
