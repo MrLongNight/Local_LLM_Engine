@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file.
 ### Verified
 - 12.11.2026, commit `528e1d3` (APK run `#264`, unit-test run `#344`): Android Debug APK CI passed, including the 7/7 Android-36 x86_64 process-isolation instrumentation tests, native Vulkan/graph-overlay checks, APK manifest validation and explicit profiler-disabled BuildConfig assertion. Unit tests, native host prompt-cache/truncation tests and pre-commit checks also passed.
 - Documentation-only follow-up commit `d5fdb1b` also passed unit-test run `#346`. The unit-test push trigger is now path-filtered so prose-only commits do not rerun Android builds; pull requests remain fully checked.
+- The path-filtered unit-test workflow itself passed run `#347` (commit `fc1d3fc`), including the SDK setup and host-side native prompt-cache/truncation tests.
 - Retrieved and inspected the uploaded ARM64-v8a/x86_64 Debug APK (79,063,814 bytes; SHA-256 `55166f9bb1c17f4f39ff9f01240098f8d0bde49d78d86eefb69c4e7646442c5e`). This CI artifact is a profiler-disabled Debug APK, not a release build; target-device Mali-G57 acceptance remains open.
 
 

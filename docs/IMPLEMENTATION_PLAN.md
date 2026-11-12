@@ -11,7 +11,7 @@
 - **pre-commit.ci:** Status `success` auf diesem Commit.
 - **Profiler-BuildConfig:** Push-Build explizit mit `VULKAN_PERF_PROFILER_ENABLED=false` verifiziert. Ein separater Diagnosebuild kann über `workflow_dispatch` mit `enable_vulkan_perf_profiler=true` erstellt werden; Release erzwingt weiterhin `false`.
 - **Dokumentations-Folgecommit:** Der reine Dokumentationscommit `d5fdb1b` wurde mit Unit-Test-Run `#346` ebenfalls erfolgreich geprüft. Zwischen dem verifizierten Engine-Commit `528e1d3` und `d5fdb1b` wurden keine App-/Engine-Quellen geändert. Die Push-Trigger laufen deshalb künftig nur bei relevanten Quell-/Buildänderungen; Pull Requests bleiben vollständig getestet.
-- **Workflow-Änderung:** Commit `fc1d3fc` grenzt den Unit-Test-Push-Trigger auf App-/Engine-Quellen, Build-Konfiguration und Workflows ein. Reine README-/Dokumentationsänderungen lösen keine Android-Testjobs mehr aus. Der erste Lauf nach der Workflowänderung ist Run `#347`.
+- **Workflow-Änderung:** Commit `fc1d3fc` grenzt den Unit-Test-Push-Trigger auf App-/Engine-Quellen, Build-Konfiguration und Workflows ein. Reine README-/Dokumentationsänderungen lösen keine Android-Testjobs mehr aus. Verifikation: Unit-Test-Run `#347` / `43243673895` auf Commit `fc1d3fc` vollständig erfolgreich; SDK-Setup, App-/Engine-Unit-Tests, native Host-Tests und Report-Upload abgeschlossen.
 
 ## Verifiziertes APK-Artefakt
 
