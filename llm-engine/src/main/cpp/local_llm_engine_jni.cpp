@@ -42,6 +42,8 @@ extern "C" int local_llm_get_graph_splits(struct llama_context* context);
 static std::mutex g_native_log_file_mutex;
 static FILE* g_native_log_file = nullptr;
 static constexpr long MAX_NATIVE_LOG_FILE_BYTES = 2L * 1024L * 1024L;
+static auto g_last_native_log_flush = std::chrono::steady_clock::now();
+static constexpr auto NATIVE_LOG_FLUSH_INTERVAL = std::chrono::milliseconds(500);
 
 // This process-wide override is consumed by the generated ggml-vulkan.cpp overlay.
 // 0=AUTO, 1=SUBGROUP, 2=LARGE, 3=Q4_K base, 4=Q5_K base,
@@ -178,8 +180,8 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
         static_cast<long long>(millis)
     );
 
-    // Prefix every native log line with a sortable timestamp; flush immediately so
-    // useful diagnostics survive a driver abort or process-level crash.
+    // Prefix every native log line with a sortable timestamp. Flush WARN/ERROR
+    // immediately; batch INFO/DEBUG persistence on a bounded 500 ms interval.
     const char* cursor = text;
     while (*cursor != '\0') {
         const char* line_end = std::strchr(cursor, '\n');
@@ -207,7 +209,13 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
         if (line_end == nullptr) break;
         cursor = line_end + 1;
     }
-    std::fflush(g_native_log_file);
+    const auto steady_now = std::chrono::steady_clock::now();
+    const bool urgent_level =
+        level == GGML_LOG_LEVEL_WARN || level == GGML_LOG_LEVEL_ERROR;
+    if (urgent_level || steady_now - g_last_native_log_flush >= NATIVE_LOG_FLUSH_INTERVAL) {
+        std::fflush(g_native_log_file);
+        g_last_native_log_flush = steady_now;
+    }
 }
 
 // Persist compact inference timings through the same native log stream consumed by
@@ -664,9 +672,13 @@ static bool append_token_to_batch(
 
 static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, llama_pos start_pos, bool want_last_logit, PromptEvalProgressContext* progress_context) {
     if (!engine || !engine->context) return -1;
-    for (int i = 0; i < (int)tokens.size(); i += engine->batch_size) {
+    // n_ubatch is the actual decode/progress/cancellation quantum. Calling
+    // llama_decode once with n_batch would hide intermediate Vulkan progress and
+    // defer cooperative cancellation until the whole n_batch had completed.
+    const int prompt_chunk_size = std::clamp(engine->micro_batch_size, 1, engine->batch_size);
+    for (int i = 0; i < (int)tokens.size(); i += prompt_chunk_size) {
         if (engine->cancel_requested.load()) return -2;
-        const int cur_batch_size = std::min((int)tokens.size() - i, engine->batch_size);
+        const int cur_batch_size = std::min((int)tokens.size() - i, prompt_chunk_size);
         engine->batch.n_tokens = 0;
 
         if (start_pos + i + cur_batch_size > engine->context_size - OVERFLOW_HEADROOM) {
@@ -1840,9 +1852,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeDestroyEngine(
         jlong handle) {
     auto* engine = fromHandle(handle);
     if (engine) {
+        void* destroyed_handle_address = static_cast<void*>(engine);
         engine->unload();
         delete engine;
-        LOGI("Destroyed handle %p", engine);
+        LOGI("Destroyed handle %p", destroyed_handle_address);
     }
 }
 

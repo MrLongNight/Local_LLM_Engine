@@ -449,18 +449,35 @@ internal class LocalLlmEngineImpl(
             return@callbackFlow
         }
 
+        // Publish the active flag before the final cancellation check. If the
+        // collector closes just before this point, invokeOnClose has already closed
+        // the channel; ensureActive then aborts. If it closes after this point,
+        // invokeOnClose sees nativeWorkActive=true and signals nativeCancel().
         nativeWorkActive.set(true)
-        val processRes = NativeEngineHandle.nativeProcessChat(
-            handle = handle,
-            inferenceRunId = inferenceRunId,
-            roles = roles,
-            contents = contents,
-            maxPredict = request.maxPredictTokens,
-            temperature = request.temperature ?: Float.NaN,
-            topP = request.topP ?: Float.NaN,
-            enableThinking = request.enableThinking,
-            progressCallback = progressCallback
-        )
+        val processRes = try {
+            currentCoroutineContext().ensureActive()
+            if (isCancelled.get()) {
+                6 // dedicated cancellation result; native inference never starts
+            } else {
+                NativeEngineHandle.nativeProcessChat(
+                    handle = handle,
+                    inferenceRunId = inferenceRunId,
+                    roles = roles,
+                    contents = contents,
+                    maxPredict = request.maxPredictTokens,
+                    temperature = request.temperature ?: Float.NaN,
+                    topP = request.topP ?: Float.NaN,
+                    enableThinking = request.enableThinking,
+                    progressCallback = progressCallback
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            nativeWorkActive.set(false)
+            throw cancelled
+        } catch (error: Throwable) {
+            nativeWorkActive.set(false)
+            throw error
+        }
 
         if (processRes == 6 || isCancelled.get()) {
             nativeWorkActive.set(false)
