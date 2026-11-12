@@ -306,28 +306,51 @@ jobs:
                       )
 
               if abi == "arm64-v8a":
-                  graph_context_sources = [
-                      e for e in entries
-                      if os.path.basename(e.get("file", "")) == "llama-context.cpp"
-                  ]
-                  if not graph_context_sources:
-                      raise SystemExit(
-                          "arm64-v8a: patched llama-context.cpp graph distribution source is missing from compile_commands.json"
-                      )
-                  for entry in graph_context_sources:
+                  # CMake may compile the generated source as an independent TU or
+                  # include it in a generated UNITY_BUILD TU (depending on generator/
+                  # CMake version). Verify the actual compile database either way.
+                  graph_context_sources = []
+                  compiled_graph_overlays = []
+                  for entry in entries:
                       source_file = entry.get("file", "")
                       if not os.path.isabs(source_file):
                           source_file = os.path.join(entry.get("directory", "."), source_file)
+                      if not os.path.isfile(source_file):
+                          continue
                       with open(source_file, encoding="utf-8") as stream:
-                          compiled_context_source = stream.read()
-                      if "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" not in compiled_context_source or "ggml_backend_sched_get_tensor_backend" not in compiled_context_source:
-                          raise SystemExit(
-                              f"arm64-v8a compiled llama-context.cpp {source_file} "
-                              "does not contain CPU/Vulkan graph backend diagnostics"
-                          )
+                          compiled_source = stream.read()
+                      if (
+                          os.path.basename(source_file) == "llama-context.cpp"
+                          and "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" in compiled_source
+                          and "ggml_backend_sched_get_tensor_backend" in compiled_source
+                      ):
+                          graph_context_sources.append(source_file)
+                          compiled_graph_overlays.append(source_file)
+                          continue
+                      # In Unity mode the compiled TU contains an include of the
+                      # generated overlay rather than its source text. Record that
+                      # exact include and verify the referenced generated file below.
+                      if "local-android-llama/llama-context.cpp" in compiled_source:
+                          graph_context_sources.append(source_file)
+                          for candidate in glob.glob(
+                              "llm-engine/.cxx/**/local-android-llama/llama-context.cpp",
+                              recursive=True,
+                          ):
+                              with open(candidate, encoding="utf-8") as overlay_stream:
+                                  overlay_source = overlay_stream.read()
+                              if (
+                                  "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" in overlay_source
+                                  and "ggml_backend_sched_get_tensor_backend" in overlay_source
+                              ):
+                                  compiled_graph_overlays.append(candidate)
+                  if not graph_context_sources or not compiled_graph_overlays:
+                      raise SystemExit(
+                          "arm64-v8a: generated llama-context.cpp graph diagnostics overlay "
+                          "is not present in any compiled translation unit from compile_commands.json"
+                      )
                   print(
                       "arm64-v8a: verified per-run CPU/Vulkan graph-node assignment diagnostics "
-                      "are in the compiled llama-context.cpp source."
+                      "are compiled (direct source or generated Unity translation unit)."
                   )
 
                   kleidiai_sources = [
