@@ -718,10 +718,30 @@ static int decode_tokens(EngineInstance* engine, const llama_tokens& tokens, lla
 
 extern "C" {
 
+// No C++ exception may escape an exported JNI boundary. Throw a Java
+// exception instead so the existing Kotlin Result/Flow error handling can
+// report the failure without terminating the VM through an uncaught C++ throw.
+static void local_llm_report_jni_exception(
+        JNIEnv* env,
+        const char* function_name,
+        const char* message) noexcept {
+    if (env == nullptr || env->ExceptionCheck()) return;
+    LOGE("JNI boundary caught C++ exception in %s: %s",
+         function_name != nullptr ? function_name : "unknown",
+         message != nullptr ? message : "unknown C++ exception");
+    jclass exception_class = env->FindClass("java/lang/IllegalStateException");
+    if (exception_class == nullptr) return;
+    env->ThrowNew(
+        exception_class,
+        message != nullptr ? message : "Native engine raised an unknown C++ exception");
+    env->DeleteLocalRef(exception_class);
+}
+
+
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetDiagnosticsLogFile(
-        JNIEnv* env, jclass /*clazz*/, jstring jpath) {
+        JNIEnv* env, jclass /*clazz*/, jstring jpath) try {
     if (jpath == nullptr) return;
     const char* path = env->GetStringUTFChars(jpath, nullptr);
     if (path == nullptr) return;
@@ -745,13 +765,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetDiagnostics
     } else {
         LOGE("Could not open native diagnostics file; native messages remain available in logcat");
     }
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeSetDiagnosticsLogFile", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeSetDiagnosticsLogFile", "unknown C++ exception");
+    return;
 }
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jboolean enable_vulkan_perf_profiler) {
+        jboolean enable_vulkan_perf_profiler) try {
     const bool profiler_requested = enable_vulkan_perf_profiler == JNI_TRUE;
     if (profiler_requested) {
         // llama.cpp reads these variables during Vulkan backend discovery.
@@ -784,16 +810,28 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(
 #endif
     llama_backend_init();
     LOGI("llama_backend_init completed");
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeInitBackend", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeInitBackend", "unknown C++ exception");
+    return;
 }
 
 JNIEXPORT void JNICALL
-Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeShutdownBackend(JNIEnv* /*env*/, jclass /*clazz*/) {
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeShutdownBackend(JNIEnv* env, jclass /*clazz*/) try {
     llama_backend_free();
     LOGI("llama_backend_free completed");
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeShutdownBackend", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeShutdownBackend", "unknown C++ exception");
+    return;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetSystemInfo(JNIEnv* env, jclass /*clazz*/) {
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetSystemInfo(JNIEnv* env, jclass /*clazz*/) try {
     const char* sys_info = llama_print_system_info();
     std::ostringstream details;
     details << (sys_info ? sys_info : "N/A")
@@ -805,11 +843,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetSystemInfo(
             << ",recommendedPerformanceCores=" << recommended_performance_core_count();
     log_native_info_message(details.str());
     return env->NewStringUTF(details.str().c_str());
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetSystemInfo", error.what());
+    return nullptr;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetSystemInfo", "unknown C++ exception");
+    return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetBackendDiagnostics(
-        JNIEnv* env, jclass /*clazz*/) {
+        JNIEnv* env, jclass /*clazz*/) try {
     try {
         const std::string diagnostics = collectBackendDiagnostics();
         return env->NewStringUTF(diagnostics.c_str());
@@ -819,13 +863,25 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetBackendDiag
     } catch (...) {
         return env->NewStringUTF("backendDiagnosticsException=unknown");
     }
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetBackendDiagnostics", error.what());
+    return nullptr;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetBackendDiagnostics", "unknown C++ exception");
+    return nullptr;
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeCreateEngine(JNIEnv* /*env*/, jclass /*clazz*/) {
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeCreateEngine(JNIEnv* env, jclass /*clazz*/) try {
     auto* engine = new EngineInstance();
     LOGI("Created controlled EngineInstance handle: %p", engine);
     return reinterpret_cast<jlong>(engine);
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeCreateEngine", error.what());
+    return 0;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeCreateEngine", "unknown C++ exception");
+    return 0;
 }
 
 JNIEXPORT jint JNICALL
@@ -848,7 +904,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jint micro_batch_size,
         jint flash_attention_mode,
         jint vulkan_dmmv_workgroup,
-        jobject progress_listener) {
+        jobject progress_listener) try {
     auto* engine = fromHandle(handle);
     if (!engine) return 1;
 
@@ -1194,13 +1250,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
          ctx_size, b_size, resolved_micro_batch, n_threads, resolved_batch_threads,
          engine->active_backend.c_str());
     return 0;
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeLoadModel", error.what());
+    return 103;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeLoadModel", "unknown C++ exception");
+    return 103;
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptMetrics(
         JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (!engine) return env->NewStringUTF("");
     std::ostringstream ss;
@@ -1217,23 +1279,35 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptM
        << ";graphSplits=" << local_llm_get_graph_splits(engine->context)
        << ";backend=" << engine->active_backend;
     return env->NewStringUTF(ss.str().c_str());
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetLastPromptMetrics", error.what());
+    return nullptr;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetLastPromptMetrics", "unknown C++ exception");
+    return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetActiveBackend(
         JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (!engine) return env->NewStringUTF("None");
     return env->NewStringUTF(engine->active_backend.c_str());
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetActiveBackend", error.what());
+    return nullptr;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetActiveBackend", "unknown C++ exception");
+    return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelMetadata(
         JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (!engine || !engine->model) return env->NewStringUTF("");
 
@@ -1246,6 +1320,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelMetada
     std::ostringstream ss;
     ss << desc << ";" << n_params << ";" << n_ctx_train << ";" << size_bytes << ";" << engine->active_backend;
     return env->NewStringUTF(ss.str().c_str());
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetModelMetadata", error.what());
+    return nullptr;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetModelMetadata", "unknown C++ exception");
+    return nullptr;
 }
 
 JNIEXPORT jint JNICALL
@@ -1260,7 +1340,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         jfloat request_temperature,
         jfloat request_top_p,
         jboolean enable_thinking,
-        jobject progress_listener) {
+        jobject progress_listener) try {
     auto* engine = fromHandle(handle);
 #if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
     if (engine && engine->block_next_inference_for_test.exchange(false)) {
@@ -1610,13 +1690,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     engine->inference_start_us = llama_time_us();
 
     return 0;
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeProcessChat", error.what());
+    return 9;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeProcessChat", "unknown C++ exception");
+    return 9;
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextToken(
         JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (!engine) return nullptr;
 
@@ -1754,102 +1840,162 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     engine->assistant_ss << valid_output;
     return new_java_string_from_utf8(env, valid_output);
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGenerateNextToken", error.what());
+    return nullptr;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGenerateNextToken", "unknown C++ exception");
+    return nullptr;
 }
 
 JNIEXPORT jint JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastFinishReason(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     return engine ? engine->last_finish_reason : 3;
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetLastFinishReason", error.what());
+    return 3;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetLastFinishReason", "unknown C++ exception");
+    return 3;
 }
 
 JNIEXPORT jlong JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetInferenceDurationUs(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (!engine || engine->inference_start_us == 0) return 0;
     return llama_time_us() - engine->inference_start_us;
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetInferenceDurationUs", error.what());
+    return 0;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetInferenceDurationUs", "unknown C++ exception");
+    return 0;
 }
 
 JNIEXPORT jint JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetTokensGenerated(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     return engine ? engine->tokens_generated : 0;
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetTokensGenerated", error.what());
+    return 0;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetTokensGenerated", "unknown C++ exception");
+    return 0;
 }
 
 #if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeArmBlockNextInferenceForTest(
-        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
+        JNIEnv* env, jclass /*clazz*/, jlong handle) try {
     auto* engine = fromHandle(handle);
     if (!engine) return;
     engine->native_inference_block_entered_for_test.store(false);
     engine->block_next_inference_for_test.store(true);
     LOGW("DEBUG_TEST_HOOK: next nativeProcessChat will block (pid=%d)", getpid());
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeArmBlockNextInferenceForTest", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeArmBlockNextInferenceForTest", "unknown C++ exception");
+    return;
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeIsBlockNextInferenceArmedForTest(
-        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
+        JNIEnv* env, jclass /*clazz*/, jlong handle) try {
     auto* engine = fromHandle(handle);
     return engine && engine->block_next_inference_for_test.load() ? JNI_TRUE : JNI_FALSE;
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeIsBlockNextInferenceArmedForTest", error.what());
+    return JNI_FALSE;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeIsBlockNextInferenceArmedForTest", "unknown C++ exception");
+    return JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeIsNativeInferenceBlockEnteredForTest(
-        JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
+        JNIEnv* env, jclass /*clazz*/, jlong handle) try {
     auto* engine = fromHandle(handle);
     return engine && engine->native_inference_block_entered_for_test.load() ? JNI_TRUE : JNI_FALSE;
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeIsNativeInferenceBlockEnteredForTest", error.what());
+    return JNI_FALSE;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeIsNativeInferenceBlockEnteredForTest", "unknown C++ exception");
+    return JNI_FALSE;
 }
 #endif
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeResetCancellation(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (engine) {
         engine->cancel_requested.store(false);
     }
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeResetCancellation", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeResetCancellation", "unknown C++ exception");
+    return;
 }
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeCancel(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (engine) {
         engine->cancel_requested.store(true);
         LOGI("Native cancellation signal sent to handle %p", engine);
     }
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeCancel", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeCancel", "unknown C++ exception");
+    return;
 }
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeUnloadModel(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (engine) {
         engine->unload();
         LOGI("Model unloaded from handle %p", engine);
     }
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeUnloadModel", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeUnloadModel", "unknown C++ exception");
+    return;
 }
 
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeDestroyEngine(
-        JNIEnv* /*env*/,
+        JNIEnv* env,
         jclass /*clazz*/,
-        jlong handle) {
+        jlong handle) try {
     auto* engine = fromHandle(handle);
     if (engine) {
         void* destroyed_handle_address = static_cast<void*>(engine);
@@ -1857,6 +2003,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeDestroyEngine(
         delete engine;
         LOGI("Destroyed handle %p", destroyed_handle_address);
     }
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeDestroyEngine", error.what());
+    return;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeDestroyEngine", "unknown C++ exception");
+    return;
 }
 
 } // extern "C"
