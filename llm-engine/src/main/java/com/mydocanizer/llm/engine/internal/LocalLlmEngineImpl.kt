@@ -31,7 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -341,7 +341,7 @@ internal class LocalLlmEngineImpl(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = callbackFlow {
+    override fun streamChat(request: InferenceRequest): Flow<InferenceEvent> = channelFlow {
         val inferenceRunId = UUID.randomUUID().toString()
         val handle = getValidHandle()
 
@@ -377,7 +377,7 @@ internal class LocalLlmEngineImpl(
             trySend(InferenceEvent.Cancelled("", 0))
             _state.value = EngineState.ModelLoaded(modelInfo)
             isCancelled.set(false)
-            return@callbackFlow
+            return@channelFlow
         }
 
         // Token events must never be dropped when the UI/Binder collector is slower
@@ -385,6 +385,11 @@ internal class LocalLlmEngineImpl(
         // latest pending progress sample is forwarded while native prefill is busy.
         val progressEvents = Channel<InferenceEvent.Progress>(Channel.CONFLATED)
         val nativeWorkActive = AtomicBoolean(false)
+        // This producer performs native work itself and closes its channel in finally.
+        // It is intentionally channelFlow (not callbackFlow): callbackFlow is reserved
+        // for externally registered callbacks whose lifetime is paired with awaitClose.
+        // invokeOnClose remains the cancellation hook so an external collector aborts
+        // a native prefill/decode that is currently executing on llamaDispatcher.
         channel.invokeOnClose {
             progressEvents.close()
             if (nativeWorkActive.get()) {
@@ -450,7 +455,7 @@ internal class LocalLlmEngineImpl(
             trySend(InferenceEvent.Cancelled("", 0))
             _state.value = EngineState.ModelLoaded(modelInfo)
             isCancelled.set(false)
-            return@callbackFlow
+            return@channelFlow
         }
 
         // Publish the active flag before the final cancellation check. If the
@@ -495,7 +500,7 @@ internal class LocalLlmEngineImpl(
             trySend(InferenceEvent.Cancelled("", cancelledTokens))
             _state.value = EngineState.ModelLoaded(modelInfo)
             close()
-            return@callbackFlow
+            return@channelFlow
         }
 
         if (processRes != 0) {
@@ -515,7 +520,7 @@ internal class LocalLlmEngineImpl(
             trySend(InferenceEvent.Error(err))
             _state.value = EngineState.ModelLoaded(modelInfo)
             close()
-            return@callbackFlow
+            return@channelFlow
         }
 
         val prefillDurationMs = (System.nanoTime() - requestStartNano) / 1_000_000L
