@@ -225,7 +225,8 @@ object EngineDiagnostics {
         val nativePssMb: Double?,
         val nativeHeapMb: Double?,
         val javaHeapMb: Double?,
-        val availableRamMb: Double?
+        val availableRamMb: Double?,
+        val thermalStatus: String?
     )
 
     private const val MAX_EXPORT_BYTES = 32 * 1024
@@ -244,6 +245,17 @@ object EngineDiagnostics {
         return line.substring(valueStart, minOf(comma, brace)).takeIf { it.isNotBlank() }
     }
 
+    private fun thermalRank(status: String): Int = when (status.uppercase(Locale.US)) {
+        "NONE" -> 0
+        "LIGHT" -> 1
+        "MODERATE" -> 2
+        "SEVERE" -> 3
+        "CRITICAL" -> 4
+        "EMERGENCY" -> 5
+        "SHUTDOWN" -> 6
+        else -> -1
+    }
+
     private fun resourceSample(line: String): ResourceSample? {
         if (!line.contains("RESOURCE_SNAPSHOT")) return null
         return ResourceSample(
@@ -255,7 +267,8 @@ object EngineDiagnostics {
             nativePssMb = field(line, "nativePssMb")?.toDoubleOrNull(),
             nativeHeapMb = field(line, "nativeHeapAllocatedMb")?.toDoubleOrNull(),
             javaHeapMb = field(line, "javaHeapUsedMb")?.toDoubleOrNull(),
-            availableRamMb = field(line, "systemAvailableRamMb")?.toDoubleOrNull()
+            availableRamMb = field(line, "systemAvailableRamMb")?.toDoubleOrNull(),
+            thermalStatus = field(line, "thermalStatus")?.takeIf { thermalRank(it) >= 0 }
         )
     }
 
@@ -580,6 +593,8 @@ object EngineDiagnostics {
                     entries.mapNotNull(selector).maxOrNull()?.let { String.format(Locale.US, "%.1f", it) } ?: "n/a"
                 val minimumAvailable = entries.mapNotNull { it.availableRamMb }.minOrNull()
                     ?.let { String.format(Locale.US, "%.1f", it) } ?: "n/a"
+                val thermalStates = entries.mapNotNull { it.thermalStatus }.distinct()
+                val thermalPeak = thermalStates.maxByOrNull(::thermalRank) ?: "n/a"
                 val last = entries.lastOrNull()
                 val model = last?.let { field(it.line, "model") }
                 val context = last?.let { field(it.line, "contextTokens") }
@@ -589,6 +604,7 @@ object EngineDiagnostics {
                 "$group n=${entries.size} PSS_peak=${peak { it.pssMb }}MB " +
                     "nativePSS_peak=${peak { it.nativePssMb }}MB nativeHeap_peak=${peak { it.nativeHeapMb }}MB " +
                     "javaHeap_peak=${peak { it.javaHeapMb }}MB availableRAM_min=${minimumAvailable}MB " +
+                    "thermal_peak=$thermalPeak thermal_states=${thermalStates.joinToString("/")}" +
                     listOfNotNull(model?.let { "model=$it" }, context?.let { "ctx=$it" },
                         batch?.let { "batch=$it" }, microBatch?.let { "ubatch=$it" },
                         layers?.let { "gpuLayers=$it" }).joinToString(" ")
@@ -618,6 +634,7 @@ object EngineDiagnostics {
                     "pss=${sample.pssMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     "nativeHeap=${sample.nativeHeapMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     "availRAM=${sample.availableRamMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
+                    sample.thermalStatus?.let { "thermal=$it" },
                     field(sample.line, "contextTokens")?.let { "ctx=$it" },
                     field(sample.line, "microBatchSize")?.let { "ubatch=$it" },
                     field(sample.line, "gpuLayersRequested")?.let { "gpuLayers=$it" },

@@ -257,6 +257,29 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun thermalPeakAndObservedStatesAreReportedPerInferenceRun() {
+        val first =
+            "2026-11-12 04:00:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=701,phase=INFERENCE_run-thermal-1,processPssMb=900.0,nativePssMb=500.0," +
+                "nativeHeapAllocatedMb=420.0,javaHeapUsedMb=80.0,systemAvailableRamMb=1200.0," +
+                "thermalStatus=LIGHT,thermalStatusCode=1,microBatchSize=64"
+        val second =
+            "2026-11-12 04:00:01.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=701,phase=INFERENCE_run-thermal-1,processPssMb=1100.0,nativePssMb=650.0," +
+                "nativeHeapAllocatedMb=520.0,javaHeapUsedMb=90.0,systemAvailableRamMb=900.0," +
+                "thermalStatus=SEVERE,thermalStatusCode=3,microBatchSize=64"
+
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(first, second))
+
+        assertTrue(report.contains("701/INFERENCE_run-thermal-1"))
+        assertTrue(report.contains("PSS_peak=1100.0MB"))
+        assertTrue(report.contains("availableRAM_min=900.0MB"))
+        assertTrue(report.contains("thermal_peak=SEVERE"))
+        assertTrue(report.contains("thermal_states=LIGHT/SEVERE"))
+        assertTrue(report.contains("thermal=SEVERE"))
+    }
+
+    @Test
     fun ramSummaryIsPlacedBeforeVerboseTokenMetricsWhenExportMustBeTruncated() {
         val ramSample =
             "2026-11-10 16:00:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
