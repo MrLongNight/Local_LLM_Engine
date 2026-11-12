@@ -69,17 +69,26 @@ class BackendBenchmarkPlanTest {
     }
 
     @Test
-    fun fullMatrixCoversBackendDecodeMicroBatchAndFlashAttentionAxes() {
-        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(EngineConfig(batchSize = 128, threads = 6))
-        assertEquals(18, profiles.size)
-        assertEquals(18, profiles.map { it.id }.distinct().size)
-        assertEquals(12, profiles.count { it.backend == BackendPreference.VULKAN })
+    fun fullMatrixCoversWorkgroupsAndQ4KSpecificPathsForMatchingModel() {
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(
+            EngineConfig(batchSize = 128, threads = 6),
+            "Qwen3.5-4B-Q4_K_M.gguf"
+        )
+        assertEquals(36, profiles.size)
+        assertEquals(36, profiles.map { it.id }.distinct().size)
+        assertEquals(30, profiles.count { it.backend == BackendPreference.VULKAN })
         assertEquals(6, profiles.count { it.backend == BackendPreference.CPU })
         assertEquals(setOf(32, 64, 128), profiles.map { it.microBatchSize }.toSet())
+        assertTrue(profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.SUBGROUP })
+        assertTrue(profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.LARGE })
         assertTrue(profiles.any {
-            it.backend == BackendPreference.VULKAN &&
-                it.decodePath == VulkanMatvecWorkgroup.Q4K_BASE_DMMV &&
+            it.kernelProfile == VulkanMatvecWorkgroup.Q4K_BASE_DMMV &&
                 it.flashAttention == FlashAttentionMode.ENABLED
+        })
+        assertTrue(profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.Q4K_PREFILL_F16 })
+        assertTrue(profiles.none {
+            it.kernelProfile == VulkanMatvecWorkgroup.Q5K_BASE_DMMV ||
+                it.kernelProfile == VulkanMatvecWorkgroup.Q6K_BASE_DMMV
         })
         assertTrue(profiles.filter { it.backend == BackendPreference.VULKAN }.all {
             it.config.gpuLayers == 99 &&
@@ -88,8 +97,21 @@ class BackendBenchmarkPlanTest {
         })
         assertTrue(profiles.filter { it.backend == BackendPreference.CPU }.all {
             it.config.gpuLayers == 0 &&
-                it.decodePath == VulkanMatvecWorkgroup.AUTO
+                it.kernelProfile == VulkanMatvecWorkgroup.AUTO
         })
+    }
+
+    @Test
+    fun fullMatrixIncludesQuantizationSpecificQ5AndQ6PathsOnlyWhenRelevant() {
+        val config = EngineConfig(batchSize = 128)
+        val q5Profiles = BackendBenchmarkPlan.fullMatrixProfiles(config, "Qwen3.5-4B-Q5_K_M.gguf")
+        val q6Profiles = BackendBenchmarkPlan.fullMatrixProfiles(config, "Qwen3.5-4B-Q6_K.gguf")
+        assertEquals(30, q5Profiles.size)
+        assertEquals(30, q6Profiles.size)
+        assertTrue(q5Profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.Q5K_BASE_DMMV })
+        assertTrue(q6Profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.Q6K_BASE_DMMV })
+        assertTrue(q5Profiles.none { it.kernelProfile == VulkanMatvecWorkgroup.Q6K_BASE_DMMV })
+        assertTrue(q6Profiles.none { it.kernelProfile == VulkanMatvecWorkgroup.Q5K_BASE_DMMV })
     }
 
     @Test

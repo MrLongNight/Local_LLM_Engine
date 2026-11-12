@@ -15,8 +15,9 @@ All notable changes to this project are documented in this file.
 - CI verifies that the arm64 KleidiAI runtime-dispatch translation unit is compiled with GGML_USE_CPU_KLEIDIAI; upstream KleidiAI performs runtime HWCAP feature selection for DOTPROD/I8MM with compatible NEON fallbacks.
 
 ### Added
-- Added an executable 18-profile device benchmark matrix covering Vulkan/CPU, AUTO/Q4_K base-DMMV, n_ubatch 32/64/128 and Flash Attention disabled/enabled. Each profile reloads the same GGUF, validates the selected backend, uses a fixed prompt and records model load, prefill, TTFT and decode metrics.
-- Compact diagnostics retain full-matrix result rows and corresponding run-correlated prompt metrics including graph splits; run-scoped RAM samples report Peak-PSS, minimum available RAM and thermal status.
+- Added an executable model-quantization-aware benchmark matrix covering Vulkan/CPU, AUTO/SUBGROUP/LARGE, matching Q4_K/Q5_K/Q6_K A/B profiles, n_ubatch 32/64/128 and Flash Attention disabled/enabled. Each profile reloads and validates the same GGUF and records model load, prefill, TTFT, decode speed and graph splits.
+- Appended graphSplits and diagnosticRunId to InferenceResult with backward-compatible Parcelable defaults. Each matrix row now joins directly to the matching INFERENCE_<runId> Peak-PSS, minimum available RAM and thermal summary.
+- Added a concrete Qwen3/Gemma 4 GGUF catalogue with HF repositories, filenames, published sizes, Gated DeltaNet flags and explicitly labelled ModelMemoryGuard estimates at ctx 2048.
 
 ### Fixed
 - Updated the app initialization test for the explicit 99-layer full-offload request (actual Vulkan offload remains determined by native backend diagnostics).

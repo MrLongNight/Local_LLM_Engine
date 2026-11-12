@@ -418,7 +418,13 @@ class InferenceService : Service() {
                                 }
                             }
                             is InferenceEvent.Completed -> {
-                                callback?.onCompleted(currentReqId, event.result)
+                                // The IPC request ID is also the resource-monitor phase suffix.
+                                // Carry it with the result so matrix rows can be joined to
+                                // INFERENCE_<runId> Peak-PSS/RAM/thermal summaries.
+                                callback?.onCompleted(
+                                    currentReqId,
+                                    event.result.copy(diagnosticRunId = currentReqId)
+                                )
                             }
                             is InferenceEvent.Cancelled -> {
                                 callback?.onCancelled(currentReqId, event.partialText, event.tokensGenerated)

@@ -365,14 +365,12 @@ object EngineDiagnostics {
                     event.startsWith("VULKAN_Q4K_PATH_SWEEP_")
             }
             .takeLast(12)
-        // Keep all matrix profile rows and their run-correlated prompt metrics. The latter
-        // include graphSplits and runId; resource samples are summarized separately by run.
+        // Keep every matrix profile row in the compact export. Each result carries
+        // graphSplits and diagnosticRunId; the RAM summary below joins that ID to the
+        // exact INFERENCE_<runId> Peak-PSS/available-RAM/thermal samples.
         val fullMatrixEvents = kotlinLines
             .filter { eventName(it).startsWith("FULL_MATRIX_") }
-            .takeLast(24)
-        val matrixPromptMetrics = kotlinLines
-            .filter { eventName(it) == "PROMPT_STAGE_METRICS" }
-            .takeLast(24)
+            .takeLast(48)
         val performanceEvents = (
             kotlinLines
                 .filterNot { it.contains("RESOURCE_SNAPSHOT") }
@@ -381,10 +379,9 @@ object EngineDiagnostics {
                     val event = eventName(it)
                     event.startsWith("VULKAN_DMMV_SWEEP_") ||
                         event.startsWith("VULKAN_Q4K_PATH_SWEEP_") ||
-                        event.startsWith("FULL_MATRIX_") ||
-                        event == "PROMPT_STAGE_METRICS"
+                        event.startsWith("FULL_MATRIX_")
                 }
-                .takeLast(12) + vulkanKernelSweepEvents + fullMatrixEvents + matrixPromptMetrics
+                .takeLast(12) + vulkanKernelSweepEvents + fullMatrixEvents
             )
             .distinct()
             .sorted()

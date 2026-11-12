@@ -499,6 +499,10 @@ internal class LocalLlmEngineImpl(
 
         val prefillDurationMs = (System.nanoTime() - requestStartNano) / 1_000_000L
         val promptMetrics = NativeEngineHandle.nativeGetLastPromptMetrics(handle)
+        val graphSplits = promptMetrics.split(';')
+            .firstOrNull { it.startsWith("graphSplits=") }
+            ?.substringAfter('=')
+            ?.toIntOrNull() ?: -1
         EngineDiagnostics.info(
             "inference",
             "PROMPT_STAGE_METRICS",
@@ -601,7 +605,8 @@ internal class LocalLlmEngineImpl(
                         tokensGenerated = actualTokens,
                         durationMs = durationMs,
                         tokensPerSecond = tokensPerSec,
-                        finishReason = finishReason
+                        finishReason = finishReason,
+                        graphSplits = graphSplits
                     )
                     trySend(InferenceEvent.Completed(result))
                 }

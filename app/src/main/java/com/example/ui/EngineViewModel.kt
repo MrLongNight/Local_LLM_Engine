@@ -442,7 +442,7 @@ class EngineViewModel(
         val source = if (model.path.startsWith("content://", ignoreCase = true)) {
             ModelSource.ContentUri(model.path, model.name)
         } else ModelSource.FilePath(model.path)
-        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(originalConfig)
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(originalConfig, model.name + " " + model.description)
         val benchmarkPrompt =
             "Gib die Zahlen 1 bis 48 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
 
@@ -459,7 +459,7 @@ class EngineViewModel(
                 "benchmark",
                 "FULL_MATRIX_STARTED",
                 "model=${model.name},modelBytes=${model.sizeBytes},profiles=${profiles.size}," +
-                    "backends=VULKAN,CPU,decodePaths=AUTO,Q4K_BASE_DMMV,nUbatch=32,64,128," +
+                    "backends=VULKAN,CPU,kernelProfiles=AUTO,SUBGROUP,LARGE,QUANTIZATION_MATCHED_AB_PATHS,nUbatch=32,64,128," +
                     "flashAttention=DISABLED,ENABLED,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
                     "batch=${originalConfig.batchSize},prompt=fixed_counting_sequence"
@@ -476,6 +476,13 @@ class EngineViewModel(
                     }
                     _benchmarkReport.value =
                         "Matrix ${index + 1}/${profiles.size}: ${profile.id} – Modell wird geladen…"
+                    EngineDiagnostics.info(
+                        "benchmark",
+                        "FULL_MATRIX_PROFILE_STARTED",
+                        "index=${index + 1},total=${profiles.size},profile=${profile.id}," +
+                            "backend=${profile.backend},nUbatch=${profile.microBatchSize}," +
+                            "flashAttention=${profile.flashAttention},model=${model.name}"
+                    )
                     restoreRequired = true
                     try {
                         val loadStarted = System.nanoTime()
@@ -505,9 +512,19 @@ class EngineViewModel(
                                 "Zu wenige Mess-Tokens im Profil ${profile.id}: ${measured.measuredTokens}"
                             )
                         }
+                        if (measured.result.graphSplits < 0) {
+                            throw IllegalStateException(
+                                "Graph-Split-Metrik fehlt im Profil ${profile.id}; diese Messung ist nicht vollständig."
+                            )
+                        }
+                        if (measured.result.diagnosticRunId.isBlank()) {
+                            throw IllegalStateException(
+                                "IPC-Diagnose-Run-ID fehlt im Profil ${profile.id}; RAM-Messwerte können nicht zugeordnet werden."
+                            )
+                        }
                         val reportLine = String.format(
                             java.util.Locale.US,
-                            "%s | load=%dms | prompt=%d tokens/%s ms | TTFT=%s ms | " +
+                            "%s | load=%dms | prompt=%d tokens/%s ms | TTFT=%s ms | graphSplits=%d | runId=%s | " +
                                 "warmup=%d | measured=%d in %s ms | decode=%.3f tok/s | native=%.3f tok/s | " +
                                 "n_batch=%d n_ubatch=%d threads=%d | %s",
                             profile.id,
@@ -515,6 +532,8 @@ class EngineViewModel(
                             measured.promptTokens,
                             measured.promptEvaluationMs?.toString() ?: "n/a",
                             measured.firstTokenAfterPrefillMs?.toString() ?: "n/a",
+                            measured.result.graphSplits,
+                            measured.result.diagnosticRunId,
                             measured.warmupTokens,
                             measured.measuredTokens,
                             measured.measuredWallMs?.toString() ?: "n/a",
@@ -531,8 +550,10 @@ class EngineViewModel(
                             "benchmark",
                             "FULL_MATRIX_RESULT",
                             "profile=${profile.id},model=${model.name},backend=${actualBackend}," +
-                                "decodePath=${profile.decodePath.name},nUbatch=${profile.microBatchSize}," +
-                                "flashAttention=${profile.flashAttention.name},modelLoadMs=${modelLoadMs}," +
+                                "kernelProfile=${profile.kernelProfile.name},nUbatch=${profile.microBatchSize}," +
+                                "flashAttention=${profile.flashAttention.name},graphSplits=${measured.result.graphSplits}," +
+                                    "diagnosticRunId=${measured.result.diagnosticRunId},resourcePhase=INFERENCE_${measured.result.diagnosticRunId}," +
+                                    "modelLoadMs=${modelLoadMs},"
                                 "promptTokens=${measured.promptTokens},prefillMs=${measured.promptEvaluationMs ?: -1L}," +
                                 "firstTokenAfterPrefillMs=${measured.firstTokenAfterPrefillMs ?: -1L}," +
                                 "warmupTokens=${measured.warmupTokens},measuredTokens=${measured.measuredTokens}," +
@@ -542,7 +563,7 @@ class EngineViewModel(
                                 "generationMs=${measured.result.durationMs},finishReason=${measured.result.finishReason.name}," +
                                 "batch=${profile.config.batchSize},threads=${profile.config.threads}," +
                                 "batchThreads=${profile.config.effectiveBatchThreads},activeBackend=${loaded.activeBackend}," +
-                                "graphSplits=see_run_correlated_PROMPT_STAGE_METRICS,peakPss=see_run_scoped_RESOURCE_SNAPSHOT"
+                                "activeBackend=${loaded.activeBackend}"
                         )
                     } catch (cancelled: CancellationException) {
                         throw cancelled
@@ -582,9 +603,9 @@ class EngineViewModel(
                 _benchmarkReport.value = buildString {
                     appendLine("Vollständige Benchmarkmatrix – ${successfulRuns}/${profiles.size} Profile erfolgreich")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB); SHA-256: ${model.sha256 ?: "nicht verfügbar"}")
-                    appendLine("Dimensionen: Vulkan/CPU × Decode-Pfad × n_ubatch 32/64/128 × Flash Attention AUS/AN.")
+                    appendLine("Dimensionen: Vulkan/CPU × AUTO/SUBGROUP/LARGE + quantisierungsabhängiger A/B-Pfad × n_ubatch 32/64/128 × Flash Attention AUS/AN.")
                     appendLine("Je Profil: Modell-Load, Prefill, TTFT, 4 Warm-up- und 20 Mess-Tokens, Decode tok/s.")
-                    appendLine("Graph-Splits in run-korrelierten PROMPT_STAGE_METRICS; Peak-PSS, Thermalstatus und verfügbares RAM in INFERENCE_<runId>-Snapshots.")
+                    appendLine("Graph-Splits stehen direkt in jeder Profilzeile. diagnosticRunId verbindet jede Zeile mit dem exakten INFERENCE_<runId>-Peak-PSS/RAM-/Thermal-Summary.")
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: ${stoppedReason}")
                     append("Die ursprüngliche Modellkonfiguration wurde wiederhergestellt; nicht unterstützte Profile bleiben als Fehler sichtbar.")

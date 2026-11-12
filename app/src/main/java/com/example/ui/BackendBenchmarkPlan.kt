@@ -20,27 +20,44 @@ internal object BackendBenchmarkPlan {
     data class FullMatrixProfile(
         val id: String,
         val backend: BackendPreference,
-        val decodePath: VulkanMatvecWorkgroup,
+        val kernelProfile: VulkanMatvecWorkgroup,
         val microBatchSize: Int,
         val flashAttention: FlashAttentionMode,
         val config: EngineConfig
     )
 
     /**
-     * Executable G1 cross-product: backend × decode path × n_ubatch × Flash Attention.
-     * Vulkan includes AUTO and Q4_K base-DMMV; CPU has one decode path because the
-     * Vulkan workgroup override is irrelevant there. The Q4_K-specific override is
-     * measurement-only and must not become a default without target-device results.
+     * Executable G1 matrix: backend × relevant Vulkan kernel/quantization profile ×
+     * n_ubatch × Flash Attention. SUBGROUP/LARGE are always measured on Vulkan;
+     * quantization-specific overrides are only scheduled for a matching GGUF filename
+     * or description, so an A/B path is never reported as active for the wrong tensor type.
      */
-    fun fullMatrixProfiles(original: EngineConfig): List<FullMatrixProfile> {
+    fun fullMatrixProfiles(
+        original: EngineConfig,
+        modelNameAndMetadata: String = ""
+    ): List<FullMatrixProfile> {
         val profiles = mutableListOf<FullMatrixProfile>()
+        val modelHint = modelNameAndMetadata.uppercase()
+        val quantSpecificProfiles = when {
+            "Q4_K" in modelHint -> listOf(
+                VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+                VulkanMatvecWorkgroup.Q4K_PREFILL_F16
+            )
+            "Q5_K" in modelHint -> listOf(VulkanMatvecWorkgroup.Q5K_BASE_DMMV)
+            "Q6_K" in modelHint -> listOf(VulkanMatvecWorkgroup.Q6K_BASE_DMMV)
+            else -> emptyList()
+        }
         for (backend in BACKENDS) {
-            val decodePaths = if (backend == BackendPreference.VULKAN) {
-                listOf(VulkanMatvecWorkgroup.AUTO, VulkanMatvecWorkgroup.Q4K_BASE_DMMV)
+            val kernelProfiles = if (backend == BackendPreference.VULKAN) {
+                listOf(
+                    VulkanMatvecWorkgroup.AUTO,
+                    VulkanMatvecWorkgroup.SUBGROUP,
+                    VulkanMatvecWorkgroup.LARGE
+                ) + quantSpecificProfiles
             } else {
                 listOf(VulkanMatvecWorkgroup.AUTO)
             }
-            for (decodePath in decodePaths) {
+            for (kernelProfile in kernelProfiles) {
                 for (microBatch in listOf(32, 64, 128)) {
                     for (flashAttention in listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)) {
                         val isVulkan = backend == BackendPreference.VULKAN
@@ -53,14 +70,14 @@ internal object BackendBenchmarkPlan {
                             } else original.batchThreads,
                             batchSize = maxOf(original.batchSize, microBatch),
                             microBatchSize = microBatch,
-                            vulkanMatvecWorkgroup = decodePath,
+                            vulkanMatvecWorkgroup = kernelProfile,
                             flashAttentionMode = flashAttention
                         )
-                        val id = "${backend.name}_${decodePath.name}_UB${microBatch}_FA_${flashAttention.name}"
+                        val id = "${backend.name}_${kernelProfile.name}_UB${microBatch}_FA_${flashAttention.name}"
                         profiles += FullMatrixProfile(
                             id = id,
                             backend = backend,
-                            decodePath = decodePath,
+                            kernelProfile = kernelProfile,
                             microBatchSize = microBatch,
                             flashAttention = flashAttention,
                             config = config

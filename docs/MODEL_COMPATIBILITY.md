@@ -9,6 +9,25 @@ This catalogue records source-level compatibility only. Three independent gates 
 2. **Backend operator coverage:** CPU/Vulkan has an implementation and reports support for the graph operators used by that model. A source-level operator implementation is not proof that every tensor shape, quantization, or graph split is supported.
 3. **Android device verified:** the exact GGUF loads and generates output on the target phone, with the requested backend and layer offload confirmed in diagnostics. Only this gate justifies a device-compatibility claim.
 
+## Downloadable model catalogue and memory guard estimates
+
+The table records concrete GGUF choices for smoke/compatibility testing. File sizes are the Hugging Face listing values (decimal GB). “Available RAM required” is **not a device benchmark**: it is calculated from the current ModelMemoryGuard policy at n_ctx=2048:
+
+model file bytes + 2048 × max(128 KiB, model bytes / 10,000) + 512 MiB.
+
+The engine may reduce context when free RAM is lower, down to 256 tokens, or reject the load if the estimate still does not fit. This is an admission estimate, not a measured peak or a guarantee against driver/allocator overhead.
+
+| Model | HF GGUF repository / file | Size | Guard-estimated available RAM at ctx 2048 | Hybrid (Gated DeltaNet) |
+|---|---|---:|---:|---|
+| Qwen3-4B-Instruct-2507 Q4_K_M | [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF) · Qwen3-4B-Instruct-2507-Q4_K_M.gguf | 2.33 GB | ≈3.11 GiB | No |
+| Qwen3.5-4B Q4_K_M | [bartowski/Qwen_Qwen3.5-4B-GGUF](https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF) · Qwen3.5-4B-Q4_K_M.gguf | 3.01 GB | ≈3.88 GiB | **Yes** |
+| Qwen3.5-4B Q5_K_M | same repository · Qwen3.5-4B-Q5_K_M.gguf | 3.44 GB | ≈4.36 GiB | **Yes** |
+| Qwen3.5-4B Q6_K | same repository · Qwen3.5-4B-Q6_K.gguf | 3.81 GB | ≈4.77 GiB | **Yes** |
+| Gemma 4 E2B-it Q4_K_M | [Jessylg27/gemma-4-E2B-it-GGUF](https://huggingface.co/Jessylg27/gemma-4-E2B-it-GGUF) · gemma-4-E2B-it-Q4_K_M.gguf | 3.43 GB | ≈4.35 GiB | No Gated DeltaNet |
+| Gemma 4 E4B-it Q4_K_M | [lmstudio-community/gemma-4-E4B-it-GGUF](https://huggingface.co/lmstudio-community/gemma-4-E4B-it-GGUF) · gemma-4-E4B-it-Q4_K_M.gguf | 5.34 GB | ≈6.49 GiB | No Gated DeltaNet |
+
+The Qwen3.5 Q4_K_M, Q5_K_M and Q6_K files deliberately exercise the corresponding Vulkan quantization-specific A/B selector. The benchmark matrix detects the quantization from the selected file name/description and includes only a matching override. Generic or non-K-quants do not receive a false Q4_K/Q5_K/Q6_K A/B result.
+
 ## Current catalogue
 
 | Model family / example | Upstream architecture registration | Graph implementation | CPU / Vulkan source coverage | Mali-G57 device status |

@@ -365,7 +365,7 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Vollständige Messmatrix: 18 Profile aus Vulkan/CPU, AUTO/Q4_K-Basis-DMMV, n_ubatch 32/64/128 und Flash Attention AUS/AN. Jeder Lauf lädt das Modell neu; bei kritisch wenig RAM oder hoher Temperatur wird abgebrochen.",
+                        text = "Modellabhängige Messmatrix: Vulkan/CPU, AUTO/SUBGROUP/LARGE plus passender Q4_K-/Q5_K-/Q6_K-A/B-Pfad, n_ubatch 32/64/128 und Flash Attention AUS/AN. Jeder Lauf lädt dasselbe Modell neu; bei kritisch wenig RAM oder hoher Temperatur wird abgebrochen.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -374,7 +374,7 @@ fun SettingsScreen(
                         enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
                         modifier = Modifier.fillMaxWidth().testTag("full_benchmark_matrix_button")
                     ) {
-                        Text(if (isBenchmarking) "Vollständige Matrix läuft…" else "Vollständige 18-Profil-Matrix starten")
+                        Text(if (isBenchmarking) "Vollständige Matrix läuft…" else "Vollständige Modellmatrix starten")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(

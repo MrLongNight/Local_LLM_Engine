@@ -56,14 +56,20 @@ data class InferenceResult(
     val tokensGenerated: Int,
     val durationMs: Long,
     val tokensPerSecond: Double,
-    val finishReason: FinishReason
+    val finishReason: FinishReason,
+    /** Scheduler graph splits reported by llama.cpp, or -1 when unavailable. */
+    val graphSplits: Int = -1,
+    /** Binder inference request identity, matching INFERENCE_<runId> RAM samples. */
+    val diagnosticRunId: String = ""
 ) : Parcelable {
     constructor(parcel: Parcel) : this(
         text = parcel.readString() ?: "",
         tokensGenerated = parcel.readInt(),
         durationMs = parcel.readLong(),
         tokensPerSecond = parcel.readDouble(),
-        finishReason = FinishReason.valueOf(parcel.readString() ?: FinishReason.STOP.name)
+        finishReason = FinishReason.valueOf(parcel.readString() ?: FinishReason.STOP.name),
+        graphSplits = if (parcel.dataAvail() >= Int.SIZE_BYTES) parcel.readInt() else -1,
+        diagnosticRunId = if (parcel.dataAvail() > 0) parcel.readString().orEmpty() else ""
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -72,6 +78,8 @@ data class InferenceResult(
         parcel.writeLong(durationMs)
         parcel.writeDouble(tokensPerSecond)
         parcel.writeString(finishReason.name)
+        parcel.writeInt(graphSplits)
+        parcel.writeString(diagnosticRunId)
     }
 
     override fun describeContents(): Int = 0
