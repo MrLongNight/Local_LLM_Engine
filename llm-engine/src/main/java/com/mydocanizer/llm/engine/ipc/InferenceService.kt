@@ -382,6 +382,8 @@ class InferenceService : Service() {
             activeInferenceJob = serviceScope.launch {
                 val currentReqId = requestId
                 resourceMonitor?.inferenceStarted(currentReqId)
+                var terminalCallback: (() -> Unit)? = null
+                var requestReleased = false
                 try {
                     val e = initEngine()
                     var tokenCount = 0
@@ -421,35 +423,53 @@ class InferenceService : Service() {
                                 // The IPC request ID is also the resource-monitor phase suffix.
                                 // Carry it with the result so matrix rows can be joined to
                                 // INFERENCE_<runId> Peak-PSS/RAM/thermal summaries.
-                                callback?.onCompleted(
-                                    currentReqId,
-                                    event.result.copy(diagnosticRunId = currentReqId)
-                                )
+                                val result = event.result.copy(diagnosticRunId = currentReqId)
+                                terminalCallback = { callback?.onCompleted(currentReqId, result) }
                             }
                             is InferenceEvent.Cancelled -> {
-                                callback?.onCancelled(currentReqId, event.partialText, event.tokensGenerated)
+                                val partialText = event.partialText
+                                val generatedTokens = event.tokensGenerated
+                                terminalCallback = {
+                                    callback?.onCancelled(currentReqId, partialText, generatedTokens)
+                                }
                             }
                             is InferenceEvent.Error -> {
-                                callback?.onError(
-                                    currentReqId,
-                                    event.throwable.message ?: event.throwable.javaClass.simpleName,
-                                    event.partialText
-                                )
+                                val message = event.throwable.message ?: event.throwable.javaClass.simpleName
+                                val partialText = event.partialText
+                                terminalCallback = {
+                                    callback?.onError(currentReqId, message, partialText)
+                                }
                             }
                         }
                     }
                 } catch (cancelled: CancellationException) {
                     Log.i(TAG, "Inference coroutine cancelled for request $currentReqId")
-                    callback?.onCancelled(currentReqId, "", 0)
+                    terminalCallback = { callback?.onCancelled(currentReqId, "", 0) }
                 } catch (t: Throwable) {
                     Log.e(TAG, "Error in streamChat IPC", t)
-                    callback?.onError(currentReqId, t.message ?: t.javaClass.simpleName, "")
+                    val message = t.message ?: t.javaClass.simpleName
+                    terminalCallback = { callback?.onError(currentReqId, message, "") }
                 } finally {
                     resourceMonitor?.inferenceFinished(currentReqId)
-                    if (activeRequestId.get() == currentReqId) {
-                        activeRequestId.set(null)
+                    requestReleased = activeRequestId.compareAndSet(currentReqId, null)
+                    if (requestReleased) {
+                        // Release the active slot before notifying the client. The client
+                        // may immediately reload the model for the next benchmark profile;
+                        // it must not preempt this just-finished request during the small
+                        // window between onCompleted and this Job's finally block.
                         activeInferenceJob = null
                     }
+                }
+
+                if (requestReleased) {
+                    runCatching { terminalCallback?.invoke() }
+                        .onFailure { callbackError ->
+                            EngineDiagnostics.error(
+                                "ipc",
+                                "INFERENCE_TERMINAL_CALLBACK_FAILED",
+                                callbackError
+                            )
+                        }
                 }
             }
         }
