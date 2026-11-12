@@ -37,6 +37,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -47,6 +48,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -803,6 +805,29 @@ internal class InferenceClient(
 
         val pendingTimeout = AtomicReference<TimeoutSnapshot?>(null)
         val timeoutReported = AtomicBoolean(false)
+        // Preserve every token across Binder callbacks while allowing progress updates
+        // to collapse to the latest pending value when the collector/UI is slow.
+        val progressEvents = Channel<InferenceEvent.Progress>(Channel.CONFLATED)
+        val tokenDeliveryFailureHandled = AtomicBoolean(false)
+        val progressForwarder = launch(Dispatchers.Default) {
+            for (progress in progressEvents) {
+                if (trySend(progress).isFailure) {
+                    if (tokenDeliveryFailureHandled.compareAndSet(false, true) &&
+                        activeRequestId.get() == requestId
+                    ) {
+                        EngineDiagnostics.info(
+                            "ipc_client", "PROGRESS_EVENT_DELIVERY_FAILED",
+                            "request=$requestId; requesting native cancellation"
+                        )
+                        val service = remoteService
+                        clientScope.launch(Dispatchers.IO) {
+                            runCatching { service?.cancelInference(requestId) }
+                        }
+                    }
+                    break
+                }
+            }
+        }
 
         fun finishStream(event: InferenceEvent): Boolean {
             if (!terminalSent.compareAndSet(false, true)) return false
@@ -975,7 +1000,7 @@ internal class InferenceClient(
                             )
                         }
                     }
-                    trySend(progress)
+                    progressEvents.trySend(progress)
                     lastUiProgressNano.set(now)
                 }
             }
@@ -1016,7 +1041,7 @@ internal class InferenceClient(
                         "request=$reqId, messages=$promptMessageCount, elapsedMs=$elapsedMs"
                     )
                     trySend(InferenceEvent.Started(promptMessageCount))
-                    trySend(
+                    progressEvents.trySend(
                         InferenceEvent.Progress(
                             tokensGenerated = 0,
                             elapsedMs = 0L,
@@ -1044,13 +1069,23 @@ internal class InferenceClient(
                             "request=$reqId, latencyAfterPrefillMs=$elapsedMs"
                         )
                     }
-                    trySend(InferenceEvent.Token(token, tokenIndex))
+                    val tokenSend = trySend(InferenceEvent.Token(token, tokenIndex))
+                    if (tokenSend.isFailure && tokenDeliveryFailureHandled.compareAndSet(false, true)) {
+                        EngineDiagnostics.info(
+                            "ipc_client", "TOKEN_EVENT_DELIVERY_FAILED",
+                            "request=$requestId,tokenIndex=$tokenIndex; requesting native cancellation"
+                        )
+                        val service = remoteService
+                        clientScope.launch(Dispatchers.IO) {
+                            runCatching { service?.cancelInference(requestId) }
+                        }
+                    }
                     val elapsedMs = ((receivedAt - prefillCompletedNano.get()) / 1_000_000L).coerceAtLeast(0L)
                     val speed = if (elapsedMs > 0L) generated * 1000.0 / elapsedMs else 0.0
                     val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
                         (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
                     } else null
-                    trySend(
+                    progressEvents.trySend(
                         InferenceEvent.Progress(
                             tokensGenerated = generated,
                             elapsedMs = elapsedMs,
@@ -1084,7 +1119,7 @@ internal class InferenceClient(
                     val eta = if (speed > 0.0 && total > processed) {
                         (((total - processed) * 1000.0) / speed).toLong()
                     } else null
-                    trySend(
+                    progressEvents.trySend(
                         InferenceEvent.Progress(
                             tokensGenerated = 0,
                             elapsedMs = measuredElapsedMs,
@@ -1107,7 +1142,7 @@ internal class InferenceClient(
                     val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
                         (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
                     } else null
-                    trySend(
+                    progressEvents.trySend(
                         InferenceEvent.Progress(
                             tokensGenerated = generated,
                             elapsedMs = elapsed,
@@ -1179,6 +1214,8 @@ internal class InferenceClient(
         }
 
         awaitClose {
+            progressEvents.close()
+            progressForwarder.cancel()
             watchdogJob?.cancel()
             streamControl?.let { activeStreamControl.compareAndSet(it, null) }
             if (activeRequestId.compareAndSet(requestId, null)) {
@@ -1198,7 +1235,7 @@ internal class InferenceClient(
                 }
             }
         }
-    }
+    }.buffer(Channel.UNLIMITED)
 
     override suspend fun generateChat(request: InferenceRequest): Result<InferenceResult> {
         return runCatching {
