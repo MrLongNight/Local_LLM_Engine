@@ -69,6 +69,30 @@ class BackendBenchmarkPlanTest {
     }
 
     @Test
+    fun fullMatrixCoversBackendDecodeMicroBatchAndFlashAttentionAxes() {
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(EngineConfig(batchSize = 128, threads = 6))
+        assertEquals(18, profiles.size)
+        assertEquals(18, profiles.map { it.id }.distinct().size)
+        assertEquals(12, profiles.count { it.backend == BackendPreference.VULKAN })
+        assertEquals(6, profiles.count { it.backend == BackendPreference.CPU })
+        assertEquals(setOf(32, 64, 128), profiles.map { it.microBatchSize }.toSet())
+        assertTrue(profiles.any {
+            it.backend == BackendPreference.VULKAN &&
+                it.decodePath == VulkanMatvecWorkgroup.Q4K_BASE_DMMV &&
+                it.flashAttention == FlashAttentionMode.ENABLED
+        })
+        assertTrue(profiles.filter { it.backend == BackendPreference.VULKAN }.all {
+            it.config.gpuLayers == 99 &&
+                it.config.threads <= 2 &&
+                it.config.effectiveBatchThreads <= 2
+        })
+        assertTrue(profiles.filter { it.backend == BackendPreference.CPU }.all {
+            it.config.gpuLayers == 0 &&
+                it.decodePath == VulkanMatvecWorkgroup.AUTO
+        })
+    }
+
+    @Test
     fun flashAttentionSweepForcesOnAndOffForBothBackends() {
         val profiles = BackendBenchmarkPlan.flashAttentionConfigurations(EngineConfig())
         assertEquals(8, profiles.size)

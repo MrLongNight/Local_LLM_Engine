@@ -14,6 +14,10 @@ All notable changes to this project are documented in this file.
 ### Build
 - CI verifies that the arm64 KleidiAI runtime-dispatch translation unit is compiled with GGML_USE_CPU_KLEIDIAI; upstream KleidiAI performs runtime HWCAP feature selection for DOTPROD/I8MM with compatible NEON fallbacks.
 
+### Added
+- Added an executable 18-profile device benchmark matrix covering Vulkan/CPU, AUTO/Q4_K base-DMMV, n_ubatch 32/64/128 and Flash Attention disabled/enabled. Each profile reloads the same GGUF, validates the selected backend, uses a fixed prompt and records model load, prefill, TTFT and decode metrics.
+- Compact diagnostics retain full-matrix result rows and corresponding run-correlated prompt metrics including graph splits; run-scoped RAM samples report Peak-PSS, minimum available RAM and thermal status.
+
 ### Fixed
 - Updated the app initialization test for the explicit 99-layer full-offload request (actual Vulkan offload remains determined by native backend diagnostics).
 - Made InferenceRequest Parcelable reading backward-compatible when older clients omit the appended enableThinking field, and use the typed Parcelable reader on Android 13+.

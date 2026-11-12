@@ -3,6 +3,7 @@ package com.example.ui
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FlashAttentionMode
+import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 
 /**
  * Single-request backend comparison: the initial generated tokens warm the execution
@@ -15,6 +16,61 @@ internal object BackendBenchmarkPlan {
     const val COOLDOWN_MS = 500L
 
     val BACKENDS = listOf(BackendPreference.VULKAN, BackendPreference.CPU)
+
+    data class FullMatrixProfile(
+        val id: String,
+        val backend: BackendPreference,
+        val decodePath: VulkanMatvecWorkgroup,
+        val microBatchSize: Int,
+        val flashAttention: FlashAttentionMode,
+        val config: EngineConfig
+    )
+
+    /**
+     * Executable G1 cross-product: backend × decode path × n_ubatch × Flash Attention.
+     * Vulkan includes AUTO and Q4_K base-DMMV; CPU has one decode path because the
+     * Vulkan workgroup override is irrelevant there. The Q4_K-specific override is
+     * measurement-only and must not become a default without target-device results.
+     */
+    fun fullMatrixProfiles(original: EngineConfig): List<FullMatrixProfile> {
+        val profiles = mutableListOf<FullMatrixProfile>()
+        for (backend in BACKENDS) {
+            val decodePaths = if (backend == BackendPreference.VULKAN) {
+                listOf(VulkanMatvecWorkgroup.AUTO, VulkanMatvecWorkgroup.Q4K_BASE_DMMV)
+            } else {
+                listOf(VulkanMatvecWorkgroup.AUTO)
+            }
+            for (decodePath in decodePaths) {
+                for (microBatch in listOf(32, 64, 128)) {
+                    for (flashAttention in listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)) {
+                        val isVulkan = backend == BackendPreference.VULKAN
+                        val config = configuration(original).copy(
+                            backendPreference = backend,
+                            gpuLayers = if (isVulkan) 99 else 0,
+                            threads = if (isVulkan) original.threads.coerceIn(1, 2) else original.threads,
+                            batchThreads = if (isVulkan) {
+                                original.batchThreads.takeIf { it > 0 }?.coerceIn(1, 2) ?: 0
+                            } else original.batchThreads,
+                            batchSize = maxOf(original.batchSize, microBatch),
+                            microBatchSize = microBatch,
+                            vulkanMatvecWorkgroup = decodePath,
+                            flashAttentionMode = flashAttention
+                        )
+                        val id = "${backend.name}_${decodePath.name}_UB${microBatch}_FA_${flashAttention.name}"
+                        profiles += FullMatrixProfile(
+                            id = id,
+                            backend = backend,
+                            decodePath = decodePath,
+                            microBatchSize = microBatch,
+                            flashAttention = flashAttention,
+                            config = config
+                        )
+                    }
+                }
+            }
+        }
+        return profiles
+    }
 
     fun configuration(original: EngineConfig): EngineConfig = original.copy(
         maxPredictTokens = TOTAL_TOKENS,

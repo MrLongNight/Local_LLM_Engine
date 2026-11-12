@@ -276,7 +276,7 @@ object EngineDiagnostics {
             "GENERATION_COMPLETED"
         ) || event.startsWith("BACKEND_BENCHMARK_") ||
             event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
-            event.startsWith("VULKAN_Q4K_PATH_SWEEP_")
+            event.startsWith("VULKAN_Q4K_PATH_SWEEP_") || event.startsWith("FULL_MATRIX_")
     }
 
     private fun isImportantEvent(line: String): Boolean {
@@ -365,6 +365,14 @@ object EngineDiagnostics {
                     event.startsWith("VULKAN_Q4K_PATH_SWEEP_")
             }
             .takeLast(12)
+        // Keep all matrix profile rows and their run-correlated prompt metrics. The latter
+        // include graphSplits and runId; resource samples are summarized separately by run.
+        val fullMatrixEvents = kotlinLines
+            .filter { eventName(it).startsWith("FULL_MATRIX_") }
+            .takeLast(24)
+        val matrixPromptMetrics = kotlinLines
+            .filter { eventName(it) == "PROMPT_STAGE_METRICS" }
+            .takeLast(24)
         val performanceEvents = (
             kotlinLines
                 .filterNot { it.contains("RESOURCE_SNAPSHOT") }
@@ -372,9 +380,11 @@ object EngineDiagnostics {
                 .filterNot {
                     val event = eventName(it)
                     event.startsWith("VULKAN_DMMV_SWEEP_") ||
-                        event.startsWith("VULKAN_Q4K_PATH_SWEEP_")
+                        event.startsWith("VULKAN_Q4K_PATH_SWEEP_") ||
+                        event.startsWith("FULL_MATRIX_") ||
+                        event == "PROMPT_STAGE_METRICS"
                 }
-                .takeLast(12) + vulkanKernelSweepEvents
+                .takeLast(12) + vulkanKernelSweepEvents + fullMatrixEvents + matrixPromptMetrics
             )
             .distinct()
             .sorted()

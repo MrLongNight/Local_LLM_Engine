@@ -423,6 +423,178 @@ class EngineViewModel(
 
 
     /**
+     * Full G1 matrix: backend × decode path × n_ubatch × Flash Attention.
+     * Each profile gets a fresh model load and deterministic inference; failures are
+     * reported without silently falling back to a different backend.
+     */
+    fun runFullBenchmarkMatrix() {
+        if (_isBenchmarking.value) return
+        if (_isGenerating.value || _isImporting.value) {
+            _errorMessage.value = "Die vollständige Benchmarkmatrix erst starten, wenn keine Inferenz oder Modell-Operation läuft."
+            return
+        }
+        val model = currentModel.value ?: run {
+            _errorMessage.value = "Bitte zuerst ein GGUF-Modell laden."
+            return
+        }
+        val originalConfig = _engineConfig.value
+        val systemPromptSnapshot = _systemPrompt.value
+        val source = if (model.path.startsWith("content://", ignoreCase = true)) {
+            ModelSource.ContentUri(model.path, model.name)
+        } else ModelSource.FilePath(model.path)
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(originalConfig)
+        val benchmarkPrompt =
+            "Gib die Zahlen 1 bis 48 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
+
+        _isBenchmarking.value = true
+        _benchmarkReport.value = "Vollständige Benchmarkmatrix wird vorbereitet (${profiles.size} Profile)…"
+        _errorMessage.value = null
+
+        viewModelScope.launch {
+            val rows = mutableListOf<String>()
+            var restoreRequired = false
+            var stoppedReason: String? = null
+            var successfulRuns = 0
+            EngineDiagnostics.info(
+                "benchmark",
+                "FULL_MATRIX_STARTED",
+                "model=${model.name},modelBytes=${model.sizeBytes},profiles=${profiles.size}," +
+                    "backends=VULKAN,CPU,decodePaths=AUTO,Q4K_BASE_DMMV,nUbatch=32,64,128," +
+                    "flashAttention=DISABLED,ENABLED,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
+                    "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
+                    "batch=${originalConfig.batchSize},prompt=fixed_counting_sequence"
+            )
+            try {
+                for ((index, profile) in profiles.withIndex()) {
+                    currentCoroutineContext().ensureActive()
+                    val safetyStop = configurationTestSafetyBlock()
+                    if (safetyStop != null) {
+                        stoppedReason = safetyStop
+                        rows += "ABBRUCH vor ${profile.id}: ${safetyStop}"
+                        EngineDiagnostics.info("benchmark", "FULL_MATRIX_SAFETY_STOP", safetyStop)
+                        break
+                    }
+                    _benchmarkReport.value =
+                        "Matrix ${index + 1}/${profiles.size}: ${profile.id} – Modell wird geladen…"
+                    restoreRequired = true
+                    try {
+                        val loadStarted = System.nanoTime()
+                        val loaded = engine.loadModel(source, profile.config).getOrElse { throw it }
+                        val modelLoadMs = (System.nanoTime() - loadStarted) / 1_000_000L
+                        val actualBackend = backendFamily(loaded.activeBackend)
+                        if (actualBackend != profile.backend.name) {
+                            throw IllegalStateException(
+                                "Angefordert wurde ${profile.backend.name}, geladen wurde aber ${loaded.activeBackend}"
+                            )
+                        }
+                        if (loaded.sizeBytes != model.sizeBytes ||
+                            (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() &&
+                                model.sha256 != loaded.sha256)
+                        ) {
+                            throw IllegalStateException("Nach dem Neuladen wurde nicht dieselbe GGUF-Datei bestätigt.")
+                        }
+                        val measured = collectBackendBenchmarkSample(
+                            backend = profile.backend,
+                            maxTokens = BackendBenchmarkPlan.TOTAL_TOKENS,
+                            warmupTokens = BackendBenchmarkPlan.WARMUP_TOKENS,
+                            systemPromptSnapshot = systemPromptSnapshot,
+                            benchmarkPrompt = benchmarkPrompt
+                        )
+                        if (measured.measuredTokens < 8) {
+                            throw IllegalStateException(
+                                "Zu wenige Mess-Tokens im Profil ${profile.id}: ${measured.measuredTokens}"
+                            )
+                        }
+                        val reportLine = String.format(
+                            java.util.Locale.US,
+                            "%s | load=%dms | prompt=%d tokens/%s ms | TTFT=%s ms | " +
+                                "warmup=%d | measured=%d in %s ms | decode=%.3f tok/s | native=%.3f tok/s | " +
+                                "n_batch=%d n_ubatch=%d threads=%d | %s",
+                            profile.id,
+                            modelLoadMs,
+                            measured.promptTokens,
+                            measured.promptEvaluationMs?.toString() ?: "n/a",
+                            measured.firstTokenAfterPrefillMs?.toString() ?: "n/a",
+                            measured.warmupTokens,
+                            measured.measuredTokens,
+                            measured.measuredWallMs?.toString() ?: "n/a",
+                            measured.measuredTokensPerSecond,
+                            measured.result.tokensPerSecond,
+                            profile.config.batchSize,
+                            profile.config.effectiveMicroBatchSize,
+                            profile.config.threads,
+                            loaded.activeBackend
+                        )
+                        rows += reportLine
+                        successfulRuns++
+                        EngineDiagnostics.info(
+                            "benchmark",
+                            "FULL_MATRIX_RESULT",
+                            "profile=${profile.id},model=${model.name},backend=${actualBackend}," +
+                                "decodePath=${profile.decodePath.name},nUbatch=${profile.microBatchSize}," +
+                                "flashAttention=${profile.flashAttention.name},modelLoadMs=${modelLoadMs}," +
+                                "promptTokens=${measured.promptTokens},prefillMs=${measured.promptEvaluationMs ?: -1L}," +
+                                "firstTokenAfterPrefillMs=${measured.firstTokenAfterPrefillMs ?: -1L}," +
+                                "warmupTokens=${measured.warmupTokens},measuredTokens=${measured.measuredTokens}," +
+                                "measuredWallMs=${measured.measuredWallMs ?: -1L}," +
+                                "decodeTokensPerSecond=${measured.measuredTokensPerSecond}," +
+                                "nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
+                                "generationMs=${measured.result.durationMs},finishReason=${measured.result.finishReason.name}," +
+                                "batch=${profile.config.batchSize},threads=${profile.config.threads}," +
+                                "batchThreads=${profile.config.effectiveBatchThreads},activeBackend=${loaded.activeBackend}," +
+                                "graphSplits=see_run_correlated_PROMPT_STAGE_METRICS,peakPss=see_run_scoped_RESOURCE_SNAPSHOT"
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        val message = error.message ?: error.javaClass.simpleName
+                        rows += "${profile.id} | FEHLER: ${message}"
+                        EngineDiagnostics.error("benchmark", "FULL_MATRIX_PROFILE_FAILED", error)
+                    }
+                    if (index < profiles.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
+                }
+            } catch (cancelled: CancellationException) {
+                stoppedReason = "Vom Nutzer oder durch den ViewModel-Lifecycle abgebrochen."
+                rows += "ABGEBROCHEN: Vollständige Matrix wurde unterbrochen."
+                EngineDiagnostics.info("benchmark", "FULL_MATRIX_CANCELLED")
+                throw cancelled
+            } catch (error: Throwable) {
+                stoppedReason = error.message ?: error.javaClass.simpleName
+                rows += "FEHLER: ${stoppedReason}"
+                EngineDiagnostics.error("benchmark", "FULL_MATRIX_FAILED", error)
+            } finally {
+                if (restoreRequired) {
+                    _benchmarkReport.value = "Stelle die ursprüngliche Modellkonfiguration wieder her…"
+                    val restore = withContext(NonCancellable) {
+                        runCatching { engine.loadModel(source, originalConfig).getOrThrow() }
+                    }
+                    restore.onSuccess { restored ->
+                        EngineDiagnostics.info(
+                            "benchmark",
+                            "FULL_MATRIX_RESTORED",
+                            "backendPreference=${originalConfig.backendPreference},activeBackend=${restored.activeBackend}"
+                        )
+                    }.onFailure { error ->
+                        rows += "KRITISCH: Restore fehlgeschlagen: ${error.message ?: error.javaClass.simpleName}"
+                        EngineDiagnostics.error("benchmark", "FULL_MATRIX_RESTORE_FAILED", error)
+                    }
+                }
+                _benchmarkReport.value = buildString {
+                    appendLine("Vollständige Benchmarkmatrix – ${successfulRuns}/${profiles.size} Profile erfolgreich")
+                    appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB); SHA-256: ${model.sha256 ?: "nicht verfügbar"}")
+                    appendLine("Dimensionen: Vulkan/CPU × Decode-Pfad × n_ubatch 32/64/128 × Flash Attention AUS/AN.")
+                    appendLine("Je Profil: Modell-Load, Prefill, TTFT, 4 Warm-up- und 20 Mess-Tokens, Decode tok/s.")
+                    appendLine("Graph-Splits in run-korrelierten PROMPT_STAGE_METRICS; Peak-PSS, Thermalstatus und verfügbares RAM in INFERENCE_<runId>-Snapshots.")
+                    rows.forEach { appendLine(it) }
+                    if (stoppedReason != null) appendLine("Hinweis: ${stoppedReason}")
+                    append("Die ursprüngliche Modellkonfiguration wurde wiederhergestellt; nicht unterstützte Profile bleiben als Fehler sichtbar.")
+                }
+                _isBenchmarking.value = false
+            }
+        }
+    }
+
+    /**
      * Short, reproducible comparison. Each backend gets one model load and one inference
      * request. The first four generated tokens warm the execution path; the following
      * twenty are measured. This avoids repeating the expensive prompt prefill twice.
