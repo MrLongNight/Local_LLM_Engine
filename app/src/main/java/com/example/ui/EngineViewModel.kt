@@ -856,7 +856,18 @@ class EngineViewModel(
                 }
                 is InferenceEvent.Cancelled -> {
                     cancelledPartialText = event.partialText.ifBlank { streamedOutput.toString() }
-                    throw CancellationException("Backend test cancelled: " + backend.name)
+                    EngineDiagnostics.info(
+                        "benchmark",
+                        "BACKEND_BENCHMARK_INFERENCE_CANCELLED",
+                        "backend=" + backend.name + ",tokens=" + event.tokensGenerated +
+                            ",partialChars=" + cancelledPartialText!!.length
+                    )
+                    // A native inference cancellation is a failed sample, not cancellation
+                    // of the parent benchmark coroutine. Only a real Job cancellation
+                    // should stop the complete matrix/sweep.
+                    throw IllegalStateException(
+                        "Die Inferenz für " + backend.name + " wurde vor Abschluss abgebrochen."
+                    )
                 }
             }
             }
@@ -870,12 +881,14 @@ class EngineViewModel(
             )
             throw cancelled
         } catch (error: Throwable) {
+            val finishReason = if (cancelledPartialText != null) "CANCELLED" else "ERROR"
             EngineDiagnostics.testText(
                 "benchmark",
                 "BACKEND_BENCHMARK_TEST_OUTPUT",
-                "backend=" + backend.name + ",finishReason=ERROR,tokens=" +
-                    visibleTokenCount + ",error=" + (error.message ?: error.javaClass.simpleName) +
-                    ",text=" + (failedPartialText ?: streamedOutput.toString())
+                "backend=" + backend.name + ",finishReason=" + finishReason +
+                    ",tokens=" + visibleTokenCount + ",error=" +
+                    (error.message ?: error.javaClass.simpleName) +
+                    ",text=" + (cancelledPartialText ?: failedPartialText ?: streamedOutput.toString())
             )
             throw error
         }
@@ -1616,7 +1629,15 @@ class EngineViewModel(
                 }
                 is InferenceEvent.Cancelled -> {
                     cancelledPartialText = event.partialText.ifBlank { streamedOutput.toString() }
-                    throw CancellationException("Native inference cancelled")
+                    EngineDiagnostics.info(
+                        "config_test",
+                        "CONFIG_SMOKE_INFERENCE_CANCELLED",
+                        "stage=" + diagnosticLabel + ",tokens=" + event.tokensGenerated +
+                            ",partialChars=" + cancelledPartialText!!.length
+                    )
+                    throw IllegalStateException(
+                        "Die Testinferenz wurde abgebrochen: " + diagnosticLabel
+                    )
                 }
                 is InferenceEvent.Started -> Unit
             }
@@ -1631,12 +1652,13 @@ class EngineViewModel(
             )
             throw cancelled
         } catch (error: Throwable) {
+            val finishReason = if (cancelledPartialText != null) "CANCELLED" else "ERROR"
             EngineDiagnostics.testText(
                 "config_test",
                 "CONFIG_SMOKE_TEST_OUTPUT",
-                "stage=" + diagnosticLabel + ",finishReason=ERROR,error=" +
-                    (error.message ?: error.javaClass.simpleName) + ",text=" +
-                    (failedPartialText ?: streamedOutput.toString())
+                "stage=" + diagnosticLabel + ",finishReason=" + finishReason +
+                    ",error=" + (error.message ?: error.javaClass.simpleName) + ",text=" +
+                    (cancelledPartialText ?: failedPartialText ?: streamedOutput.toString())
             )
             throw error
         }
