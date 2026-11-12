@@ -1,9 +1,37 @@
-# Aktueller Stand 12.11.2026
+# Aktueller Stand 12.11.2026 – verifizierter CI-/APK-Stand
 
-- Repository-Head nach CI-Fix: `6a4f0d6e45714c92d3d2dfc694ee80437d8f0d83`.
-- GitHub Actions: Unit Tests `43232784465` erfolgreich; Android APK Build `43232784573` erfolgreich einschließlich Android-36-x86_64-Instrumentationstests, APK-/Test-APK-Upload und nativen Compile-Checks.
-- Der APK-CI-Fehler wurde auf die zu enge Erkennung der generierten `llama-context.cpp`-Overlaydatei in `compile_commands.json` zurückgeführt. CI akzeptiert nun sowohl eine direkte Translation-Unit als auch deren Einbindung in eine Unity-Translation-Unit und prüft weiterhin den Inhalt des generierten Overlays.
-- Die Emulatorprüfung ist kein Ersatz für die Zielgeräteabnahme. Auf nubia Z2462N / Android 16 / Mali-G57 bleiben reale GGUF-Load-/Inference-/Offload-Messungen, die Vulkan-A/B-Sweeps, fünf Ressourcenzyklen und die numerischen Performance-Akzeptanzwerte offen.
+**Repository:** `MrLongNight/Local_LLM_Engine` · Branch `main`  
+**Commit:** `528e1d34af9b00c3bcd1054fb12862cc09ab0703`
+
+## GitHub Actions – vollständig grün
+
+- **Android APK Build #264 / Run `43238009301`:** erfolgreich. APK und Instrumentation-APK erstellt und hochgeladen. Native ARM64-/x86_64-Optimierungsflags, Vulkan-Quelloverlay, Graph-Backend-Diagnose (direkte TU/Unity-TU), Integer-Dot-Shader und zusammengeführtes Service-Manifest wurden geprüft.
+- **Android-36-x86_64-Instrumentation:** 7/7 Tests bestanden, 0 übersprungen, 0 fehlgeschlagen. Der Lauf umfasst die Prozessisolation-/Hard-Abort-/Recovery-Pfade aus dem aktuellen Testumfang. Er ersetzt keine Mali-G57-Geräteabnahme.
+- **Unit Tests #265 / Run `43238009122`:** erfolgreich; zusätzlich bestanden die nativen Host-Tests für Prompt-Prefix-Cache und geschützte Prompt-Truncation.
+- **pre-commit.ci:** Status `success` auf diesem Commit.
+- **Profiler-BuildConfig:** Push-Build explizit mit `VULKAN_PERF_PROFILER_ENABLED=false` verifiziert. Ein separater Diagnosebuild kann über `workflow_dispatch` mit `enable_vulkan_perf_profiler=true` erstellt werden; Release erzwingt weiterhin `false`.
+
+## Verifiziertes APK-Artefakt
+
+- **Datei:** `app-debug.apk`, entpackt aus GitHub-Artefakt `Local-LMM-Engine-debug-apk` (Artifact ID `13952939090`).
+- **Größe:** 79.063.814 Bytes (ca. 75,4 MiB).
+- **SHA-256:** `55166f9bb1c17f4f39ff9f01240098f8d0bde49d78d86eefb69c4e7646442c5e`.
+- **ABIs:** ARM64-v8a und x86_64; das APK enthält `liblocalllm_engine.so` für beide Architekturen.
+- **Manifest:** genau ein privater `:inference`-Service, `exported=false`, `isolatedProcess=false`; CI-Prüfung bestanden.
+- **Artefakt-Aufbewahrung:** GitHub meldet Ablauf am 26.11.2026. Der APK wurde zusätzlich aus dem Artefakt geladen und lokal auf ZIP-/APK-Inhalt geprüft. Der verifizierte APK ist ein normaler profilerfreier Debug-Build, keine Release-APK.
+
+## Noch offene Abnahmen – keine CI kann sie ersetzen
+
+1. **Zielgerät:** nubia Z2462N / Android 16 / ARM64 / Mali-G57: echte GGUF-Modellladung und Folgeinferenz mit explizitem CPU- und Vulkan-Modus.
+2. **Tatsächlicher Offload:** reale Layerzahl und per-run CPU-/Vulkan-Graph-Node-Verteilung nachweisen; eine Vulkan-Auswahl oder angeforderte Layerzahl allein reicht nicht.
+3. **Performance:** profileraktivierter Diagnosebuild zur Operatoranalyse; anschließend profilerfreie CPU-/Vulkan- und Q4_K-/Q5_K-/Q6_K-A/B-Läufe mit gleichem Modell/Prompt und reproduzierbaren Bedingungen.
+4. **Ressourcenzyklen:** mindestens fünf Load-/Inference-/Timeout-/Kill-/Reconnect-Zyklen mit app-seitiger Nachher-Messung für PSS, Native-/Graphics-PSS und soweit verfügbar Vulkan-Heap/Budget.
+5. **SAF-End-to-End:** echter Binder-Transfer eines seekbaren SAF-Descriptors in den `:inference`-Prozess plus lokale-/Cloud-Provider auf Zielhardware.
+6. **Geräte-Profiler:** `LOCAL_LLM_VULKAN_OP_TIMING`-Zeilen und deren runId-Verknüpfung mit `TOKEN_STEP_METRIC` auf dem Mali-G57 nachweisen.
+
+**Bewertung:** Der Code-/CI-Stand ist für Unit Tests, native Build-Prüfungen, APK-Erstellung und Emulator-Prozessisolation grün. Die Engine ist damit noch nicht als auf dem nubia/Mali-G57 geräteverifiziert, performant oder produktionsreif einzustufen.
+
+---
 
 # Umsetzungsplan – Local LLM Engine
 
