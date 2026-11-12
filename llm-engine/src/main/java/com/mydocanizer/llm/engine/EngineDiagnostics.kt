@@ -384,7 +384,8 @@ object EngineDiagnostics {
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
             "TOKEN_STEP_METRIC", "MEMORY", "ALLOC", "PIPELINE", "SHADER", "FENCE", "QUEUE", "PERF_PROFILER",
             "FAILED", "ERROR", "WARN", "UNSUPPORTED", "FALLBACK",
-            "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST"
+            "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST",
+            "CPU_RUNTIME_FEATURES", "ABORT_CALLBACK_POLICY", "GRAPH_SPLITS"
         )
         val relevantNative = nativeLines
             .filterNot {
@@ -432,9 +433,19 @@ object EngineDiagnostics {
         val profilerConfigEvidence = nativeLines
             .filter { it.contains("VULKAN_PERF_PROFILER_CONFIG") }
             .takeLast(2)
+        val cpuFeatureEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_CPU_RUNTIME_FEATURES") }
+            .takeLast(2)
+        val abortPolicyEvidence = nativeLines
+            .filter { it.contains("LLAMA_ABORT_CALLBACK_POLICY") }
+            .takeLast(2)
+        val graphSplitEvidence = nativeLines
+            .filter { it.contains("graphSplits=") }
+            .takeLast(8)
         val nativePriorityEvidence = (
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
-                q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence
+                q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence +
+                cpuFeatureEvidence + abortPolicyEvidence + graphSplitEvidence
             ).distinct().map { compactLine(it, 360) }
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.

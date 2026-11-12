@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Replaced the stale remembered-model GPU-layer fallback of 37 with the explicit full-offload request value 99.
+- Native CPU thread fallback now uses the performance-core frequency policy; Vulkan offload caps host and batch submission pools to 1–2 threads.
+- Added explicit NEON, DOTPROD, I8MM and FP16 runtime-feature diagnostics. Pinned llama.cpp's CPU-only abort-callback limitation is logged for Vulkan rather than implying cooperative Vulkan abort.
+- Added scheduler graph-split metrics through an internal bridge compiled into the pinned llama target without changing llama.cpp's public C API.
+- Added critical-memory-pressure handling in :inference: after cooperative cancellation when necessary, the service unloads the model and closes its retained model descriptor. Per-inference RAM/thermal snapshots are grouped by run ID for peak-PSS reporting.
+
+### Build
+- CI verifies that the arm64 KleidiAI runtime-dispatch translation unit is compiled with GGML_USE_CPU_KLEIDIAI; upstream KleidiAI performs runtime HWCAP feature selection for DOTPROD/I8MM with compatible NEON fallbacks.
+
+### Fixed
 - Updated the app initialization test for the explicit 99-layer full-offload request (actual Vulkan offload remains determined by native backend diagnostics).
 - Made InferenceRequest Parcelable reading backward-compatible when older clients omit the appended enableThinking field, and use the typed Parcelable reader on Android 13+.
 - Kept token events lossless with an unlimited output buffer, added coroutine cancellation checks during decode, and moved prompt progress through a conflated channel; a closed token collector now requests native cancellation.

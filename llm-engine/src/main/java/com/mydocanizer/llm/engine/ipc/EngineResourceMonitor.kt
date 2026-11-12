@@ -70,7 +70,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         samplingJob = scope.launch {
             while (isActive) {
                 sample()
-                delay(if (phase.get() in ACTIVE_PHASES) ACTIVE_INTERVAL_MS else IDLE_INTERVAL_MS)
+                val currentPhase = phase.get()
+                delay(if (currentPhase in ACTIVE_PHASES || currentPhase.startsWith("INFERENCE_")) ACTIVE_INTERVAL_MS else IDLE_INTERVAL_MS)
             }
         }
     }
@@ -128,10 +129,12 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         logPhase("MODEL_LOAD_FAILED")
     }
 
-    fun inferenceStarted() {
-        synchronized(nativeMemoryLock) { phase.set("INFERENCE") }
-        logPhase("INFERENCE")
-        logRunEnvironment("INFERENCE_START")
+    fun inferenceStarted(runId: String) {
+        val runPhase = "INFERENCE_${runId.take(48)}"
+        synchronized(nativeMemoryLock) { phase.set(runPhase) }
+        logPhase(runPhase)
+        logRunEnvironment("INFERENCE_START:${runId.take(48)}")
+        sample()
     }
 
     private fun logRunEnvironment(event: String) {
@@ -160,9 +163,13 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         else -> "UNAVAILABLE"
     }
 
-    fun inferenceFinished() {
+    fun inferenceFinished(runId: String) {
+        // Capture terminal PSS while the run-specific phase is still active.
+        if (phase.get() == "INFERENCE_${runId.take(48)}") sample()
         synchronized(nativeMemoryLock) {
-            phase.set(if (model.get() == null) "SERVICE_IDLE" else "MODEL_LOADED_IDLE")
+            if (phase.get() == "INFERENCE_${runId.take(48)}") {
+                phase.set(if (model.get() == null) "SERVICE_IDLE" else "MODEL_LOADED_IDLE")
+            }
         }
         logPhase(phase.get())
     }
@@ -171,6 +178,13 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         model.set(null)
         synchronized(nativeMemoryLock) { phase.set("MODEL_UNLOADED") }
         logPhase("MODEL_UNLOADED")
+    }
+
+    fun modelUnloadFailed() {
+        synchronized(nativeMemoryLock) {
+            phase.set(if (model.get() == null) "SERVICE_IDLE" else "MODEL_LOADED_IDLE")
+        }
+        logPhase("MODEL_UNLOAD_FAILED")
     }
 
     private fun logPhase(value: String) {

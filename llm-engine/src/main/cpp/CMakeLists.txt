@@ -554,12 +554,11 @@ set(LLAMA_OPENSSL OFF CACHE BOOL "llama: use openssl" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "ggml: native" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "ggml: backend dl" FORCE)
 set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "ggml: build all variants of the CPU backend" FORCE)
-# Do not turn GGML_BACKEND_DL/CPU_ALL_VARIANTS on here: in the pinned upstream
-# CMake, CPU_ALL_VARIANTS requires BACKEND_DL, BUILD_SHARED_LIBS and converts
-# every backend created by ggml_add_backend_library (including Vulkan) into a
-# MODULE target. This project intentionally links the Vulkan backend statically.
-# Keep the ARM CPU backend baseline-safe until a CPU-only variant loader is added;
-# never compile the sole CPU backend with dotprod/i8mm flags without runtime dispatch.
+# Keep GGML_BACKEND_DL/CPU_ALL_VARIANTS off: upstream's all-variants mode
+# converts every backend (including Vulkan) to MODULE targets, incompatible with
+# this app's static Vulkan link. ARM acceleration is provided by GGML_CPU_KLEIDIAI:
+# pinned ggml-cpu/kleidiai performs Android HWCAP runtime detection for DOTPROD/I8MM
+# and selects compatible kernels with NEON fallbacks. This preserves static Vulkan.
 set(GGML_LLAMAFILE OFF CACHE BOOL "ggml: llamafile" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "ggml: use OpenMP" FORCE)
 
@@ -653,6 +652,22 @@ if(GGML_VULKAN)
 endif()
 
 add_subdirectory(${LLAMA_SRC} build-llama)
+
+# Internal diagnostic bridge: expose the current scheduler split count without
+# modifying llama.cpp's public C API or the pinned submodule.
+if(NOT TARGET llama)
+    message(FATAL_ERROR "LocalLLM: pinned llama target was not created; graph-split diagnostics cannot be installed.")
+endif()
+set(_local_llm_graph_metrics_source "${CMAKE_CURRENT_BINARY_DIR}/local_llm_graph_metrics.cpp")
+file(WRITE "${_local_llm_graph_metrics_source}" [=[
+#include "llama-context.h"
+#include "ggml-backend.h"
+
+extern "C" int local_llm_get_graph_splits(struct llama_context * context) {
+    return context ? ggml_backend_sched_get_n_splits(context->get_sched()) : -1;
+}
+]=])
+target_sources(llama PRIVATE "${_local_llm_graph_metrics_source}")
 
 if(TARGET ggml-vulkan)
     if(LOCAL_LLM_PATCHED_VULKAN_CPP)

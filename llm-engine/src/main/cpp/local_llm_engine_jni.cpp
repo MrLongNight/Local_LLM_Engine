@@ -27,6 +27,9 @@
 #include "sampling.h"
 #include "prompt_cache_utils.h"
 
+// Internal llama.cpp scheduler metric bridge compiled into the pinned llama target.
+extern "C" int local_llm_get_graph_splits(struct llama_context* context);
+
 #define TAG "LocalLlmEngineNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__)
@@ -779,7 +782,16 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeShutdownBacken
 JNIEXPORT jstring JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetSystemInfo(JNIEnv* env, jclass /*clazz*/) {
     const char* sys_info = llama_print_system_info();
-    return env->NewStringUTF(sys_info ? sys_info : "N/A");
+    std::ostringstream details;
+    details << (sys_info ? sys_info : "N/A")
+            << "\nLOCAL_LLM_CPU_RUNTIME_FEATURES"
+            << " - NEON=" << ggml_cpu_has_neon()
+            << ",DOTPROD=" << ggml_cpu_has_dotprod()
+            << ",I8MM=" << ggml_cpu_has_matmul_int8()
+            << ",FP16=" << ggml_cpu_has_fp16_va()
+            << ",recommendedPerformanceCores=" << recommended_performance_core_count();
+    log_native_info_message(details.str());
+    return env->NewStringUTF(details.str().c_str());
 }
 
 JNIEXPORT jstring JNICALL
@@ -1032,9 +1044,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     descriptor_stream = nullptr; // EngineInstance owns the duplicate until model unload.
     report_model_load_stage(&progress_context, 0.72f); // weights complete; context setup begins
 
-    int n_threads = threads;
-    if (n_threads <= 0) {
-        n_threads = std::max(2, (int)sysconf(_SC_NPROCESSORS_ONLN) - 2);
+    int n_threads = threads > 0 ? threads : recommended_performance_core_count();
+    // Keep host submission threads low while layers are offloaded to Vulkan.
+    if (use_vulkan && model_params.n_gpu_layers > 0) {
+        const int capped_threads = std::clamp(n_threads, 1, 2);
+        if (capped_threads != n_threads) {
+            LOGI("Vulkan host threads capped for offload: requested=%d,selected=%d", n_threads, capped_threads);
+        }
+        n_threads = capped_threads;
     }
     engine->n_threads = n_threads;
 
@@ -1051,7 +1068,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     int b_size = batch_size > 0 ? batch_size : BATCH_SIZE;
     engine->batch_size = b_size;
-    const int resolved_batch_threads = batch_threads > 0 ? batch_threads : n_threads;
+    int resolved_batch_threads = batch_threads > 0 ? batch_threads : n_threads;
+    if (use_vulkan && model_params.n_gpu_layers > 0) {
+        resolved_batch_threads = std::clamp(resolved_batch_threads, 1, 2);
+    }
     // Default Vulkan ubatch is bounded for finer progress/cancel granularity.
     // Explicit values always win, enabling a controlled 32/64/128 sweep.
     const int resolved_micro_batch = micro_batch_size > 0
@@ -1073,6 +1093,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     if (!use_vulkan) {
         ctx_params.abort_callback = llama_decode_abort_requested;
         ctx_params.abort_callback_data = engine;
+        // Pinned llama.cpp a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5:
+        // include/llama.h explicitly says abort_callback currently works only with CPU.
+        // Vulkan cancellation therefore relies on the service watchdog/process-isolation fallback.
+    } else {
+        LOGI("LLAMA_ABORT_CALLBACK_POLICY - backend=VULKAN,cooperativeCallback=unsupported,pinnedRevision=a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5");
     }
 
     llama_context* ctx = nullptr;
@@ -1176,6 +1201,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptM
        << ";microBatchSize=" << engine->micro_batch_size
        << ";pid=" << getpid()
        << ";runId=" << engine->inference_run_id
+       << ";graphSplits=" << local_llm_get_graph_splits(engine->context)
        << ";backend=" << engine->active_backend;
     return env->NewStringUTF(ss.str().c_str());
 }

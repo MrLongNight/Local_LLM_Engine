@@ -3,6 +3,7 @@ package com.mydocanizer.llm.engine.ipc
 import android.app.ActivityManager
 import android.app.Service
 import android.content.Intent
+import android.content.ComponentCallbacks2
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.Process
@@ -68,6 +69,7 @@ class InferenceService : Service() {
     @Volatile
     private var activeInferenceJob: Job? = null
     private val isShuttingDown = AtomicBoolean(false)
+    private val memoryTrimUnloadPending = AtomicBoolean(false)
     private var resourceMonitor: EngineResourceMonitor? = null
     @Volatile
     private var activeModelDescriptor: ParcelFileDescriptor? = null
@@ -123,6 +125,62 @@ class InferenceService : Service() {
     override fun onUnbind(intent: Intent?): Boolean {
         EngineDiagnostics.info("ipc", "SERVICE_UNBOUND", "Client unbound from InferenceService")
         return super.onUnbind(intent)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        EngineDiagnostics.info("memory", "SERVICE_TRIM_MEMORY", "level=$level,pid=${Process.myPid()}")
+        if (level < ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            !memoryTrimUnloadPending.compareAndSet(false, true)
+        ) return
+
+        val localEngine = engine
+        if (localEngine == null) {
+            memoryTrimUnloadPending.set(false)
+            return
+        }
+        val activeJob = activeInferenceJob
+        if (activeJob?.isActive == true) {
+            EngineDiagnostics.info("memory", "MODEL_UNLOAD_REQUESTED_FOR_TRIM", "reason=active_inference,level=$level")
+            localEngine.cancelInference()
+            activeJob.invokeOnCompletion {
+                serviceScope.launch {
+                    try {
+                        unloadModelForMemoryPressure(localEngine, level)
+                    } finally {
+                        memoryTrimUnloadPending.set(false)
+                    }
+                }
+            }
+        } else {
+            serviceScope.launch {
+                try {
+                    unloadModelForMemoryPressure(localEngine, level)
+                } finally {
+                    memoryTrimUnloadPending.set(false)
+                }
+            }
+        }
+    }
+
+    private suspend fun unloadModelForMemoryPressure(localEngine: LocalLlmEngine, level: Int) {
+        if (engine !== localEngine || activeInferenceJob?.isActive == true) return
+        val currentModel = localEngine.currentModel.value ?: return
+        EngineDiagnostics.info(
+            "memory",
+            "MODEL_UNLOAD_FOR_MEMORY_PRESSURE",
+            "level=$level,model=${currentModel.name}"
+        )
+        resourceMonitor?.modelUnloading()
+        localEngine.unloadModel().onSuccess {
+            activeModelDescriptor?.close()
+            activeModelDescriptor = null
+            resourceMonitor?.modelUnloaded()
+            EngineDiagnostics.info("memory", "MODEL_UNLOADED_FOR_MEMORY_PRESSURE", "level=$level")
+        }.onFailure { error ->
+            resourceMonitor?.modelUnloadFailed()
+            EngineDiagnostics.error("memory", "MODEL_UNLOAD_FOR_MEMORY_PRESSURE_FAILED", error)
+        }
     }
 
     override fun onDestroy() {
@@ -291,7 +349,7 @@ class InferenceService : Service() {
                         resourceMonitor?.modelUnloaded()
                         callback?.onModelLoaded(null)
                     }.onFailure { err ->
-                        resourceMonitor?.inferenceFinished()
+                        resourceMonitor?.inferenceFinished(currentReqId)
                         callback?.onModelLoadFailed(err.message ?: "Unload failed")
                     }
                 } catch (t: Throwable) {
@@ -323,7 +381,7 @@ class InferenceService : Service() {
 
             activeInferenceJob = serviceScope.launch {
                 val currentReqId = requestId
-                resourceMonitor?.inferenceStarted()
+                resourceMonitor?.inferenceStarted(currentReqId)
                 try {
                     val e = initEngine()
                     var tokenCount = 0

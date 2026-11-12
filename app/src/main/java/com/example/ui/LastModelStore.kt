@@ -111,7 +111,7 @@ internal class LastModelStore(context: Context) {
                         ?: BackendPreference.VULKAN.name
                 )
             }.getOrDefault(BackendPreference.VULKAN),
-            gpuLayers = preferences.getInt(KEY_GPU_LAYERS, 37),
+            gpuLayers = preferences.getInt(KEY_GPU_LAYERS, 99),
             timeoutConfig = timeout,
             batchThreads = preferences.getInt(KEY_BATCH_THREADS, 0),
             microBatchSize = preferences.getInt(KEY_MICRO_BATCH_SIZE, 0),

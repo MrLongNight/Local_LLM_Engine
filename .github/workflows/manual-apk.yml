@@ -306,6 +306,29 @@ jobs:
                       )
 
               if abi == "arm64-v8a":
+                  kleidiai_sources = [
+                      e for e in entries
+                      if os.path.basename(e.get("file", "")) == "kleidiai.cpp"
+                  ]
+                  if not kleidiai_sources:
+                      raise SystemExit(
+                          "arm64-v8a: KleidiAI runtime-dispatch source is missing from compile_commands.json"
+                      )
+                  for entry in kleidiai_sources:
+                      command = entry.get("command")
+                      args = shlex.split(command) if command else entry.get("arguments", [])
+                      if not any(
+                          arg == "-DGGML_USE_CPU_KLEIDIAI" or arg.startswith("-DGGML_USE_CPU_KLEIDIAI=")
+                          for arg in args
+                      ):
+                          raise SystemExit(
+                              "arm64-v8a: kleidiai.cpp is compiled without GGML_USE_CPU_KLEIDIAI"
+                          )
+                  print(
+                      "arm64-v8a: verified KleidiAI DOTPROD/I8MM runtime-dispatch source "
+                      "and compile definition."
+                  )
+
                   has_integer_dot_runtime_marker = False
                   for entry in selected:
                       command = entry.get("command")
