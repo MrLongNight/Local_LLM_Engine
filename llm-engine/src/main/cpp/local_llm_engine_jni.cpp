@@ -6,11 +6,13 @@
 #include <vector>
 #include <sstream>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <exception>
+#include <iomanip>
 #include <stdexcept>
 #include <cstdio>
 #include <fstream>
@@ -224,6 +226,37 @@ static void log_native_info_message(const std::string& message) {
     local_llm_native_log_callback(GGML_LOG_LEVEL_INFO, message.c_str(), nullptr);
 }
 
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+static std::string escape_text_diagnostic(const std::string& value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const char ch : value) {
+        if (ch == '\n') escaped += "\\n";
+        else if (ch == '\r') escaped += "\\r";
+        else if (ch == '\\') escaped += "\\\\";
+        else escaped += ch;
+    }
+    return escaped;
+}
+
+static void log_text_diagnostic_chunks(
+        const std::string& run_id,
+        const char* kind,
+        const std::string& value) {
+    const std::string escaped = escape_text_diagnostic(value);
+    constexpr size_t CHUNK_BYTES = 1800;
+    const size_t total = std::max<size_t>(1, (escaped.size() + CHUNK_BYTES - 1) / CHUNK_BYTES);
+    for (size_t part = 0; part < total; ++part) {
+        const std::string chunk = escaped.substr(part * CHUNK_BYTES, CHUNK_BYTES);
+        std::ostringstream line;
+        line << "LOCAL_LLM_TEXT_TRACE - runId=" << run_id
+             << ",kind=" << kind << ",part=" << (part + 1) << "/" << total
+             << ",text=" << (chunk.empty() ? "<empty>" : chunk);
+        log_native_info_message(line.str());
+    }
+}
+#endif
+
 static constexpr int OVERFLOW_HEADROOM = 8;
 static constexpr int BATCH_SIZE = 512;
 static constexpr float DEFAULT_TEMP = 0.7f;
@@ -371,6 +404,96 @@ struct EngineInstance {
         unload_unlocked();
     }
 };
+
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+static void log_prompt_text_diagnostics(
+        const EngineInstance* engine,
+        const llama_tokens& tokens,
+        const std::string& rendered_prompt,
+        bool used_chat_template,
+        const std::string& template_mode,
+        const llama_vocab* vocab,
+        bool add_bos,
+        llama_token bos_token,
+        bool add_eos,
+        llama_token eos_token) {
+    if (engine == nullptr || vocab == nullptr) return;
+    std::ostringstream metadata;
+    metadata << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+             << ",kind=PROMPT_METADATA,templateMode=" << template_mode
+             << ",usedChatTemplate=" << (used_chat_template ? 1 : 0)
+             << ",messageCount=" << engine->chat_msgs.size()
+             << ",vocabSize=" << llama_vocab_n_tokens(vocab)
+             << ",addBOS=" << (add_bos ? 1 : 0)
+             << ",bosId=" << bos_token
+             << ",addEOS=" << (add_eos ? 1 : 0)
+             << ",eosId=" << eos_token
+             << ",promptTokens=" << tokens.size();
+    log_native_info_message(metadata.str());
+
+    if (engine->chat_templates) {
+        log_text_diagnostic_chunks(engine->inference_run_id, "CHAT_TEMPLATE_SOURCE",
+            common_chat_templates_source(engine->chat_templates.get()));
+    }
+    log_text_diagnostic_chunks(engine->inference_run_id, "RENDERED_PROMPT", rendered_prompt);
+
+    constexpr size_t TOKEN_IDS_PER_LINE = 80;
+    const size_t chunks = (tokens.size() + TOKEN_IDS_PER_LINE - 1) / TOKEN_IDS_PER_LINE;
+    for (size_t chunk = 0; chunk < chunks; ++chunk) {
+        const size_t begin = chunk * TOKEN_IDS_PER_LINE;
+        const size_t end = std::min(tokens.size(), begin + TOKEN_IDS_PER_LINE);
+        std::ostringstream ids;
+        ids << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+            << ",kind=PROMPT_TOKEN_IDS,part=" << (chunk + 1) << "/" << chunks
+            << ",offset=" << begin << ",ids=";
+        for (size_t i = begin; i < end; ++i) {
+            if (i != begin) ids << ',';
+            ids << tokens[i];
+        }
+        log_native_info_message(ids.str());
+    }
+
+    std::string detokenized;
+    for (const llama_token token : tokens) {
+        detokenized += common_token_to_piece(engine->context, token, true);
+    }
+    log_text_diagnostic_chunks(engine->inference_run_id, "DETOKENIZED_PROMPT", detokenized);
+}
+
+static void log_first_token_top5_logits(const EngineInstance* engine) {
+    if (engine == nullptr || engine->context == nullptr || engine->model == nullptr) return;
+    const llama_vocab* vocab = llama_model_get_vocab(engine->model);
+    const int vocab_size = llama_vocab_n_tokens(vocab);
+    const float* logits = llama_get_logits_ith(engine->context, -1);
+    if (logits == nullptr || vocab_size <= 0) {
+        log_native_info_message("LOCAL_LLM_TEXT_TRACE - kind=FIRST_TOKEN_TOP5_LOGITS,available=0");
+        return;
+    }
+    struct Candidate { float value; llama_token token; };
+    std::array<Candidate, 5> top{};
+    size_t count = 0;
+    for (int32_t id = 0; id < vocab_size; ++id) {
+        const float value = logits[id];
+        if (!std::isfinite(value)) continue;
+        size_t pos = 0;
+        while (pos < count && top[pos].value >= value) ++pos;
+        if (pos >= top.size()) continue;
+        if (count < top.size()) ++count;
+        for (size_t j = count - 1; j > pos; --j) top[j] = top[j - 1];
+        top[pos] = Candidate{value, static_cast<llama_token>(id)};
+    }
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(5)
+        << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+        << ",kind=FIRST_TOKEN_TOP5_LOGITS,vocabSize=" << vocab_size << ",entries=";
+    for (size_t i = 0; i < count; ++i) {
+        if (i != 0) out << '|';
+        out << (i + 1) << ':' << top[i].token << ':' << top[i].value << ':'
+            << escape_text_diagnostic(common_token_to_piece(engine->context, top[i].token, true));
+    }
+    log_native_info_message(out.str());
+}
+#endif
 
 // llama.cpp documents this callback as CPU-only in the pinned revision. Vulkan
 // cancellation remains process-level because the GPU backend does not guarantee
@@ -1390,8 +1513,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         common_sampler_free(engine->sampler);
         engine->sampler = nullptr;
     }
+    common_params_sampling request_sampling;
     try {
-        common_params_sampling request_sampling;
         configure_local_sampling(request_sampling, effective_temperature, effective_top_p,
                                  engine->default_top_k, engine->default_min_p);
         engine->sampler = common_sampler_init(engine->model, request_sampling);
@@ -1412,6 +1535,30 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     LOGI("Request sampler configured: temperature=%.3f, top_k=%d, top_p=%.3f, min_p=%.3f, chain=%s",
          effective_temperature, engine->default_top_k, effective_top_p, engine->default_min_p,
          effective_temperature <= 0.0f ? "GREEDY" : "TOP_K_TOP_P_MIN_P_TEMPERATURE");
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    {
+        std::ostringstream sampling;
+        sampling << std::fixed << std::setprecision(6)
+                 << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+                 << ",kind=SAMPLING_PARAMETERS"
+                 << ",temperature=" << request_sampling.temp
+                 << ",topP=" << request_sampling.top_p
+                 << ",topK=" << request_sampling.top_k
+                 << ",minP=" << request_sampling.min_p
+                 << ",repeatPenalty=" << request_sampling.penalty_repeat
+                 << ",frequencyPenalty=" << request_sampling.penalty_freq
+                 << ",presencePenalty=" << request_sampling.penalty_present
+                 << ",penaltyLastN=" << request_sampling.penalty_last_n
+                 << ",dryMultiplier=" << request_sampling.dry_multiplier
+                 << ",typicalP=" << request_sampling.typ_p
+                 << ",xtcProbability=" << request_sampling.xtc_probability
+                 << ",xtcThreshold=" << request_sampling.xtc_threshold
+                 << ",topNSigma=" << request_sampling.top_n_sigma
+                 << ",vocabSize=" << llama_vocab_n_tokens(llama_model_get_vocab(engine->model))
+                 << ",samplerChain=" << common_sampler_print(engine->sampler);
+        log_native_info_message(sampling.str());
+    }
+#endif
 
     engine->last_prompt_template_us = 0;
     engine->last_prompt_tokenization_us = 0;
@@ -1467,15 +1614,18 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     std::string full_prompt;
     common_chat_prompt rendered_prompt;
     bool used_chat_template = false;
+    std::string template_mode = "FALLBACK";
 
     auto render_and_tokenize = [&](const std::vector<common_chat_msg>& source_messages,
                                    bool add_generation_prompt,
                                    std::string& out_prompt,
                                    common_chat_prompt& out_rendered,
-                                   bool& out_used_template) -> llama_tokens {
+                                   bool& out_used_template,
+                                   std::string& out_template_mode) -> llama_tokens {
         out_prompt.clear();
         out_rendered = common_chat_prompt();
         out_used_template = false;
+        out_template_mode = "FALLBACK";
         try {
             common_chat_templates_inputs inputs;
             inputs.messages = source_messages;
@@ -1486,6 +1636,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             out_rendered = rendered.prompt;
             out_prompt = out_rendered.str();
             out_used_template = true;
+            out_template_mode = "JINJA";
         } catch (const std::exception& jinja_error) {
             LOGW("Jinja chat-template rendering failed: %s", jinja_error.what());
             try {
@@ -1498,6 +1649,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
                 out_rendered = rendered.prompt;
                 out_prompt = out_rendered.str();
                 out_used_template = true;
+                out_template_mode = "LEGACY";
             } catch (const std::exception& legacy_error) {
                 LOGE("Legacy chat-template rendering failed: %s", legacy_error.what());
                 if (has_chat_template) {
@@ -1539,7 +1691,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
 
     const int64_t tokenization_start_us = llama_time_us();
     llama_tokens tokens = render_and_tokenize(
-        messages, true, full_prompt, rendered_prompt, used_chat_template);
+        messages, true, full_prompt, rendered_prompt, used_chat_template, template_mode);
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
         return 3;
@@ -1568,7 +1720,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         messages.erase(messages.begin() + static_cast<std::ptrdiff_t>(erase_index));
         ++removed_history_messages;
         tokens = render_and_tokenize(
-            messages, true, full_prompt, rendered_prompt, used_chat_template);
+            messages, true, full_prompt, rendered_prompt, used_chat_template, template_mode);
         if (tokens.empty()) {
             LOGE("Prompt became empty after history truncation");
             return 3;
@@ -1605,8 +1757,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             std::string system_prompt_text;
             common_chat_prompt system_rendered;
             bool system_used_template = false;
+            std::string system_template_mode;
             const auto system_tokens = render_and_tokenize(
-                system_messages, false, system_prompt_text, system_rendered, system_used_template);
+                system_messages, false, system_prompt_text, system_rendered,
+                system_used_template, system_template_mode);
             engine->system_prompt_position = static_cast<llama_pos>(
                 local_llm::common_prefix_length(system_tokens, tokens));
             if (engine->system_prompt_position < static_cast<llama_pos>(system_tokens.size())) {
@@ -1618,6 +1772,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             engine->system_prompt_position = 0;
         }
     }
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    log_prompt_text_diagnostics(engine, tokens, full_prompt, used_chat_template,
+        template_mode, model_vocab, model_add_bos, model_bos_token, model_add_eos, model_eos_token);
+#endif
     PromptEvalProgressContext progress_context{env, progress_listener, nullptr};
     if (progress_listener != nullptr) {
         jclass listener_class = env->GetObjectClass(progress_listener);
@@ -1765,6 +1923,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     // has returned. Re-activate the same run ID for this token's GPU graph.
     VulkanProfileRunScope profile_run_scope(engine->inference_run_id);
     const int64_t token_step_start_us = llama_time_us();
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    if (engine->tokens_generated == 0) log_first_token_top5_logits(engine);
+#endif
     const int64_t sample_start_us = llama_time_us();
     const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
     common_sampler_accept(engine->sampler, new_token_id, true);
