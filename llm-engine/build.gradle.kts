@@ -2,6 +2,11 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+// Profiler builds are intentionally opt-in: timestamp queries perturb throughput.
+val localLlmVulkanPerfProfiler = providers.gradleProperty("localLlmVulkanPerfProfiler")
+    .map { it.equals("true", ignoreCase = true) }
+    .getOrElse(false)
+
 android {
     namespace = "com.mydocanizer.llm.engine"
     compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -9,6 +14,7 @@ android {
 
     buildTypes {
         getByName("debug") {
+            buildConfigField("boolean", "VULKAN_PERF_PROFILER_ENABLED", localLlmVulkanPerfProfiler.toString())
             externalNativeBuild {
                 cmake {
                     arguments += listOf("-DLOCAL_LLM_ENABLE_TEST_HOOKS=ON")
@@ -16,6 +22,7 @@ android {
             }
         }
         getByName("release") {
+            buildConfigField("boolean", "VULKAN_PERF_PROFILER_ENABLED", "false")
             externalNativeBuild {
                 cmake {
                     arguments += listOf("-DLOCAL_LLM_ENABLE_TEST_HOOKS=OFF")

@@ -94,7 +94,11 @@ internal class LocalLlmEngineImpl(
                 diagnosticsDirectory,
                 "engine-native-${android.os.Process.myPid()}.log"
             )
-            val loaded = NativeEngineHandle.ensureLoaded(nativeDiagnosticsFile)
+            val profilerEnabled = BuildConfig.VULKAN_PERF_PROFILER_ENABLED
+            val loaded = NativeEngineHandle.ensureLoaded(
+                diagnosticsLogFile = nativeDiagnosticsFile,
+                enableVulkanPerfProfiler = profilerEnabled
+            )
             if (!loaded) {
                 throw IllegalStateException("Failed to load native library localllm_engine")
             }
@@ -102,7 +106,7 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.info(
                 "engine",
                 "NATIVE_LOGGER_READY",
-                "nativeLogFile=${nativeDiagnosticsFile.name}; minimumLevel=INFO; promptAndResponseContentNotRecorded"
+                "nativeLogFile=${nativeDiagnosticsFile.name}; minimumLevel=INFO; vulkanPerfProfilerEnabled=$profilerEnabled; promptAndResponseContentNotRecorded"
             )
             val handle = NativeEngineHandle.nativeCreateEngine()
             if (handle == 0L) {

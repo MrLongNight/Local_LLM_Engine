@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added a separate Debug-only opt-in for Vulkan per-operation profiling via `-PlocalLlmVulkanPerfProfiler=true`; normal builds remain profiler-free and Release forcibly disables it.
+- Added an explicit logger diagnostic recording whether the profiler opt-in is active.
+
+### Fixed
+- Android APK CI now verifies the generated graph-diagnostics overlay whether CMake compiles it directly or includes it in a Unity translation unit; marker checks still inspect the actual generated overlay source.
+
+
+### Added
 - Added per-run CPU/Vulkan graph-node assignment diagnostics from the pinned llama.cpp scheduler callback. The compact report distinguishes CPU fallback nodes from Vulkan nodes instead of relying on aggregate graph-split totals alone; CI verifies the generated source overlay is compiled.
 
 

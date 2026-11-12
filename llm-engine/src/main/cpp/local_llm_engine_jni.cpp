@@ -762,7 +762,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(
         unsetenv("GGML_VK_PERF_LOGGER_CONCURRENT");
         if (profiler_result == 0 && frequency_result == 0) {
             log_native_info_message(
-                "VULKAN_PERF_PROFILER_CONFIG - enabled=true,frequency=1,mode=per_operation_gpu_timestamps,scope=debug_only");
+                "VULKAN_PERF_PROFILER_CONFIG - enabled=true,frequency=1,mode=per_operation_gpu_timestamps,scope=explicit_build_opt_in");
         } else {
             unsetenv("GGML_VK_PERF_LOGGER");
             unsetenv("GGML_VK_PERF_LOGGER_FREQUENCY");

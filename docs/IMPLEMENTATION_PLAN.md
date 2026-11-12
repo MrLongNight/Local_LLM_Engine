@@ -1,3 +1,10 @@
+# Aktueller Stand 12.11.2026
+
+- Repository-Head nach CI-Fix: `6a4f0d6e45714c92d3d2dfc694ee80437d8f0d83`.
+- GitHub Actions: Unit Tests `43232784465` erfolgreich; Android APK Build `43232784573` erfolgreich einschließlich Android-36-x86_64-Instrumentationstests, APK-/Test-APK-Upload und nativen Compile-Checks.
+- Der APK-CI-Fehler wurde auf die zu enge Erkennung der generierten `llama-context.cpp`-Overlaydatei in `compile_commands.json` zurückgeführt. CI akzeptiert nun sowohl eine direkte Translation-Unit als auch deren Einbindung in eine Unity-Translation-Unit und prüft weiterhin den Inhalt des generierten Overlays.
+- Die Emulatorprüfung ist kein Ersatz für die Zielgeräteabnahme. Auf nubia Z2462N / Android 16 / Mali-G57 bleiben reale GGUF-Load-/Inference-/Offload-Messungen, die Vulkan-A/B-Sweeps, fünf Ressourcenzyklen und die numerischen Performance-Akzeptanzwerte offen.
+
 # Umsetzungsplan – Local LLM Engine
 
 **Arbeitsbranch:** `main`  
@@ -215,14 +222,14 @@ Ausgangscommit vor diesem Plan: `ed6506302565f02c4896095c8d6f00a778f9f689`.
 **Status:** Work in progress. Manifest und AIDL sind im Quellstand vorhanden; Timeout-Korrektur ist implementiert, CI- und Geräteabnahme sind noch nicht abgeschlossen.
 
 
-## Debug-Vulkan-Profiler – Implementierung am 10.11.2026, Verifikation ausstehend
+## Vulkan-Per-Op-Profiler – expliziter Build-Opt-in und aktueller Abnahmestand (12.11.2026)
 
-- Debug-Builds übergeben `BuildConfig.DEBUG` an den JNI-Backendstart. Vor `llama_backend_init()` wird dadurch `GGML_VK_PERF_LOGGER=1` mit Frequenz 1 gesetzt; der nicht-konkurrierende Per-Operator-Modus bleibt aktiv. Release-Builds entfernen die Variablen ausdrücklich.
-- Der Android-CMake-Overlay ersetzt gezielt `vk_perf_logger::print_timings()` im generierten Vulkan-Quelltext. Die Upstream-Ausgabe über `std::cerr` wird zu strukturierten `GGML_LOG_INFO`-Zeilen umgeleitet, damit sie in der vorhandenen nativen Prozess-Logdatei erhalten bleibt. Jede Zeile enthält PID, Graph-Snapshot-ID, Operator, Sample-Anzahl sowie durchschnittliche und kumulierte GPU-Zeit; GFLOPS nur, wenn Upstream passende FLOP-Zähler bereitstellt.
-- Der kompakte Export fasst die letzten zwölf Graph-Snapshots pro Operator zusammen und meldet p50/p90 der GPU-Operatorzeit. Die RAM-Zusammenfassung und RAM-Zeitlinie stehen vor umfangreichen Token-Stichproben. Native Prozesslogs behalten bis zu 2 MiB, der kompakte Export bis zu 32 KiB.
-- **Messgrenze:** Vulkan-Timestamp-Queries und deren Auslesen verursachen zusätzliche Laufzeit-/Synchronisationskosten. Tokens/s eines profileraktivierten Debug-Laufs sind daher kein sauberer Performancevergleich. Die Operationstimestamps dienen der Lokalisierung teurer GPU-Operationen; jede Optimierung muss anschließend in einem profilerfreien Lauf erneut gemessen werden.
-- **Noch nicht abgenommen:** CI muss den erzeugten Vulkan-Overlay-Quelltext und die Debug-/Release-JNI-Konfiguration kompilieren. Auf dem Mali-G57 muss ein Debug-Lauf echte `LOCAL_LLM_VULKAN_OP_TIMING`-Zeilen zeigen. Erst danach sind Q4_K-Prefill-/Decode-Operationen getrennt zu vergleichen. Ein Build allein beweist weder funktionierende Hardware-Timestamp-Queries noch einen Performancegewinn.
-
+- Das Profiling ist standardmäßig in Debug und Release deaktiviert. `-PlocalLlmVulkanPerfProfiler=true` aktiviert es ausschließlich für einen separaten Debug-Build; Release erzwingt den Wert `false`.
+- Die Library übergibt den generierten BuildConfig-Schalter an `NativeEngineHandle.ensureLoaded()`. JNI setzt `GGML_VK_PERF_LOGGER` vor `llama_backend_init()` nur bei diesem expliziten Opt-in und protokolliert den tatsächlichen Zustand. Standard-Benchmarks bleiben profilerfrei.
+- Der Android-CMake-Overlay ersetzt `vk_perf_logger::print_timings()` im generierten Vulkan-Quelltext und führt Operatorzeiten über `GGML_LOG_INFO` in das native Diagnoseprotokoll. PID, Graph-Snapshot, Operator und Inferenz-`runId` verbinden die Werte mit den Tokenmetriken; der kompakte Export bildet p50/p90.
+- **CI-Nachweis:** Commit `6a4f0d6` (12.11.2026) baut die Debug-APK und Instrumentation-APK erfolgreich. Der CI-Check verifiziert das Vulkan-Overlay, den Graph-Backend-Diagnosecode (direkte TU oder Unity-TU), Integer-Dot-Shader sowie Optimierungsflags. Der Android-36-x86_64-Prozessisolationstest und die Unit Tests sind erfolgreich.
+- **Messgrenze:** Timestamp-Queries und deren Readback kosten Laufzeit und Synchronisation. Tokens/s eines profileraktivierten Laufs sind kein Performance-Benchmark. Kernelentscheidungen müssen in einem separaten profilerfreien Lauf wiederholt werden.
+- **Weiterhin offen:** Der Per-Op-Profiler muss mit einem expliziten Diagnose-Build auf dem Mali-G57 getestet und seine `runId`-Zuordnung im Export bestätigt werden. Auch die Vulkan-A/B-Ergebnisse und sämtliche Performance-Akzeptanzwerte benötigen reale Messungen auf dem nubia Z2462N; CI/Emulator belegt diese nicht.
 
 ### Diagnose-Follow-up – Profiling nach Inferenzlauf trennen
 

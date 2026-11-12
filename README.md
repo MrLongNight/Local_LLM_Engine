@@ -87,10 +87,20 @@ with `decodeSubmitUs` and `backendSyncWaitUs` available separately in the native
 ## Debug Vulkan GPU-operation profiler
 
 The per-operation profiler is **disabled by default in both Debug and Release**.
-The engine only sets `GGML_VK_PERF_LOGGER` when an explicit diagnostic
-initialization requests it, before `llama_backend_init()`. Standard backend
-comparisons and the full benchmark matrix therefore run without per-op
-timestamp-query overhead. The Android Vulkan compatibility overlay routes
+A normal build never enables Vulkan timestamp queries, so standard backend
+comparisons and the full benchmark matrix run without profiler overhead.
+
+For a separate diagnostic Debug APK only, pass the explicit Gradle property:
+
+```bash
+gradle --no-daemon -PlocalLlmVulkanPerfProfiler=true :app:assembleDebug
+```
+
+The property defaults to `false`; Release builds forcibly keep it disabled.
+The library passes this build-time opt-in to JNI, which sets
+`GGML_VK_PERF_LOGGER` before `llama_backend_init()`. The generated profiler
+rows are retained in the native diagnostics export. Build a separate
+profiler-disabled APK for every throughput comparison. The Android Vulkan compatibility overlay routes
 each profiler result through the native ggml logger instead of `std::cerr`,
 so explicitly enabled diagnostic rows are retained in the process-specific
 native diagnostics file and included in the compact export. Each row contains the
@@ -98,8 +108,8 @@ inference-service PID, a graph snapshot ID, operator name, timestamp sample
 count, average GPU time and accumulated GPU time; GFLOPS are included where
 llama.cpp provides matching flop counts.
 
-Release builds explicitly clear the profiler environment variables. Debug
-profiling adds timestamp queries and synchronization/readback overhead, so
+Profiler-disabled builds explicitly clear the profiler environment variables. Profiling
+adds timestamp queries and synchronization/readback overhead, so
 **do not use tokens/s from a profiler-enabled Debug run as a clean performance
 benchmark**. Use it to identify expensive Vulkan operators and compare kernel
 paths; validate any resulting optimization again in a profiler-disabled build.
