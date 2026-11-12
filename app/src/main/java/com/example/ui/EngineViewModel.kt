@@ -1388,7 +1388,8 @@ class EngineViewModel(
         }
         val profiles = InferenceConfigSmokePlan.create(
             originalConfig,
-            Runtime.getRuntime().availableProcessors()
+            Runtime.getRuntime().availableProcessors(),
+            activeBackend = model.activeBackend
         )
         if (profiles.size < 2) {
             _errorMessage.value = "Keine abweichenden Testprofile für diese Konfiguration gefunden."

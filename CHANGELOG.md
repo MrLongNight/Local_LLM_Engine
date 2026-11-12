@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Configuration screening now resolves AUTO n_ubatch from the actually loaded backend (Vulkan 64 or CPU n_batch), rather than assuming Vulkan for an AUTO model that may have fallen back to CPU.
+
+
+### Fixed
 - The configuration smoke-test baseline now preserves n_ubatch AUTO (Vulkan 64, CPU n_batch). The n_batch candidate pins the baseline's resolved ubatch so each profile still changes only one effective parameter.
 
 

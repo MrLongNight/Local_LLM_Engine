@@ -17,11 +17,14 @@ class InferenceConfigSmokePlanTest {
             backendPreference = BackendPreference.VULKAN,
             gpuLayers = 37
         )
-        val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 8)
+        val activeBackend = "Vulkan selected (Mali-G57)"
+        val profiles = InferenceConfigSmokePlan.create(
+            base, availableProcessors = 8, activeBackend = activeBackend
+        )
 
         assertEquals("baseline", profiles.first().id)
         assertEquals(0, profiles.first().config.microBatchSize) // keep Vulkan AUTO
-        assertEquals(64, profiles.first().config.let { InferenceConfigSmokePlan.resolvedUbatchForTest(it) })
+        assertEquals(64, profiles.first().config.let { InferenceConfigSmokePlan.resolvedUbatchForTest(it, activeBackend) })
         assertTrue(profiles.size >= 5)
         assertTrue(profiles.any { it.config.threads == 4 && it.config.batchThreads == 6 })
         assertTrue(profiles.any { it.config.threads == 8 && it.config.batchThreads == 6 })
@@ -35,8 +38,8 @@ class InferenceConfigSmokePlanTest {
                 profile.config.threads != baseline.threads,
                 profile.config.batchThreads != baseline.batchThreads,
                 profile.config.batchSize != baseline.batchSize,
-                InferenceConfigSmokePlan.resolvedUbatchForTest(profile.config) !=
-                    InferenceConfigSmokePlan.resolvedUbatchForTest(baseline)
+                InferenceConfigSmokePlan.resolvedUbatchForTest(profile.config, activeBackend) !=
+                    InferenceConfigSmokePlan.resolvedUbatchForTest(baseline, activeBackend)
             ).count { it }
             assertEquals("Profile " + profile.id + " must change exactly one axis", 1, changed)
             assertEquals(baseline.contextSize, profile.config.contextSize)
@@ -47,13 +50,40 @@ class InferenceConfigSmokePlanTest {
         }
     }
 
+
+    @Test
+    fun autoBaselineUsesTheActualCpuBackendNBatch() {
+        val base = EngineConfig(
+            batchSize = 128,
+            threads = 4,
+            backendPreference = BackendPreference.AUTO
+        )
+        val profiles = InferenceConfigSmokePlan.create(
+            base,
+            availableProcessors = 8,
+            activeBackend = "CPU (registered ggml CPU backend)"
+        )
+        assertEquals(0, profiles.first().config.microBatchSize)
+        assertEquals(
+            128,
+            InferenceConfigSmokePlan.resolvedUbatchForTest(
+                profiles.first().config,
+                "CPU (registered ggml CPU backend)"
+            )
+        )
+        val batchProfile = profiles.firstOrNull { it.id == "batch-default" }
+        if (batchProfile != null) {
+            assertEquals(128, batchProfile.config.microBatchSize)
+        }
+    }
+
     @Test
     fun omitsNBatchCandidateWhenItWouldMakeMicroBatchInvalid() {
         val base = EngineConfig(batchSize = 1024, threads = 6, microBatchSize = 1024)
         val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 8)
         assertTrue(profiles.none { it.id == "batch-default" })
         profiles.forEach { profile ->
-            val ubatch = if (profile.config.microBatchSize > 0) profile.config.microBatchSize else 64
+            val ubatch = InferenceConfigSmokePlan.resolvedUbatchForTest(profile.config)
             assertTrue(ubatch <= profile.config.batchSize)
         }
     }
