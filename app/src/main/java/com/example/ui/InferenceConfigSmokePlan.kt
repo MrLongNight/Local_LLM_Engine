@@ -20,12 +20,15 @@ internal object InferenceConfigSmokePlan {
     fun create(base: EngineConfig, availableProcessors: Int): List<Profile> {
         val baseline = base.copy(
             batchThreads = if (base.batchThreads > 0) base.batchThreads else base.threads,
-            microBatchSize = if (base.microBatchSize > 0) base.microBatchSize else base.batchSize,
+            // Preserve AUTO (0) so the baseline exercises Vulkan n_ubatch=64 or
+            // CPU n_ubatch=n_batch exactly as the native backend would resolve it.
+            microBatchSize = base.microBatchSize,
             temperature = 0f,
             topP = 1f,
             maxPredictTokens = MEASURED_TOKENS
         )
         val deviceThreads = availableProcessors.coerceIn(2, 8)
+        val baselineUbatch = resolvedMicroBatchSize(baseline)
         val smallerMicroBatch = minOf(32, baseline.batchSize)
         val candidates = mutableListOf(
             Profile("threads-default", "n_threads=4 (Standardwert)", baseline.copy(threads = 4)),
@@ -39,8 +42,14 @@ internal object InferenceConfigSmokePlan {
         )
         // Keep n_ubatch fixed while testing n_batch. Skip this profile when
         // the existing micro-batch would exceed the candidate batch size.
-        if (baseline.microBatchSize <= 512) {
-            candidates += Profile("batch-default", "n_batch=512 (Standardwert)", baseline.copy(batchSize = 512))
+        if (baselineUbatch <= 512) {
+            // Pin the already-resolved ubatch while changing n_batch; a raw AUTO
+            // value would resolve differently after changing n_batch on CPU.
+            candidates += Profile(
+                "batch-default",
+                "n_batch=512 (Standardwert)",
+                baseline.copy(batchSize = 512, microBatchSize = baselineUbatch)
+            )
         }
 
         val result = mutableListOf(Profile("baseline", "Ausgangskonfiguration", baseline))
@@ -51,9 +60,20 @@ internal object InferenceConfigSmokePlan {
         return result
     }
 
+    internal fun resolvedUbatchForTest(config: EngineConfig): Int = resolvedMicroBatchSize(config)
+
+    private fun resolvedMicroBatchSize(config: EngineConfig): Int {
+        if (config.microBatchSize > 0) return minOf(config.microBatchSize, config.batchSize)
+        return if (config.backendPreference == com.mydocanizer.llm.engine.BackendPreference.CPU) {
+            config.batchSize
+        } else {
+            minOf(64, config.batchSize)
+        }
+    }
+
     private fun signature(config: EngineConfig): String =
         config.threads.toString() + ":" +
             config.batchThreads + ":" +
             config.batchSize + ":" +
-            config.microBatchSize
+            resolvedMicroBatchSize(config)
 }

@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- The configuration smoke-test baseline now preserves n_ubatch AUTO (Vulkan 64, CPU n_batch). The n_batch candidate pins the baseline's resolved ubatch so each profile still changes only one effective parameter.
+
+
+### Fixed
 - Kept the raw n_ubatch AUTO value at the JNI boundary so Vulkan uses its 64-token mobile default instead of accidentally receiving n_batch=512; resource snapshots separate effective and requested micro-batch values.
 - Native prompt evaluation now calls llama_decode in n_ubatch-sized chunks, reporting progress and checking cancellation at each completed micro-batch. The Kotlin prefill start performs a final cancellation handshake before JNI.
 - Native INFO/DEBUG log writes are buffered and flushed at most every 500 ms; WARN/ERROR still flush immediately. Fixed native handle destruction logging to capture its address before delete.

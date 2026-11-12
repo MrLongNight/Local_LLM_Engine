@@ -20,6 +20,8 @@ class InferenceConfigSmokePlanTest {
         val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 8)
 
         assertEquals("baseline", profiles.first().id)
+        assertEquals(0, profiles.first().config.microBatchSize) // keep Vulkan AUTO
+        assertEquals(64, profiles.first().config.let { InferenceConfigSmokePlan.resolvedUbatchForTest(it) })
         assertTrue(profiles.size >= 5)
         assertTrue(profiles.any { it.config.threads == 4 && it.config.batchThreads == 6 })
         assertTrue(profiles.any { it.config.threads == 8 && it.config.batchThreads == 6 })
@@ -33,7 +35,8 @@ class InferenceConfigSmokePlanTest {
                 profile.config.threads != baseline.threads,
                 profile.config.batchThreads != baseline.batchThreads,
                 profile.config.batchSize != baseline.batchSize,
-                profile.config.microBatchSize != baseline.microBatchSize
+                InferenceConfigSmokePlan.resolvedUbatchForTest(profile.config) !=
+                    InferenceConfigSmokePlan.resolvedUbatchForTest(baseline)
             ).count { it }
             assertEquals("Profile " + profile.id + " must change exactly one axis", 1, changed)
             assertEquals(baseline.contextSize, profile.config.contextSize)
@@ -46,11 +49,12 @@ class InferenceConfigSmokePlanTest {
 
     @Test
     fun omitsNBatchCandidateWhenItWouldMakeMicroBatchInvalid() {
-        val base = EngineConfig(batchSize = 1024, threads = 6)
+        val base = EngineConfig(batchSize = 1024, threads = 6, microBatchSize = 1024)
         val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 8)
         assertTrue(profiles.none { it.id == "batch-default" })
         profiles.forEach { profile ->
-            assertTrue(profile.config.microBatchSize <= profile.config.batchSize)
+            val ubatch = if (profile.config.microBatchSize > 0) profile.config.microBatchSize else 64
+            assertTrue(ubatch <= profile.config.batchSize)
         }
     }
 
@@ -60,7 +64,8 @@ class InferenceConfigSmokePlanTest {
         val profiles = InferenceConfigSmokePlan.create(base, availableProcessors = 4)
         val signatures = profiles.map {
             it.config.threads.toString() + ":" + it.config.batchThreads +
-                ":" + it.config.batchSize + ":" + it.config.microBatchSize
+                ":" + it.config.batchSize + ":" +
+                InferenceConfigSmokePlan.resolvedUbatchForTest(it.config)
         }
         assertEquals(signatures.size, signatures.distinct().size)
     }
