@@ -28,6 +28,24 @@ inline std::size_t reusable_prefix_length(
     return std::min(common_prefix_length(cached, prompt), prompt.size() - 1);
 }
 
+// Ensure model-required BOS/EOS markers exist exactly once at sequence boundaries.
+// Template renderers may strip these markers before returning prompt parts, while
+// tokenizing every part with add_special=false would otherwise lose them.
+template <typename Token>
+inline void ensure_model_boundary_tokens(
+        std::vector<Token>& tokens,
+        bool add_bos,
+        Token bos_token,
+        bool add_eos,
+        Token eos_token) {
+    if (add_bos && (tokens.empty() || tokens.front() != bos_token)) {
+        tokens.insert(tokens.begin(), bos_token);
+    }
+    if (add_eos && (tokens.empty() || tokens.back() != eos_token)) {
+        tokens.push_back(eos_token);
+    }
+}
+
 // Return erase indices in execution order. Indices account for each preceding erase,
 // so removing oldest history messages does not invalidate later indices. Protected
 // messages (all system messages and the last user message) are never included.

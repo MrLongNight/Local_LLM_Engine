@@ -1421,6 +1421,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     engine->last_prompt_threads = engine->n_threads;
     const int64_t prompt_prepare_start_us = llama_time_us();
     const bool has_chat_template = common_chat_templates_was_explicit(engine->chat_templates.get());
+    const llama_vocab* model_vocab = llama_model_get_vocab(engine->model);
+    const bool model_add_bos = llama_vocab_get_add_bos(model_vocab);
+    const bool model_add_eos = llama_vocab_get_add_eos(model_vocab);
+    const llama_token model_bos_token = llama_vocab_bos(model_vocab);
+    const llama_token model_eos_token = llama_vocab_eos(model_vocab);
+    LOGI("Tokenizer boundary policy: addBOS=%d,bosId=%d,addEOS=%d,eosId=%d,vocabSize=%d",
+         model_add_bos ? 1 : 0, model_bos_token, model_add_eos ? 1 : 0,
+         model_eos_token, llama_vocab_n_tokens(model_vocab));
     std::vector<common_chat_msg> messages;
     messages.reserve(static_cast<size_t>(count));
 
@@ -1516,6 +1524,16 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         } else {
             result = common_tokenize(engine->context, out_prompt, false, false);
         }
+        // common_chat_templates_apply_jinja removes boundary markers when the
+        // model tokenizer asks llama.cpp to add them. Restore them after all
+        // template/input fragments are joined; never add EOS to an interior part.
+        if ((model_add_bos && model_bos_token == LLAMA_TOKEN_NULL) ||
+            (model_add_eos && model_eos_token == LLAMA_TOKEN_NULL)) {
+            LOGE("Model requires a BOS/EOS boundary token missing from its vocabulary");
+            return {};
+        }
+        local_llm::ensure_model_boundary_tokens(
+            result, model_add_bos, model_bos_token, model_add_eos, model_eos_token);
         return result;
     };
 

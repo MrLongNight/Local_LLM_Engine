@@ -27,6 +27,22 @@ int main() {
         assert(local_llm::reusable_prefix_length(cached, prompt) == 0);
     }
     {
+        std::vector<int> tokens{11, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, true, 2);
+        assert((tokens == std::vector<int>{1, 11, 22, 2}));
+    }
+    {
+        // Explicit template boundaries must not be duplicated.
+        std::vector<int> tokens{1, 11, 22, 2};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, true, 2);
+        assert((tokens == std::vector<int>{1, 11, 22, 2}));
+    }
+    {
+        std::vector<int> tokens{11, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, false, 1, false, 2);
+        assert((tokens == std::vector<int>{11, 22}));
+    }
+    {
         // system, old user/assistant turns, newest user
         const auto plan = local_llm::build_prompt_truncation_plan(
             6, std::vector<std::size_t>{0}, 5);
