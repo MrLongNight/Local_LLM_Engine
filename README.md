@@ -49,14 +49,18 @@ The workflow builds `:app:assembleDebug`, including the native C++ build and the
 
 The app stores the source and exact load-time configuration of the last model that
 loaded successfully. On the next cold app start, it attempts to load that model
-automatically. App-private GGUF files are checked for existence first. A model opened
-through Android's Storage Access Framework is remembered only after a persistent read
-grant has been obtained; if the file is moved, removed, or access is revoked, startup
-shows an actionable error and leaves the saved selection intact for recovery. Manually
-unloading a model does not clear the remembered selection.
+automatically. App-private GGUF files are checked for existence first. A model selected through Android's Storage Access Framework is streamed once into
+`filesDir/models`. The import checks available disk space, validates GGUF magic,
+calculates SHA-256, writes to a temporary file and publishes it with an atomic rename.
+When provider metadata is stable, later imports of the same URI can reuse the verified
+private copy. The inference process receives a regular app-private file descriptor;
+it does not mmap through SAF/FUSE. The private file path is saved as the recovery source,
+so later reloads do not depend on the original provider grant. A borrowed SAF descriptor
+is retained only as a fallback for explicit direct-descriptor sources.
 
-The source and settings are stored locally in app-private SharedPreferences. The GGUF
-file is not copied or uploaded by this feature.
+The source path and settings are stored locally in app-private SharedPreferences. The
+GGUF is not uploaded or synced by this feature. Manually unloading a model does not
+clear the remembered selection.
 
 ## Model compatibility catalogue
 
@@ -82,11 +86,14 @@ with `decodeSubmitUs` and `backendSyncWaitUs` available separately in the native
 
 ## Debug Vulkan GPU-operation profiler
 
-Debug builds enable llama.cpp's `GGML_VK_PERF_LOGGER` before
-`llama_backend_init()`. The Android Vulkan compatibility overlay routes each
-per-operation Vulkan timestamp result through the native ggml logger instead
-of `std::cerr`, so the rows are retained in the process-specific native
-diagnostics file and included in the compact export. Each row contains the
+The per-operation profiler is **disabled by default in both Debug and Release**.
+The engine only sets `GGML_VK_PERF_LOGGER` when an explicit diagnostic
+initialization requests it, before `llama_backend_init()`. Standard backend
+comparisons and the full benchmark matrix therefore run without per-op
+timestamp-query overhead. The Android Vulkan compatibility overlay routes
+each profiler result through the native ggml logger instead of `std::cerr`,
+so explicitly enabled diagnostic rows are retained in the process-specific
+native diagnostics file and included in the compact export. Each row contains the
 inference-service PID, a graph snapshot ID, operator name, timestamp sample
 count, average GPU time and accumulated GPU time; GFLOPS are included where
 llama.cpp provides matching flop counts.
@@ -104,6 +111,25 @@ shapes do not truncate the export fields. The RAM summary stays before verbose
 token samples. The native log retention limit is 2 MiB per process and
 the compact report limit is 32 KiB. Prompt and response contents remain
 excluded.
+
+## Full backend benchmark matrix
+
+Settings also offers an opt-in per-model matrix for the loaded GGUF. The axes are
+backend (Vulkan/CPU), Vulkan kernel profile (AUTO, SUBGROUP, LARGE, plus only
+the matching Q4_K/Q5_K/Q6_K A/B override), `n_ubatch=32/64/128`, and Flash
+Attention off/on. The number of profiles depends on the GGUF quantization;
+non-matching quantization overrides are not scheduled. Each profile reloads
+the same file, verifies the requested backend actually loaded, uses the same
+system prompt and deterministic fixed prompt, warms up four tokens and measures
+twenty tokens. The original configuration is restored in non-cancellable cleanup.
+
+Each result records load time, prompt token count and prefill time, TTFT,
+measured and native decode tok/s, graph-split count, profile settings and an
+inference request ID. That ID joins the result to the exact
+`INFERENCE_<requestId>` resource samples containing peak PSS, available RAM
+and thermal status. Unsupported profiles and failures remain visible in the
+report; they are not silently converted to a different backend. Keep the
+per-operation profiler disabled for throughput comparisons.
 
 ## In-app configuration screening
 

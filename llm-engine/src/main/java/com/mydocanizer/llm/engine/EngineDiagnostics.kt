@@ -584,12 +584,14 @@ object EngineDiagnostics {
                 val model = last?.let { field(it.line, "model") }
                 val context = last?.let { field(it.line, "contextTokens") }
                 val batch = last?.let { field(it.line, "batchSize") }
+                val microBatch = last?.let { field(it.line, "microBatchSize") }
                 val layers = last?.let { field(it.line, "gpuLayersRequested") }
                 "$group n=${entries.size} PSS_peak=${peak { it.pssMb }}MB " +
                     "nativePSS_peak=${peak { it.nativePssMb }}MB nativeHeap_peak=${peak { it.nativeHeapMb }}MB " +
                     "javaHeap_peak=${peak { it.javaHeapMb }}MB availableRAM_min=${minimumAvailable}MB " +
                     listOfNotNull(model?.let { "model=$it" }, context?.let { "ctx=$it" },
-                        batch?.let { "batch=$it" }, layers?.let { "gpuLayers=$it" }).joinToString(" ")
+                        batch?.let { "batch=$it" }, microBatch?.let { "ubatch=$it" },
+                        layers?.let { "gpuLayers=$it" }).joinToString(" ")
             }
 
         val memoryTimeline = samples
@@ -617,6 +619,7 @@ object EngineDiagnostics {
                     "nativeHeap=${sample.nativeHeapMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     "availRAM=${sample.availableRamMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     field(sample.line, "contextTokens")?.let { "ctx=$it" },
+                    field(sample.line, "microBatchSize")?.let { "ubatch=$it" },
                     field(sample.line, "gpuLayersRequested")?.let { "gpuLayers=$it" },
                     field(sample.line, "backendActive")?.let { "backend=$it" }
                 ).filterNotNull().joinToString(" ")

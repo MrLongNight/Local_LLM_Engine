@@ -40,6 +40,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         val threads: Int,
         val batchThreads: Int,
         val microBatchSize: Int,
+        val microBatchSizeRequested: Int,
         val gpuLayers: Int,
         val backendPreference: String,
         val activeBackend: String
@@ -76,6 +77,14 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         }
     }
 
+    private fun effectiveMicroBatchSize(config: EngineConfig, activeBackend: String?): Int {
+        val requested = config.microBatchSize
+        if (requested > 0) return requested.coerceAtMost(config.batchSize)
+        val useVulkan = activeBackend?.contains("Vulkan", ignoreCase = true)
+            ?: (config.backendPreference != com.mydocanizer.llm.engine.BackendPreference.CPU)
+        return if (useVulkan) minOf(64, config.batchSize) else config.batchSize
+    }
+
     fun beginModelLoad(path: String, config: EngineConfig) {
         val file = File(path)
         model.set(
@@ -86,7 +95,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 batchSize = config.batchSize,
                 threads = config.threads,
                 batchThreads = config.effectiveBatchThreads,
-                microBatchSize = config.effectiveMicroBatchSize,
+                microBatchSize = effectiveMicroBatchSize(config, null),
+                microBatchSizeRequested = config.microBatchSize,
                 gpuLayers = config.gpuLayers,
                 backendPreference = config.backendPreference.name,
                 activeBackend = "loading"
@@ -105,7 +115,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 batchSize = config.batchSize,
                 threads = config.threads,
                 batchThreads = config.effectiveBatchThreads,
-                microBatchSize = config.effectiveMicroBatchSize,
+                microBatchSize = effectiveMicroBatchSize(config, info.activeBackend),
+                microBatchSizeRequested = config.microBatchSize,
                 gpuLayers = config.gpuLayers,
                 backendPreference = config.backendPreference.name,
                 activeBackend = info.activeBackend
@@ -255,6 +266,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                     append(",threads=${snapshot.threads}")
                     append(",batchThreads=${snapshot.batchThreads}")
                     append(",microBatchSize=${snapshot.microBatchSize}")
+                    append(",microBatchSizeRequested=${snapshot.microBatchSizeRequested}")
                     append(",gpuLayersRequested=${snapshot.gpuLayers}")
                     append(",backendPreference=${snapshot.backendPreference}")
                     append(",backendActive=${snapshot.activeBackend}")
