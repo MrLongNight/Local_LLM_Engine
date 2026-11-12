@@ -2,6 +2,20 @@ name: Unit Tests
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - "app/src/**"
+      - "app/build.gradle.kts"
+      - "llm-engine/src/**"
+      - "llm-engine/build.gradle.kts"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - "gradle/libs.versions.toml"
+      - ".gitmodules"
+      - ".github/workflows/unit-tests.yml"
   pull_request:
 
 permissions:

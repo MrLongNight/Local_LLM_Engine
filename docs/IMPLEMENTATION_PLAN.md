@@ -7,9 +7,10 @@
 
 - **Android APK Build #264 / Run `43238009301`:** erfolgreich. APK und Instrumentation-APK erstellt und hochgeladen. Native ARM64-/x86_64-Optimierungsflags, Vulkan-Quelloverlay, Graph-Backend-Diagnose (direkte TU/Unity-TU), Integer-Dot-Shader und zusammengeführtes Service-Manifest wurden geprüft.
 - **Android-36-x86_64-Instrumentation:** 7/7 Tests bestanden, 0 übersprungen, 0 fehlgeschlagen. Der Lauf umfasst die Prozessisolation-/Hard-Abort-/Recovery-Pfade aus dem aktuellen Testumfang. Er ersetzt keine Mali-G57-Geräteabnahme.
-- **Unit Tests #265 / Run `43238009122`:** erfolgreich; zusätzlich bestanden die nativen Host-Tests für Prompt-Prefix-Cache und geschützte Prompt-Truncation.
+- **Unit Tests #344 / Run `43238009122`:** erfolgreich; zusätzlich bestanden die nativen Host-Tests für Prompt-Prefix-Cache und geschützte Prompt-Truncation.
 - **pre-commit.ci:** Status `success` auf diesem Commit.
 - **Profiler-BuildConfig:** Push-Build explizit mit `VULKAN_PERF_PROFILER_ENABLED=false` verifiziert. Ein separater Diagnosebuild kann über `workflow_dispatch` mit `enable_vulkan_perf_profiler=true` erstellt werden; Release erzwingt weiterhin `false`.
+- **Dokumentations-Folgecommit:** Der reine Dokumentationscommit `d5fdb1b` startete Unit-Test-Run `#346`; dieser hat bislang keinen terminalen Abschluss und steht im Gradle-Testschritt. Zwischen dem verifizierten Engine-Commit `528e1d3` und `d5fdb1b` wurden keine App-/Engine-Quellen geändert. Die Push-Trigger laufen deshalb künftig nur bei relevanten Quell-/Buildänderungen; Pull Requests bleiben vollständig getestet.
 
 ## Verifiziertes APK-Artefakt
 
