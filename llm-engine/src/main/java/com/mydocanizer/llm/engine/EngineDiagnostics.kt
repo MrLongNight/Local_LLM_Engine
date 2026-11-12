@@ -480,16 +480,31 @@ object EngineDiagnostics {
         val graphBackendDistributionEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION") }
             .takeLast(72)
-        val textTraceEvidence = nativeLines
-            .filter { it.contains("LOCAL_LLM_TEXT_TRACE") }
+        // Keep prompt/template evidence separate from per-token selection rows. The
+        // latter are compact and bounded so a short broken answer still shows where
+        // the selected tokens diverge from the model's top logits.
+        val promptTraceEvidence = nativeLines
+            .filter {
+                it.contains("LOCAL_LLM_TEXT_TRACE") && !it.contains("kind=TOKEN_SELECTION")
+            }
             .takeLast(12)
+        val tokenSelectionEvidence = nativeLines
+            .filter { it.contains("kind=TOKEN_SELECTION") }
+            .takeLast(40)
         val nativePriorityEvidence = (
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
                 q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence +
                 cpuFeatureEvidence + abortPolicyEvidence + graphSplitEvidence +
-                graphBackendDistributionEvidence + textTraceEvidence
+                graphBackendDistributionEvidence + promptTraceEvidence + tokenSelectionEvidence
             ).distinct().map {
-                compactLine(it, if (it.contains("LOCAL_LLM_TEXT_TRACE")) 1500 else 360)
+                compactLine(
+                    it,
+                    when {
+                        it.contains("kind=TOKEN_SELECTION") -> 360
+                        it.contains("LOCAL_LLM_TEXT_TRACE") -> 1500
+                        else -> 360
+                    }
+                )
             }
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.

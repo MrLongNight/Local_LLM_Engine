@@ -460,15 +460,27 @@ static void log_prompt_text_diagnostics(
     log_text_diagnostic_chunks(engine->inference_run_id, "DETOKENIZED_PROMPT", detokenized);
 }
 
-static void log_first_token_top5_logits(const EngineInstance* engine) {
+static void log_token_selection_trace(
+        const EngineInstance* engine, int32_t step_index, llama_token selected_token) {
     if (engine == nullptr || engine->context == nullptr || engine->model == nullptr) return;
     const llama_vocab* vocab = llama_model_get_vocab(engine->model);
     const int vocab_size = llama_vocab_n_tokens(vocab);
+    const std::string selected_piece =
+        escape_text_diagnostic(common_token_to_piece(engine->context, selected_token, true));
     const float* logits = llama_get_logits_ith(engine->context, -1);
+
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(5)
+        << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+        << ",kind=TOKEN_SELECTION,step=" << step_index
+        << ",selectedId=" << selected_token
+        << ",selectedPiece=" << (selected_piece.empty() ? "<empty>" : selected_piece);
     if (logits == nullptr || vocab_size <= 0) {
-        log_native_info_message("LOCAL_LLM_TEXT_TRACE - kind=FIRST_TOKEN_TOP5_LOGITS,available=0");
+        out << ",availableLogits=0";
+        log_native_info_message(out.str());
         return;
     }
+
     struct Candidate { float value; llama_token token; };
     std::array<Candidate, 5> top{};
     size_t count = 0;
@@ -482,10 +494,7 @@ static void log_first_token_top5_logits(const EngineInstance* engine) {
         for (size_t j = count - 1; j > pos; --j) top[j] = top[j - 1];
         top[pos] = Candidate{value, static_cast<llama_token>(id)};
     }
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(5)
-        << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
-        << ",kind=FIRST_TOKEN_TOP5_LOGITS,vocabSize=" << vocab_size << ",entries=";
+    out << ",vocabSize=" << vocab_size << ",top5=";
     for (size_t i = 0; i < count; ++i) {
         if (i != 0) out << '|';
         out << (i + 1) << ':' << top[i].token << ':' << top[i].value << ':'
@@ -1923,11 +1932,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     // has returned. Re-activate the same run ID for this token's GPU graph.
     VulkanProfileRunScope profile_run_scope(engine->inference_run_id);
     const int64_t token_step_start_us = llama_time_us();
-#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
-    if (engine->tokens_generated == 0) log_first_token_top5_logits(engine);
-#endif
     const int64_t sample_start_us = llama_time_us();
     const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    // Capture logits before the selected token is decoded and overwrites the output slot.
+    log_token_selection_trace(engine, engine->tokens_generated + 1, new_token_id);
+#endif
     common_sampler_accept(engine->sampler, new_token_id, true);
     const int64_t sample_duration_us = llama_time_us() - sample_start_us;
 
