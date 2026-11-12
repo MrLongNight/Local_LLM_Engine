@@ -553,7 +553,7 @@ class EngineViewModel(
                                 "kernelProfile=${profile.kernelProfile.name},nUbatch=${profile.microBatchSize}," +
                                 "flashAttention=${profile.flashAttention.name},graphSplits=${measured.result.graphSplits}," +
                                     "diagnosticRunId=${measured.result.diagnosticRunId},resourcePhase=INFERENCE_${measured.result.diagnosticRunId}," +
-                                    "modelLoadMs=${modelLoadMs},"
+                                    "modelLoadMs=${modelLoadMs}," +
                                 "promptTokens=${measured.promptTokens},prefillMs=${measured.promptEvaluationMs ?: -1L}," +
                                 "firstTokenAfterPrefillMs=${measured.firstTokenAfterPrefillMs ?: -1L}," +
                                 "warmupTokens=${measured.warmupTokens},measuredTokens=${measured.measuredTokens}," +
