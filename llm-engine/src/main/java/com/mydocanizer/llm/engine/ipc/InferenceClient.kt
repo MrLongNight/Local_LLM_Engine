@@ -834,8 +834,18 @@ internal class InferenceClient(
             watchdogJob?.cancel()
             activeRequestId.compareAndSet(requestId, null)
             streamControl?.let { activeStreamControl.compareAndSet(it, null) }
-            trySend(event)
-            channel.close()
+
+            // Close the conflated progress channel and let its forwarder drain the
+            // newest pending value before publishing the terminal event. Without
+            // this barrier, an immediate Completed/Cancelled callback could close
+            // the callbackFlow while the last real progress update was still queued,
+            // making progress delivery nondeterministic for fast CPU/Vulkan requests.
+            progressEvents.close()
+            launch(Dispatchers.Default) {
+                progressForwarder.join()
+                trySend(event)
+                channel.close()
+            }
             return true
         }
 
