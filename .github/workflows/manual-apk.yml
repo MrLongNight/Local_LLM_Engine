@@ -306,6 +306,30 @@ jobs:
                       )
 
               if abi == "arm64-v8a":
+                  graph_context_sources = [
+                      e for e in entries
+                      if os.path.basename(e.get("file", "")) == "llama-context.cpp"
+                  ]
+                  if not graph_context_sources:
+                      raise SystemExit(
+                          "arm64-v8a: patched llama-context.cpp graph distribution source is missing from compile_commands.json"
+                      )
+                  for entry in graph_context_sources:
+                      source_file = entry.get("file", "")
+                      if not os.path.isabs(source_file):
+                          source_file = os.path.join(entry.get("directory", "."), source_file)
+                      with open(source_file, encoding="utf-8") as stream:
+                          compiled_context_source = stream.read()
+                      if "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" not in compiled_context_source or "ggml_backend_sched_get_tensor_backend" not in compiled_context_source:
+                          raise SystemExit(
+                              f"arm64-v8a compiled llama-context.cpp {source_file} "
+                              "does not contain CPU/Vulkan graph backend diagnostics"
+                          )
+                  print(
+                      "arm64-v8a: verified per-run CPU/Vulkan graph-node assignment diagnostics "
+                      "are in the compiled llama-context.cpp source."
+                  )
+
                   kleidiai_sources = [
                       e for e in entries
                       if os.path.basename(e.get("file", "")) == "kleidiai.cpp"

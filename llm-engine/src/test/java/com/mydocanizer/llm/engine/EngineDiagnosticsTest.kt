@@ -152,6 +152,25 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun compactReportRetainsPerRunCpuAndVulkanGraphNodeDistribution() {
+        val distribution = "2026-11-12 05:00:00.000 [NATIVE] llama_context: " +
+            "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - runId=matrix-q4-run,graphNodes=128," +
+            "graphSplits=3,cpuNodes=12,vulkanNodes=116,otherNodes=0,unassignedNodes=0," +
+            "backendIdsChanged=1,graphSizeChanged=1"
+        val noise = (1..28).map { index ->
+            "2026-11-12 05:00:%02d.000 [NATIVE] ggml_vulkan: SHADER_STATUS - ".format(index) +
+                "shader=".repeat(50)
+        }
+        val report = EngineDiagnostics.buildCompactReportForTest(noise + distribution)
+
+        assertTrue(report.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION"))
+        assertTrue(report.contains("runId=matrix-q4-run"))
+        assertTrue(report.contains("graphSplits=3"))
+        assertTrue(report.contains("cpuNodes=12"))
+        assertTrue(report.contains("vulkanNodes=116"))
+    }
+
+    @Test
     fun compactReportRetainsDmmvWorkgroupSelectionAndAllSweepResults() {
         val nativeSelections = listOf(
             "2026-11-11 16:00:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED - " +

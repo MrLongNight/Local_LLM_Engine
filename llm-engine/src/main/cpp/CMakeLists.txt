@@ -48,6 +48,112 @@ endif()
 
 set(LLAMA_SRC ${CMAKE_CURRENT_LIST_DIR}/llama.cpp)
 
+# Keep the pinned llama.cpp tree pristine while compiling a generated copy of
+# llama-context.cpp that counts graph nodes assigned to CPU/Vulkan per request.
+function(local_llm_prepare_graph_backend_diagnostics source_dir)
+    set(_context_source "${source_dir}/src/llama-context.cpp")
+    if(NOT EXISTS "${_context_source}")
+        message(FATAL_ERROR "LocalLLM: pinned llama-context.cpp is missing: ${_context_source}")
+    endif()
+
+    file(READ "${_context_source}" _context_contents)
+    set(_graph_callback_anchor [=[
+void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph * gf, bool backend_ids_changed, bool graph_size_changed, void * user_data) {
+    // reallocating after the backend assignments changed is expected, trace only the unexpected ones
+    if (backend_ids_changed) {
+        return;
+    }
+]=])
+    string(FIND "${_context_contents}" "${_graph_callback_anchor}" _graph_callback_position)
+    if(_graph_callback_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: pinned llama_context scheduler callback anchor changed; graph backend distribution cannot be instrumented.")
+    endif()
+
+    # The pinned source already uses std::string; add the explicit mutex header
+    # for thread-safe per-run deduplication of identical graph layouts.
+    string(REPLACE "#include <limits>" "#include <limits>\n#include <mutex>" _context_contents "${_context_contents}")
+
+    set(_graph_callback_replacement [=[
+extern "C" const char * local_llm_vulkan_profile_run_id();
+
+void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph * gf, bool backend_ids_changed, bool graph_size_changed, void * user_data) {
+    // Count nodes against their actual scheduler backend. This is stronger evidence
+    // of CPU fallback than requested gpuLayers or an aggregate split count alone.
+    const char * run_id = local_llm_vulkan_profile_run_id();
+    if (run_id != nullptr && std::strcmp(run_id, "none") != 0 && gf != nullptr) {
+        int cpu_nodes = 0;
+        int vulkan_nodes = 0;
+        int other_nodes = 0;
+        int unassigned_nodes = 0;
+        const int graph_nodes = ggml_graph_n_nodes(gf);
+        for (int i = 0; i < graph_nodes; ++i) {
+            ggml_tensor * node = ggml_graph_node(gf, i);
+            ggml_backend_t backend = ggml_backend_sched_get_tensor_backend(sched, node);
+            if (backend == nullptr) {
+                ++unassigned_nodes;
+                continue;
+            }
+            const char * backend_name = ggml_backend_name(backend);
+            if (backend_name != nullptr && std::strcmp(backend_name, "CPU") == 0) {
+                ++cpu_nodes;
+            } else if (backend_name != nullptr && std::strncmp(backend_name, "Vulkan", 6) == 0) {
+                ++vulkan_nodes;
+            } else {
+                ++other_nodes;
+            }
+        }
+
+        // The callback may be invoked several times for an unchanged graph. Keep
+        // one evidence row per distinct graph layout and inference run, while
+        // retaining separate prefill/decode shapes when their node assignments differ.
+        static std::mutex local_llm_graph_diagnostic_mutex;
+        static std::string local_llm_last_graph_signature;
+        const std::string graph_signature =
+            std::string(run_id) + ":" + std::to_string(graph_nodes) + ":" +
+            std::to_string(ggml_backend_sched_get_n_splits(sched)) + ":" +
+            std::to_string(cpu_nodes) + ":" + std::to_string(vulkan_nodes) + ":" +
+            std::to_string(other_nodes) + ":" + std::to_string(unassigned_nodes);
+        bool should_log_graph_distribution = false;
+        {
+            std::lock_guard<std::mutex> lock(local_llm_graph_diagnostic_mutex);
+            if (graph_signature != local_llm_last_graph_signature) {
+                local_llm_last_graph_signature = graph_signature;
+                should_log_graph_distribution = true;
+            }
+        }
+        if (should_log_graph_distribution) {
+            LLAMA_LOG_INFO(
+                "llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - runId=%s,graphNodes=%d,graphSplits=%d,cpuNodes=%d,vulkanNodes=%d,otherNodes=%d,unassignedNodes=%d,backendIdsChanged=%d,graphSizeChanged=%d\n",
+                run_id,
+                graph_nodes,
+                ggml_backend_sched_get_n_splits(sched),
+                cpu_nodes,
+                vulkan_nodes,
+                other_nodes,
+                unassigned_nodes,
+                backend_ids_changed ? 1 : 0,
+                graph_size_changed ? 1 : 0);
+        }
+    }
+
+    // reallocating after the backend assignments changed is expected, trace only the unexpected ones
+    if (backend_ids_changed) {
+        return;
+    }
+]=])
+    string(REPLACE "${_graph_callback_anchor}" "${_graph_callback_replacement}" _context_contents "${_context_contents}")
+
+    set(_patched_dir "${CMAKE_CURRENT_BINARY_DIR}/local-android-llama")
+    file(MAKE_DIRECTORY "${_patched_dir}")
+    set(_patched_context "${_patched_dir}/llama-context.cpp")
+    file(WRITE "${_patched_context}" "${_context_contents}")
+    if(NOT _context_contents MATCHES "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" OR
+       NOT _context_contents MATCHES "ggml_backend_sched_get_tensor_backend")
+        message(FATAL_ERROR "LocalLLM: graph backend distribution overlay did not apply completely.")
+    endif()
+    set(LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP "${_patched_context}" PARENT_SCOPE)
+endfunction()
+
 # The pinned upstream tree is kept pristine. For Android ARM64 we compile a
 # build-directory copy of ggml-vulkan.cpp with the small loader/extension
 # compatibility adjustments required by Android API 24+ and Mali drivers.
@@ -543,6 +649,8 @@ void vk_perf_logger::print_timings(bool force) {
     message(STATUS "LocalLLM: prepared Android Vulkan compatibility overlay for pinned llama.cpp")
 endfunction()
 
+local_llm_prepare_graph_backend_diagnostics("${LLAMA_SRC}")
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "build shared libraries" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "llama: build the unified binary" FORCE)
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "llama: build common utils library" FORCE)
@@ -652,6 +760,27 @@ if(GGML_VULKAN)
 endif()
 
 add_subdirectory(${LLAMA_SRC} build-llama)
+
+# Replace only the compiled source path; the pinned upstream submodule remains pristine.
+if(NOT LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP OR NOT EXISTS "${LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP}")
+    message(FATAL_ERROR "LocalLLM: generated llama-context.cpp diagnostic overlay is missing.")
+endif()
+get_target_property(_llama_sources llama SOURCES)
+set(_llama_sources_patched)
+set(_llama_context_source_replaced FALSE)
+foreach(_llama_source IN LISTS _llama_sources)
+    get_filename_component(_llama_source_name "${_llama_source}" NAME)
+    if(_llama_source_name STREQUAL "llama-context.cpp")
+        list(APPEND _llama_sources_patched "${LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP}")
+        set(_llama_context_source_replaced TRUE)
+    else()
+        list(APPEND _llama_sources_patched "${_llama_source}")
+    endif()
+endforeach()
+if(NOT _llama_context_source_replaced)
+    message(FATAL_ERROR "LocalLLM: could not replace llama-context.cpp with the graph backend diagnostic build copy.")
+endif()
+set_property(TARGET llama PROPERTY SOURCES "${_llama_sources_patched}")
 
 # Internal diagnostic bridge: expose the current scheduler split count without
 # modifying llama.cpp's public C API or the pinned submodule.

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added per-run CPU/Vulkan graph-node assignment diagnostics from the pinned llama.cpp scheduler callback. The compact report distinguishes CPU fallback nodes from Vulkan nodes instead of relying on aggregate graph-split totals alone; CI verifies the generated source overlay is compiled.
+
+
 ### Fixed
 - Compact diagnostics now include per-inference thermal peak and observed thermal states alongside peak PSS and minimum available RAM; the matrix run ID remains the join key.
 

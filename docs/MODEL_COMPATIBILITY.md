@@ -42,6 +42,12 @@ The architecture names above are registered in `src/llama-arch.cpp`; the model f
 
 These facts establish that the pinned upstream source knows these architectures and has relevant backend code. They do **not** establish that the Android build's selected shader variants, the Mali-G57 driver, the selected quantization, or every model-specific graph shape will run successfully or efficiently.
 
+### Runtime CPU fallback evidence
+
+The Android build overlays the pinned `llama-context.cpp` in the build directory (the submodule itself remains pristine). For each distinct graph layout observed during an inference request, the scheduler callback records `LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION` with the request ID, graph-split count and node counts assigned to `CPU`, `Vulkan*`, other backends or no backend. This is the runtime evidence for CPU fallback: `cpuNodes > 0` means that graph contains CPU-assigned operations even when Vulkan layer offload is requested. The aggregate `graphSplits` number alone does not identify which backend owns those nodes.
+
+The compact report retains these rows per run ID so they can be joined to the corresponding matrix result, peak PSS, available RAM and thermal samples. No CPU-fallback conclusion is made when a matching distribution row is absent.
+
 ## Required acceptance for a new model
 
 Before adding a model to the device-verified column:
