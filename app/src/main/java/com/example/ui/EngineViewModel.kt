@@ -810,6 +810,7 @@ class EngineViewModel(
         var visibleTokenCount = 0
         var warmupWallMs: Long? = null
         var completed: InferenceResult? = null
+        val streamedOutput = StringBuilder()
         val started = System.nanoTime()
 
         engine.streamChat(request).collect { event ->
@@ -830,6 +831,7 @@ class EngineViewModel(
                 }
                 is InferenceEvent.Token -> {
                     visibleTokenCount++
+                    streamedOutput.append(event.token)
                     val elapsedMs = (System.nanoTime() - started) / 1_000_000L
                     if (firstTokenAfterPrefillMs == null) {
                         firstTokenAfterPrefillMs =
@@ -846,13 +848,26 @@ class EngineViewModel(
                 }
                 is InferenceEvent.Completed -> completed = event.result
                 is InferenceEvent.Error -> throw event.throwable
-                is InferenceEvent.Cancelled -> throw CancellationException(
-                    "${backend.name} wurde abgebrochen."
-                )
+                is InferenceEvent.Cancelled -> {
+                    val partial = event.partialText.ifBlank { streamedOutput.toString() }
+                    EngineDiagnostics.testText(
+                        "benchmark",
+                        "BACKEND_BENCHMARK_TEST_OUTPUT",
+                        "backend=" + backend.name + ",finishReason=CANCELLED,tokens=" +
+                            event.tokensGenerated + ",text=" + partial
+                    )
+                    throw CancellationException("Backend test cancelled: " + backend.name)
+                }
             }
         }
 
-        val result = completed ?: throw IllegalStateException("Keine abgeschlossene Antwort für ${backend.name} erhalten.")
+        val result = completed ?: throw IllegalStateException("Keine abgeschlossene Antwort für " + backend.name + " erhalten.")
+        EngineDiagnostics.testText(
+            "benchmark",
+            "BACKEND_BENCHMARK_TEST_OUTPUT",
+            "backend=" + backend.name + ",finishReason=" + result.finishReason.name +
+                ",tokens=" + result.tokensGenerated + ",text=" + result.text
+        )
         val visibleCount = visibleTokenCount.coerceAtMost(result.tokensGenerated)
         val measuredTokens = (result.tokensGenerated - warmupTokens).coerceAtLeast(0)
         val wallMs = (System.nanoTime() - started) / 1_000_000L
@@ -1441,9 +1456,11 @@ class EngineViewModel(
                         (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
                     ) throw IllegalStateException("Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt.")
 
-                    val warmup = collectConfigurationSmokeSample(InferenceConfigSmokePlan.WARMUP_TOKENS)
+                    val warmup = collectConfigurationSmokeSample(
+                        InferenceConfigSmokePlan.WARMUP_TOKENS, profile.id + ":warmup")
                     delay(InferenceConfigSmokePlan.COOLDOWN_MS)
-                    val measured = collectConfigurationSmokeSample(InferenceConfigSmokePlan.MEASURED_TOKENS)
+                    val measured = collectConfigurationSmokeSample(
+                        InferenceConfigSmokePlan.MEASURED_TOKENS, profile.id + ":measured")
                     val cfg = profile.config
                     val report = String.format(
                         java.util.Locale.US,
@@ -1536,12 +1553,16 @@ class EngineViewModel(
         val promptTokens: Int
     )
 
-    private suspend fun collectConfigurationSmokeSample(maxTokens: Int): ConfigurationSmokeSample {
+    private suspend fun collectConfigurationSmokeSample(
+        maxTokens: Int,
+        diagnosticLabel: String
+    ): ConfigurationSmokeSample {
         val started = System.nanoTime()
         var firstTokenMs: Long? = null
         var promptElapsedMs: Long? = null
         var promptTokens = 0
         var completed: com.mydocanizer.llm.engine.InferenceResult? = null
+        val streamedOutput = StringBuilder()
         val sequence = (1..160).joinToString(", ") { (it * 2).toString() }
         val prompt = "Analysiere diese Zahlenfolge und gib die nächsten fünf geraden Zahlen aus. " +
             "Antworte ausschließlich im Format ZAHL, ZAHL, ZAHL, ZAHL, ZAHL. Zahlenfolge: " + sequence
@@ -1560,17 +1581,36 @@ class EngineViewModel(
                     promptElapsedMs = event.elapsedMs
                     promptTokens = event.promptTokensTotal
                 }
-                is InferenceEvent.Token -> if (firstTokenMs == null) {
-                    firstTokenMs = (System.nanoTime() - started) / 1_000_000L
+                is InferenceEvent.Token -> {
+                    streamedOutput.append(event.token)
+                    if (firstTokenMs == null) {
+                        firstTokenMs = (System.nanoTime() - started) / 1_000_000L
+                    }
                 }
                 is InferenceEvent.Completed -> completed = event.result
                 is InferenceEvent.Error -> throw event.throwable
-                is InferenceEvent.Cancelled -> throw CancellationException("Native inference cancelled")
+                is InferenceEvent.Cancelled -> {
+                    val partial = event.partialText.ifBlank { streamedOutput.toString() }
+                    EngineDiagnostics.testText(
+                        "config_test",
+                        "CONFIG_SMOKE_TEST_OUTPUT",
+                        "stage=" + diagnosticLabel + ",finishReason=CANCELLED,tokens=" +
+                            event.tokensGenerated + ",text=" + partial
+                    )
+                    throw CancellationException("Native inference cancelled")
+                }
                 is InferenceEvent.Started -> Unit
             }
         }
         val result = completed ?: throw IllegalStateException("Keine abgeschlossene Testinferenz erhalten.")
         if (result.text.isBlank()) throw IllegalStateException("Leere Testantwort.")
+        EngineDiagnostics.testText(
+            "config_test",
+            "CONFIG_SMOKE_TEST_OUTPUT",
+            "stage=" + diagnosticLabel + ",finishReason=" + result.finishReason.name +
+                ",tokens=" + result.tokensGenerated + ",expectedContains322=" +
+                result.text.contains("322") + ",text=" + result.text
+        )
         if (!result.text.contains("322")) {
             EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_CHECK_FAILED", "expectedFirstValue=322")
         }
