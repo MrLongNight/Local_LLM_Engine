@@ -782,6 +782,15 @@ if(NOT _llama_context_source_replaced)
 endif()
 set_property(TARGET llama PROPERTY SOURCES "${_llama_sources_patched}")
 
+# Keep the diagnostic overlay visible as its own compile_commands entry. llama.cpp
+# enables CMake unity builds; without this per-source opt-out, llama-context.cpp is
+# textually included in a generated Unity/unity_*.cxx translation unit and CI cannot
+# independently verify that the graph instrumentation overlay is the source compiled.
+set_source_files_properties(
+    "${LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP}"
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON
+)
+
 # Internal diagnostic bridge: expose the current scheduler split count without
 # modifying llama.cpp's public C API or the pinned submodule.
 if(NOT TARGET llama)
