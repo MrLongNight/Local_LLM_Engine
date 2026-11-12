@@ -811,9 +811,12 @@ class EngineViewModel(
         var warmupWallMs: Long? = null
         var completed: InferenceResult? = null
         val streamedOutput = StringBuilder()
+        var cancelledPartialText: String? = null
+        var failedPartialText: String? = null
         val started = System.nanoTime()
 
-        engine.streamChat(request).collect { event ->
+        try {
+            engine.streamChat(request).collect { event ->
             when (event) {
                 is InferenceEvent.Progress -> {
                     if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION) {
@@ -847,18 +850,34 @@ class EngineViewModel(
                             "(${measuredSoFar}/${BackendBenchmarkPlan.MEASURED_TOKENS} gemessen)…"
                 }
                 is InferenceEvent.Completed -> completed = event.result
-                is InferenceEvent.Error -> throw event.throwable
+                is InferenceEvent.Error -> {
+                    failedPartialText = event.partialText
+                    throw event.throwable
+                }
                 is InferenceEvent.Cancelled -> {
-                    val partial = event.partialText.ifBlank { streamedOutput.toString() }
-                    EngineDiagnostics.testText(
-                        "benchmark",
-                        "BACKEND_BENCHMARK_TEST_OUTPUT",
-                        "backend=" + backend.name + ",finishReason=CANCELLED,tokens=" +
-                            event.tokensGenerated + ",text=" + partial
-                    )
+                    cancelledPartialText = event.partialText.ifBlank { streamedOutput.toString() }
                     throw CancellationException("Backend test cancelled: " + backend.name)
                 }
             }
+            }
+        } catch (cancelled: CancellationException) {
+            EngineDiagnostics.testText(
+                "benchmark",
+                "BACKEND_BENCHMARK_TEST_OUTPUT",
+                "backend=" + backend.name + ",finishReason=CANCELLED,tokens=" +
+                    visibleTokenCount + ",text=" +
+                    (cancelledPartialText ?: streamedOutput.toString())
+            )
+            throw cancelled
+        } catch (error: Throwable) {
+            EngineDiagnostics.testText(
+                "benchmark",
+                "BACKEND_BENCHMARK_TEST_OUTPUT",
+                "backend=" + backend.name + ",finishReason=ERROR,tokens=" +
+                    visibleTokenCount + ",error=" + (error.message ?: error.javaClass.simpleName) +
+                    ",text=" + (failedPartialText ?: streamedOutput.toString())
+            )
+            throw error
         }
 
         val result = completed ?: throw IllegalStateException("Keine abgeschlossene Antwort für " + backend.name + " erhalten.")
@@ -1563,18 +1582,21 @@ class EngineViewModel(
         var promptTokens = 0
         var completed: com.mydocanizer.llm.engine.InferenceResult? = null
         val streamedOutput = StringBuilder()
+        var cancelledPartialText: String? = null
+        var failedPartialText: String? = null
         val sequence = (1..160).joinToString(", ") { (it * 2).toString() }
         val prompt = "Analysiere diese Zahlenfolge und gib die nächsten fünf geraden Zahlen aus. " +
             "Antworte ausschließlich im Format ZAHL, ZAHL, ZAHL, ZAHL, ZAHL. Zahlenfolge: " + sequence
 
-        engine.streamChat(
-            InferenceRequest(
-                messages = listOf(ChatMessage.user(prompt)),
-                maxPredictTokens = maxTokens,
-                temperature = 0f,
-                topP = 1f
-            )
-        ).collect { event ->
+        try {
+            engine.streamChat(
+                InferenceRequest(
+                    messages = listOf(ChatMessage.user(prompt)),
+                    maxPredictTokens = maxTokens,
+                    temperature = 0f,
+                    topP = 1f
+                )
+            ).collect { event ->
             currentCoroutineContext().ensureActive()
             when (event) {
                 is InferenceEvent.Progress -> if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION) {
@@ -1588,19 +1610,35 @@ class EngineViewModel(
                     }
                 }
                 is InferenceEvent.Completed -> completed = event.result
-                is InferenceEvent.Error -> throw event.throwable
+                is InferenceEvent.Error -> {
+                    failedPartialText = event.partialText
+                    throw event.throwable
+                }
                 is InferenceEvent.Cancelled -> {
-                    val partial = event.partialText.ifBlank { streamedOutput.toString() }
-                    EngineDiagnostics.testText(
-                        "config_test",
-                        "CONFIG_SMOKE_TEST_OUTPUT",
-                        "stage=" + diagnosticLabel + ",finishReason=CANCELLED,tokens=" +
-                            event.tokensGenerated + ",text=" + partial
-                    )
+                    cancelledPartialText = event.partialText.ifBlank { streamedOutput.toString() }
                     throw CancellationException("Native inference cancelled")
                 }
                 is InferenceEvent.Started -> Unit
             }
+            }
+        } catch (cancelled: CancellationException) {
+            EngineDiagnostics.testText(
+                "config_test",
+                "CONFIG_SMOKE_TEST_OUTPUT",
+                "stage=" + diagnosticLabel + ",finishReason=CANCELLED,tokens=" +
+                    streamedOutput.length + ",text=" +
+                    (cancelledPartialText ?: streamedOutput.toString())
+            )
+            throw cancelled
+        } catch (error: Throwable) {
+            EngineDiagnostics.testText(
+                "config_test",
+                "CONFIG_SMOKE_TEST_OUTPUT",
+                "stage=" + diagnosticLabel + ",finishReason=ERROR,error=" +
+                    (error.message ?: error.javaClass.simpleName) + ",text=" +
+                    (failedPartialText ?: streamedOutput.toString())
+            )
+            throw error
         }
         val result = completed ?: throw IllegalStateException("Keine abgeschlossene Testinferenz erhalten.")
         if (result.text.isBlank()) throw IllegalStateException("Leere Testantwort.")
