@@ -50,6 +50,17 @@ object EngineDiagnostics {
         Log.i(TAG, "[$tag] $event: $details")
     }
 
+    /**
+     * Persist output from explicitly invoked diagnostic tests and benchmarks only.
+     * Normal chat responses do not call this method. Release builds omit output
+     * unless localLlmReleaseTextDiagnostics=true was explicitly enabled.
+     */
+    fun testText(tag: String, event: String, details: String) {
+        if (!BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
+        val oneLine = details.replace("\r", " ").replace("\n", "\\n").take(1400)
+        info(tag, event, oneLine)
+    }
+
     fun error(tag: String, event: String, throwable: Throwable? = null) {
         val details = throwable?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: ""
         val entry = formatLog("ERROR", tag, event, details)
@@ -289,7 +300,8 @@ object EngineDiagnostics {
             "GENERATION_COMPLETED"
         ) || event.startsWith("BACKEND_BENCHMARK_") ||
             event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
-            event.startsWith("VULKAN_Q4K_PATH_SWEEP_") || event.startsWith("FULL_MATRIX_")
+            event.startsWith("VULKAN_Q4K_PATH_SWEEP_") || event.startsWith("FULL_MATRIX_") ||
+            event.endsWith("_TEST_OUTPUT")
     }
 
     private fun isImportantEvent(line: String): Boolean {
@@ -406,6 +418,7 @@ object EngineDiagnostics {
             "FAILED", "ERROR", "WARN", "UNSUPPORTED", "FALLBACK",
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST",
             "CPU_RUNTIME_FEATURES", "ABORT_CALLBACK_POLICY", "GRAPH_SPLITS",
+            "LOCAL_LLM_TEXT_TRACE",
             "GRAPH_BACKEND_DISTRIBUTION"
         )
         val relevantNative = nativeLines
@@ -467,12 +480,17 @@ object EngineDiagnostics {
         val graphBackendDistributionEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION") }
             .takeLast(72)
+        val textTraceEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_TEXT_TRACE") }
+            .takeLast(12)
         val nativePriorityEvidence = (
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
                 q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence +
                 cpuFeatureEvidence + abortPolicyEvidence + graphSplitEvidence +
-                graphBackendDistributionEvidence
-            ).distinct().map { compactLine(it, 360) }
+                graphBackendDistributionEvidence + textTraceEvidence
+            ).distinct().map {
+                compactLine(it, if (it.contains("LOCAL_LLM_TEXT_TRACE")) 1500 else 360)
+            }
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.
         // Keep only the newest snapshots, then report per-op p50/p90 instead of
@@ -523,6 +541,10 @@ object EngineDiagnostics {
             }
         }
 
+        val textOutputEvents = kotlinLines
+            .filter { eventName(it).endsWith("_TEST_OUTPUT") }
+            .takeLast(12)
+            .map { compactLine(it, 1500) }
         val nativeSelected = (
             relevantNative.take(10) + relevantNative.takeLast(4)
         ).distinct().map { compactLine(it, 360) }
@@ -688,12 +710,29 @@ object EngineDiagnostics {
             appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
             tokenMetricSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
+            appendLine("[TESTAUSGABEN – EXPLIZITE DEBUG-TESTS]")
+            if (!BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+                appendLine("Textausgaben sind in diesem Build deaktiviert.")
+            } else if (textOutputEvents.isEmpty()) {
+                appendLine("Keine Testausgaben protokolliert. Starte einen Diagnose-/Benchmarktest.")
+            } else {
+                textOutputEvents.forEach(::appendLine)
+            }
+            appendLine()
             appendLine("[NATIVE / VULKAN – GEFILTERTE MELDUNGEN]")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
             nativeSelected.forEach(::appendLine)
             appendLine()
-            appendLine("Hinweis: Chat-Prompts und Modellantworten werden nicht exportiert. " +
-                "Der Bericht ist auf maximal 32 KiB begrenzt; GPU-Operatorzeiten werden aggregiert und RAM-Samples zusammengefasst.")
+            appendLine(
+                if (BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+                    "Hinweis: Debug-Textdiagnostik ist aktiv. Der Export enthält gerenderte Prompts, Prompt-Token-IDs, " +
+                        "detokenisierte Prompts, Sampling-Parameter und ausdrücklich protokollierte Testausgaben; " +
+                        "normale Chat-Antworten werden weiterhin nicht aufgezeichnet. Exportlimit: 32 KiB."
+                } else {
+                    "Hinweis: Chat-Prompts und Modellantworten werden nicht exportiert. " +
+                        "Der Bericht ist auf maximal 32 KiB begrenzt; GPU-Operatorzeiten werden aggregiert und RAM-Samples zusammengefasst."
+                }
+            )
         }.let { limitUtf8(it, MAX_EXPORT_BYTES) }
     }
 
