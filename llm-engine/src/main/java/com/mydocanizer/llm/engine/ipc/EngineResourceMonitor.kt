@@ -207,7 +207,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 val currentPhase = phase.get()
                 val nowNs = System.nanoTime()
                 val lastNativeSampleNs = lastNativeBackendMemorySampleNs.get()
-                val shouldSample = nativeBackendReady.get() && currentPhase !in ACTIVE_PHASES &&
+                val shouldSample = nativeBackendReady.get() &&
+                    currentPhase !in ACTIVE_PHASES && !currentPhase.startsWith("INFERENCE_") &&
                     nowNs - lastNativeSampleNs >= NATIVE_BACKEND_MEMORY_INTERVAL_NS &&
                     lastNativeBackendMemorySampleNs.compareAndSet(lastNativeSampleNs, nowNs)
                 // Vulkan memory-budget queries enumerate physical-device memory heaps. Keep these

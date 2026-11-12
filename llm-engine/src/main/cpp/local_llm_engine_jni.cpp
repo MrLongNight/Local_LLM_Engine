@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 
 #include "llama.h"
+#include "ggml-cpu.h"
 #include "common.h"
 #include "chat.h"
 #include "sampling.h"

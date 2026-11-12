@@ -349,7 +349,7 @@ class InferenceService : Service() {
                         resourceMonitor?.modelUnloaded()
                         callback?.onModelLoaded(null)
                     }.onFailure { err ->
-                        resourceMonitor?.inferenceFinished(currentReqId)
+                        resourceMonitor?.modelUnloadFailed()
                         callback?.onModelLoadFailed(err.message ?: "Unload failed")
                     }
                 } catch (t: Throwable) {
@@ -439,7 +439,7 @@ class InferenceService : Service() {
                     Log.e(TAG, "Error in streamChat IPC", t)
                     callback?.onError(currentReqId, t.message ?: t.javaClass.simpleName, "")
                 } finally {
-                    resourceMonitor?.inferenceFinished()
+                    resourceMonitor?.inferenceFinished(currentReqId)
                     if (activeRequestId.get() == currentReqId) {
                         activeRequestId.set(null)
                         activeInferenceJob = null
