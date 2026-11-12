@@ -35,6 +35,7 @@ import com.mydocanizer.llm.engine.TimeoutConfig
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.internal.ModelSourceResolver
+import com.mydocanizer.llm.engine.internal.NativeEngineHandle
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -50,6 +51,27 @@ class InferenceServiceProcessTest {
         val pid: Int,
         val disconnected: CountDownLatch
     )
+
+    @Test
+    fun cxxExceptionAtJniBoundaryBecomesJavaException() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val diagnosticsFile = File(context.cacheDir, "jni-exception-boundary-test.log")
+        assertTrue("Native engine must initialize for the JNI boundary test",
+            NativeEngineHandle.ensureLoaded(diagnosticsFile))
+        val handle = NativeEngineHandle.nativeCreateEngine()
+        assertNotEquals("Native engine handle must be valid", 0L, handle)
+        try {
+            val thrown = runCatching {
+                NativeEngineHandle.nativeThrowCppExceptionForTest(handle)
+            }.exceptionOrNull()
+            assertTrue("C++ exception must be translated to a Java exception, got $thrown",
+                thrown is IllegalStateException)
+            assertTrue("Translated exception must retain the native message",
+                thrown?.message?.contains("deliberate JNI exception-boundary test") == true)
+        } finally {
+            NativeEngineHandle.nativeDestroyEngine(handle)
+        }
+    }
 
     @Test
     fun inferenceRequestParcelablePreservesThinkingModeAcrossIpc() {

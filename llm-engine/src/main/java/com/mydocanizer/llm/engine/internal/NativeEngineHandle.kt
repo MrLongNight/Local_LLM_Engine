@@ -130,6 +130,10 @@ internal object NativeEngineHandle {
     @JvmStatic
     external fun nativeGetTokensGenerated(handle: Long): Int
 
+    /** Debug-only native throw used to verify the outer JNI exception boundary. */
+    @JvmStatic
+    external fun nativeThrowCppExceptionForTest(handle: Long)
+
     @JvmStatic
     external fun nativeArmBlockNextInferenceForTest(handle: Long)
 

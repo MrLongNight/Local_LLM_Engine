@@ -1896,6 +1896,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetTokensGener
 
 #if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
 JNIEXPORT void JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeThrowCppExceptionForTest(
+        JNIEnv* env, jclass /*clazz*/, jlong /*handle*/) try {
+    throw std::runtime_error("deliberate JNI exception-boundary test");
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeThrowCppExceptionForTest", error.what());
+} catch (...) {
+    local_llm_report_jni_exception(
+        env, "nativeThrowCppExceptionForTest", "unknown deliberate C++ exception");
+}
+
+JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeArmBlockNextInferenceForTest(
         JNIEnv* env, jclass /*clazz*/, jlong handle) try {
     auto* engine = fromHandle(handle);
