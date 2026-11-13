@@ -22,7 +22,7 @@ object EngineDiagnostics {
     private val logQueue = ConcurrentLinkedQueue<String>()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private val persistLock = Any()
-    private val timestampPrefix = Regex("""^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}""")
+    private val timestampPrefix = Regex("""^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}""")
 
     @Volatile
     private var processLogFile: File? = null
@@ -77,7 +77,10 @@ object EngineDiagnostics {
         val timestamp = synchronized(dateFormat) { dateFormat.format(Date()) }
         // Throwable messages may contain embedded stack/callbackFlow newlines. Keep each
         // persisted diagnostic row atomic so it cannot corrupt parsing of later headers.
-        val oneLineDetails = details.replace("\\r\\n", "\\\\n").replace('\\r', ' ').replace("\\n", "\\\\n")
+        val oneLineDetails = details
+            .replace("\r\n", "\\n")
+            .replace('\r', ' ')
+            .replace("\n", "\\n")
         return if (oneLineDetails.isNotBlank()) {
             "$timestamp [$level] [$tag] $event - $oneLineDetails"
         } else {
