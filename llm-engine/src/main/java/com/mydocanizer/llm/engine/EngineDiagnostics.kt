@@ -427,7 +427,8 @@ object EngineDiagnostics {
                     val event = eventName(it)
                     event.startsWith("VULKAN_DMMV_SWEEP_") ||
                         event.startsWith("VULKAN_Q4K_PATH_SWEEP_") ||
-                        event.startsWith("FULL_MATRIX_")
+                        event.startsWith("FULL_MATRIX_") ||
+                        event.endsWith("_TEST_OUTPUT")
                 }
                 .takeLast(12) + vulkanKernelSweepEvents + fullMatrixEvents + correctnessGateEvents
             )
