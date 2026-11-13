@@ -198,4 +198,19 @@ class BackendBenchmarkPlanTest {
             assertEquals(original.microBatchSize, profile.microBatchSize)
         }
     }
+    @Test
+    fun fullMatrixRunsCpuReferenceProfilesBeforeVulkanCandidates() {
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(
+            EngineConfig(batchSize = 128),
+            "Qwen3.5-4B-Q4_K_M.gguf"
+        )
+        val firstVulkan = profiles.indexOfFirst { it.backend == BackendPreference.VULKAN }
+        assertTrue(firstVulkan > 0)
+        assertTrue(profiles.take(firstVulkan).all { it.backend == BackendPreference.CPU })
+        assertTrue(profiles.drop(firstVulkan).all { it.backend == BackendPreference.VULKAN })
+        assertEquals(16, BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
+        assertTrue(BackendBenchmarkPlan.correctnessGatePrompt().contains("2, 4, 6"))
+        assertTrue(BackendBenchmarkPlan.correctnessGatePrompt().contains("318, 320"))
+    }
+
 }

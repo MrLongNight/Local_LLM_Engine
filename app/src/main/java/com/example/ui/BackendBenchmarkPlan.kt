@@ -14,8 +14,16 @@ internal object BackendBenchmarkPlan {
     const val MEASURED_TOKENS = 20
     const val TOTAL_TOKENS = WARMUP_TOKENS + MEASURED_TOKENS
     const val COOLDOWN_MS = 500L
+    const val CORRECTNESS_GATE_STEPS = 16
+    val CORRECTNESS_GATE_EXPECTED = listOf("322", "324", "326", "328", "330")
 
     val BACKENDS = listOf(BackendPreference.VULKAN, BackendPreference.CPU)
+
+    /** Full 2..320 sequence, fixed for every CPU/Vulkan comparison. */
+    fun correctnessGatePrompt(): String =
+        "Setze diese Zahlenfolge fort. Gib genau die nächsten fünf geraden Zahlen aus, " +
+            "getrennt durch Komma und Leerzeichen. Keine Erklärung: " +
+            (2..320 step 2).joinToString(", ")
 
     data class FullMatrixProfile(
         val id: String,
@@ -47,7 +55,8 @@ internal object BackendBenchmarkPlan {
             "Q6_K" in modelHint -> listOf(VulkanMatvecWorkgroup.Q6K_BASE_DMMV)
             else -> emptyList()
         }
-        for (backend in BACKENDS) {
+        // CPU references must be measured before their matching Vulkan candidates.
+        for (backend in listOf(BackendPreference.CPU, BackendPreference.VULKAN)) {
             val kernelProfiles = if (backend == BackendPreference.VULKAN) {
                 listOf(
                     VulkanMatvecWorkgroup.AUTO,

@@ -83,6 +83,19 @@ object EngineDiagnostics {
 
     fun getLogs(): List<String> = logQueue.toList()
 
+    /**
+     * Reads only the structured, debug-gated token-ID/logit rows for one inference run.
+     * Prompt and token-piece text is deliberately not returned by this helper.
+     */
+    fun tokenSelectionTraceLines(context: Context, runId: String): List<String> {
+        if (!BuildConfig.TEXT_DIAGNOSTICS_ENABLED || runId.isBlank()) return emptyList()
+        val marker = "TOKEN_SELECTION_TRACE - "
+        return readAllProcessLogs(context).filter { line ->
+            if (!line.contains(marker)) return@filter false
+            line.substringAfter(marker).startsWith("runId=$runId,")
+        }
+    }
+
     private fun persist(entry: String) {
         val file = processLogFile ?: return
         synchronized(persistLock) {
@@ -301,7 +314,7 @@ object EngineDiagnostics {
         ) || event.startsWith("BACKEND_BENCHMARK_") ||
             event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
             event.startsWith("VULKAN_Q4K_PATH_SWEEP_") || event.startsWith("FULL_MATRIX_") ||
-            event.endsWith("_TEST_OUTPUT")
+            event.startsWith("CORRECTNESS_GATE_") || event.endsWith("_TEST_OUTPUT")
     }
 
     private fun isImportantEvent(line: String): Boolean {
@@ -396,6 +409,9 @@ object EngineDiagnostics {
         val fullMatrixEvents = kotlinLines
             .filter { eventName(it).startsWith("FULL_MATRIX_") }
             .takeLast(48)
+        val correctnessGateEvents = kotlinLines
+            .filter { eventName(it).startsWith("CORRECTNESS_GATE_") }
+            .takeLast(48)
         val performanceEvents = (
             kotlinLines
                 .filterNot { it.contains("RESOURCE_SNAPSHOT") }
@@ -406,7 +422,7 @@ object EngineDiagnostics {
                         event.startsWith("VULKAN_Q4K_PATH_SWEEP_") ||
                         event.startsWith("FULL_MATRIX_")
                 }
-                .takeLast(12) + vulkanKernelSweepEvents + fullMatrixEvents
+                .takeLast(12) + vulkanKernelSweepEvents + fullMatrixEvents + correctnessGateEvents
             )
             .distinct()
             .sorted()

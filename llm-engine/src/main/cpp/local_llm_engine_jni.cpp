@@ -289,6 +289,9 @@ struct EngineInstance {
     std::string active_backend = "CPU";
     // Correlates native prompt and decode timings with the Kotlin request diagnostics.
     std::string inference_run_id;
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    std::string last_token_selection_trace;
+#endif
     std::atomic<bool> cancel_requested{false};
 #if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
     // Debug-only fault injection used to prove PID-level abort while JNI is blocked.
@@ -332,6 +335,9 @@ struct EngineInstance {
         last_finish_reason = 0;
         tokens_generated = 0;
         inference_start_us = 0;
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+        last_token_selection_trace.clear();
+#endif
     }
 
     void reset_long_term(bool clear_kv = true) {
@@ -461,7 +467,7 @@ static void log_prompt_text_diagnostics(
 }
 
 static void log_token_selection_trace(
-        const EngineInstance* engine, int32_t step_index, llama_token selected_token) {
+        EngineInstance* engine, int32_t step_index, llama_token selected_token) {
     if (engine == nullptr || engine->context == nullptr || engine->model == nullptr) return;
     const llama_vocab* vocab = llama_model_get_vocab(engine->model);
     const int vocab_size = llama_vocab_n_tokens(vocab);
@@ -477,6 +483,9 @@ static void log_token_selection_trace(
         << ",selectedPiece=" << (selected_piece.empty() ? "<empty>" : selected_piece);
     if (logits == nullptr || vocab_size <= 0) {
         out << ",availableLogits=0";
+        std::ostringstream trace;
+        trace << "step=" << step_index << ",selectedId=" << selected_token << ",top5=";
+        engine->last_token_selection_trace = trace.str();
         log_native_info_message(out.str());
         return;
     }
@@ -500,6 +509,14 @@ static void log_token_selection_trace(
         out << (i + 1) << ':' << top[i].token << ':' << top[i].value << ':'
             << escape_text_diagnostic(common_token_to_piece(engine->context, top[i].token, true));
     }
+    std::ostringstream trace;
+    trace << std::fixed << std::setprecision(5)
+          << "step=" << step_index << ",selectedId=" << selected_token << ",top5=";
+    for (size_t i = 0; i < count; ++i) {
+        if (i != 0) trace << '|';
+        trace << top[i].token << ':' << top[i].value;
+    }
+    engine->last_token_selection_trace = trace.str();
     log_native_info_message(out.str());
 }
 #endif
@@ -1416,6 +1433,25 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptM
     return nullptr;
 } catch (...) {
     local_llm_report_jni_exception(env, "nativeGetLastPromptMetrics", "unknown C++ exception");
+    return nullptr;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastTokenSelectionTrace(
+        JNIEnv* env, jclass /*clazz*/, jlong handle) try {
+    auto* engine = fromHandle(handle);
+    if (!engine) return env->NewStringUTF("");
+    std::lock_guard<std::mutex> lock(engine->mtx);
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    return env->NewStringUTF(engine->last_token_selection_trace.c_str());
+#else
+    return env->NewStringUTF("");
+#endif
+} catch (const std::exception& error) {
+    local_llm_report_jni_exception(env, "nativeGetLastTokenSelectionTrace", error.what());
+    return nullptr;
+} catch (...) {
+    local_llm_report_jni_exception(env, "nativeGetLastTokenSelectionTrace", "unknown C++ exception");
     return nullptr;
 }
 

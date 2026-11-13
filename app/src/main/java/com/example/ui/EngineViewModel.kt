@@ -428,6 +428,12 @@ class EngineViewModel(
      * reported without silently falling back to a different backend.
      */
     fun runFullBenchmarkMatrix() {
+        if (!com.example.BuildConfig.DEBUG ||
+            !com.mydocanizer.llm.engine.BuildConfig.TEXT_DIAGNOSTICS_ENABLED
+        ) {
+            _errorMessage.value = "Das Korrektheits-Gate benötigt einen Debug-Build mit TEXT_DIAGNOSTICS."
+            return
+        }
         if (_isBenchmarking.value) return
         if (_isGenerating.value || _isImporting.value) {
             _errorMessage.value = "Die vollständige Benchmarkmatrix erst starten, wenn keine Inferenz oder Modell-Operation läuft."
@@ -455,6 +461,7 @@ class EngineViewModel(
             var restoreRequired = false
             var stoppedReason: String? = null
             var successfulRuns = 0
+            val cpuGateReferences = mutableMapOf<Pair<Int, com.mydocanizer.llm.engine.FlashAttentionMode>, CorrectnessGatePlan.GateRun>()
             EngineDiagnostics.info(
                 "benchmark",
                 "FULL_MATRIX_STARTED",
@@ -500,6 +507,38 @@ class EngineViewModel(
                         ) {
                             throw IllegalStateException("Nach dem Neuladen wurde nicht dieselbe GGUF-Datei bestätigt.")
                         }
+                        val gateSample = collectBackendBenchmarkSample(
+                            backend = profile.backend,
+                            maxTokens = BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS,
+                            warmupTokens = 0,
+                            systemPromptSnapshot = "",
+                            benchmarkPrompt = BackendBenchmarkPlan.correctnessGatePrompt()
+                        )
+                        val gateTraceLines = EngineDiagnostics.tokenSelectionTraceLines(
+                            getApplication(), gateSample.result.diagnosticRunId
+                        )
+                        val gateRun = CorrectnessGatePlan.parse(gateSample.result.text, gateTraceLines)
+                        val gateKey = profile.microBatchSize to profile.flashAttention
+                        val cpuReference = cpuGateReferences[gateKey]
+                        val gateEvaluation = CorrectnessGatePlan.evaluate(
+                            candidate = gateRun,
+                            cpuReference = if (profile.backend == BackendPreference.CPU) null else cpuReference,
+                            expectedBackend = actualBackend
+                        )
+                        if (profile.backend == BackendPreference.CPU) {
+                            cpuGateReferences[gateKey] = gateRun
+                        }
+                        EngineDiagnostics.info(
+                            "benchmark",
+                            "CORRECTNESS_GATE_RESULT",
+                            "model=${model.name},profile=${profile.id},backend=$actualBackend," +
+                                "gateRunId=${gateSample.result.diagnosticRunId}," +
+                                "cpuReferenceRunId=${cpuReference?.runId.orEmpty()},status=${gateEvaluation.status}," +
+                                "reason=${gateEvaluation.reason},steps=${gateEvaluation.comparedSteps}," +
+                                "minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}/5," +
+                                "maxConsecutiveRepeat=${gateEvaluation.maxConsecutiveRepeat}"
+                        )
+                        if (gateEvaluation.passed) {
                         val measured = collectBackendBenchmarkSample(
                             backend = profile.backend,
                             maxTokens = BackendBenchmarkPlan.TOTAL_TOKENS,
@@ -524,7 +563,7 @@ class EngineViewModel(
                         }
                         val reportLine = String.format(
                             java.util.Locale.US,
-                            "%s | load=%dms | prompt=%d tokens/%s ms | TTFT=%s ms | graphSplits=%d | runId=%s | " +
+                            "%s | gate=PASS | load=%dms | prompt=%d tokens/%s ms | TTFT=%s ms | graphSplits=%d | runId=%s | " +
                                 "warmup=%d | measured=%d in %s ms | decode=%.3f tok/s | native=%.3f tok/s | " +
                                 "n_batch=%d n_ubatch=%d threads=%d | %s",
                             profile.id,
@@ -549,7 +588,8 @@ class EngineViewModel(
                         EngineDiagnostics.info(
                             "benchmark",
                             "FULL_MATRIX_RESULT",
-                            "profile=${profile.id},model=${model.name},backend=${actualBackend}," +
+                            "profile=${profile.id},model=${model.name},backend=${actualBackend},gateStatus=PASS," +
+                                "gateRunId=${gateSample.result.diagnosticRunId},minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}," +
                                 "kernelProfile=${profile.kernelProfile.name},nUbatch=${profile.microBatchSize}," +
                                 "flashAttention=${profile.flashAttention.name},graphSplits=${measured.result.graphSplits}," +
                                     "diagnosticRunId=${measured.result.diagnosticRunId},resourcePhase=INFERENCE_${measured.result.diagnosticRunId}," +
@@ -564,6 +604,16 @@ class EngineViewModel(
                                 "batch=${profile.config.batchSize},threads=${profile.config.threads}," +
                                 "batchThreads=${profile.config.effectiveBatchThreads},activeBackend=${loaded.activeBackend}"
                         )
+                        } else {
+                            val reason = gateEvaluation.reason.replace(',', ';').replace('\\n', ' ')
+                            rows += "${profile.id} | gate=FAIL ($reason) | INVALID | tok/s=n/a"
+                            EngineDiagnostics.info(
+                                "benchmark",
+                                "FULL_MATRIX_ROW_INVALID",
+                                "profile=${profile.id},model=${model.name},backend=$actualBackend," +
+                                    "gateStatus=FAIL,reason=$reason,gateRunId=${gateSample.result.diagnosticRunId}"
+                            )
+                        }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Throwable) {
@@ -600,10 +650,12 @@ class EngineViewModel(
                     }
                 }
                 _benchmarkReport.value = buildString {
-                    appendLine("Vollständige Benchmarkmatrix – ${successfulRuns}/${profiles.size} Profile erfolgreich")
+                    appendLine("Vollständige Benchmarkmatrix – ${successfulRuns}/${profiles.size} Profile mit bestandenem Gate und gültiger Messung")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB); SHA-256: ${model.sha256 ?: "nicht verfügbar"}")
                     appendLine("Dimensionen: Vulkan/CPU × AUTO/SUBGROUP/LARGE + quantisierungsabhängiger A/B-Pfad × n_ubatch 32/64/128 × Flash Attention AUS/AN.")
-                    appendLine("Je Profil: Modell-Load, Prefill, TTFT, 4 Warm-up- und 20 Mess-Tokens, Decode tok/s.")
+                    appendLine("Vor jeder Messung: 16-Token-Greedy-Gate; CPU-Referenz zuerst, Vulkan nur bei Top-1-Identität und mindestens 4/5 Top-5-Überschneidung.")
+                    appendLine("Profile ohne Gate PASS sind ungültig; für sie werden keine tok/s ausgewiesen.")
+                    appendLine("Je gültigem Profil: Modell-Load, Prefill, TTFT, 4 Warm-up- und 20 Mess-Tokens, Decode tok/s.")
                     appendLine("Graph-Splits stehen direkt in jeder Profilzeile. diagnosticRunId verbindet jede Zeile mit dem exakten INFERENCE_<runId>-Peak-PSS/RAM-/Thermal-Summary.")
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: ${stoppedReason}")

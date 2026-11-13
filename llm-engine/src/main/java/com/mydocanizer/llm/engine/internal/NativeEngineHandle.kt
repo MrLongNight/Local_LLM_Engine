@@ -99,6 +99,10 @@ internal object NativeEngineHandle {
     @JvmStatic
     external fun nativeGetLastPromptMetrics(handle: Long): String
 
+    /** Debug/TEXT_DIAGNOSTICS only: selected token and top-five logits from the last decode step. */
+    @JvmStatic
+    external fun nativeGetLastTokenSelectionTrace(handle: Long): String
+
     @JvmStatic
     external fun nativeGetActiveBackend(handle: Long): String
 
