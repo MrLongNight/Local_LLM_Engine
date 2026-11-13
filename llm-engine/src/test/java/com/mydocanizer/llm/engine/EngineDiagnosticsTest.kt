@@ -122,7 +122,9 @@ class EngineDiagnosticsTest {
                 "detail=".repeat(90)
         }
 
-        val noisyTokenMetrics = (1..30).flatMap { run ->
+        // Keep the synthetic report above the new 128 KiB production cap so this
+        // test still proves that truncation is applied after the prioritized sections.
+        val noisyTokenMetrics = (1..260).flatMap { run ->
             (1..8).map { index ->
                 nativeMetric(
                     index = index,

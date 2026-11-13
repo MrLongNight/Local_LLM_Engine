@@ -61,7 +61,7 @@ jobs:
 
       - name: Run all JVM unit tests
         run: >-
-          gradle --no-daemon --parallel --continue --max-workers=2 --build-cache
+          gradle --no-daemon --continue --build-cache
           :llm-engine:testDebugUnitTest :app:testDebugUnitTest
 
       - name: Run host-only native prompt cache and truncation tests
