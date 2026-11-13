@@ -38,9 +38,52 @@ int main() {
         assert((tokens == std::vector<int>{1, 11, 22, 2}));
     }
     {
+        // Qwen: the model does not request BOS or EOS; preserve template text.
         std::vector<int> tokens{11, 22};
-        local_llm::ensure_model_boundary_tokens(tokens, false, 1, false, 2);
+        local_llm::ensure_model_boundary_tokens(tokens, false, 1, false, 2, true);
         assert((tokens == std::vector<int>{11, 22}));
+    }
+    {
+        // LFM3: BOS is already emitted by the template; do not duplicate it.
+        std::vector<int> tokens{1, 11, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, false, 2, true);
+        assert((tokens == std::vector<int>{1, 11, 22}));
+    }
+    {
+        // Llama-3: duplicate template BOS fragments collapse to one leading BOS.
+        std::vector<int> tokens{1, 11, 1, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, false, 2, true);
+        assert((tokens == std::vector<int>{1, 11, 22}));
+    }
+    {
+        // Gemma: add a required BOS when it is absent from template token parts.
+        std::vector<int> tokens{11, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, false, 2, true);
+        assert((tokens == std::vector<int>{1, 11, 22}));
+    }
+    {
+        // add_bos=true with no BOS in the template adds it exactly once.
+        std::vector<int> tokens{11, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, false, 2, true);
+        assert((tokens == std::vector<int>{1, 11, 22}));
+    }
+    {
+        // A generation prompt remains open: add_eos=true must not append EOS.
+        std::vector<int> tokens{1, 11, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, true, 2, true);
+        assert((tokens == std::vector<int>{1, 11, 22}));
+    }
+    {
+        // A completed sequence gets one EOS, even if an earlier fragment had one.
+        std::vector<int> tokens{1, 11, 2, 22};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, true, 2, false);
+        assert((tokens == std::vector<int>{1, 11, 22, 2}));
+    }
+    {
+        // An already-closed sequence is not given a second EOS.
+        std::vector<int> tokens{1, 11, 22, 2};
+        local_llm::ensure_model_boundary_tokens(tokens, true, 1, true, 2, false);
+        assert((tokens == std::vector<int>{1, 11, 22, 2}));
     }
     {
         // system, old user/assistant turns, newest user

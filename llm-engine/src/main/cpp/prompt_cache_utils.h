@@ -29,20 +29,38 @@ inline std::size_t reusable_prefix_length(
 }
 
 // Ensure model-required BOS/EOS markers exist exactly once at sequence boundaries.
-// Template renderers may strip these markers before returning prompt parts, while
-// tokenizing every part with add_special=false would otherwise lose them.
+// add_generation_prompt means the sequence is still open: EOS must never be
+// synthesized there. An EOS marker is appended only when explicitly closing a
+// completed sequence. Template-owned BOS markers are preserved and deduplicated.
 template <typename Token>
 inline void ensure_model_boundary_tokens(
         std::vector<Token>& tokens,
         bool add_bos,
         Token bos_token,
         bool add_eos,
-        Token eos_token) {
-    if (add_bos && (tokens.empty() || tokens.front() != bos_token)) {
-        tokens.insert(tokens.begin(), bos_token);
+        Token eos_token,
+        bool add_generation_prompt = false) {
+    if (add_bos) {
+        if (tokens.empty() || tokens.front() != bos_token) {
+            tokens.insert(tokens.begin(), bos_token);
+        }
+        if (tokens.size() > 1) {
+            const auto first_after_boundary = tokens.begin() + 1;
+            tokens.erase(
+                std::remove(first_after_boundary, tokens.end(), bos_token),
+                tokens.end());
+        }
     }
-    if (add_eos && (tokens.empty() || tokens.back() != eos_token)) {
-        tokens.push_back(eos_token);
+
+    if (add_eos && !add_generation_prompt) {
+        if (tokens.empty() || tokens.back() != eos_token) {
+            tokens.erase(std::remove(tokens.begin(), tokens.end(), eos_token), tokens.end());
+            tokens.push_back(eos_token);
+        } else if (tokens.size() > 1) {
+            tokens.erase(
+                std::remove(tokens.begin(), tokens.end() - 1, eos_token),
+                tokens.end() - 1);
+        }
     }
 }
 

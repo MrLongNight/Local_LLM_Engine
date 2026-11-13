@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Native prompt boundary handling now preserves/deduplicates template BOS markers and suppresses model-requested EOS while `add_generation_prompt=true`; EOS is appended only when explicitly closing a completed sequence. Host tests cover Qwen, LFM3, Llama-3, Gemma, missing/duplicate BOS and EOS sequence closure.
 - Diagnostic log entries now escape embedded newlines, and compact-export start/end times are derived only from valid timestamp-prefixed rows; multiline exceptions can no longer corrupt the report header.
 - Binder stream early exits now pass through `awaitClose` cleanup, and the greedy gate requires exactly the five expected numbers with no extra answer text.
 

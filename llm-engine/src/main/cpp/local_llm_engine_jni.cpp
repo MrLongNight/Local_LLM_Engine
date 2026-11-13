@@ -1730,13 +1730,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             return {};
         }
         local_llm::ensure_model_boundary_tokens(
-            result, model_add_bos, model_bos_token, model_add_eos, model_eos_token);
+            result,
+            model_add_bos,
+            model_bos_token,
+            model_add_eos,
+            model_eos_token,
+            add_generation_prompt);
         return result;
     };
 
     const int64_t tokenization_start_us = llama_time_us();
+    constexpr bool add_generation_prompt = true;
     llama_tokens tokens = render_and_tokenize(
-        messages, true, full_prompt, rendered_prompt, used_chat_template, template_mode);
+        messages, add_generation_prompt, full_prompt, rendered_prompt, used_chat_template, template_mode);
     if (tokens.empty()) {
         LOGE("Prompt tokenization returned empty tokens");
         return 3;
