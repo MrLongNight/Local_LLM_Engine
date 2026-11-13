@@ -13,11 +13,11 @@ object ModelLibrary {
      * Streams one SAF document into the verified private model store.
      * Existing content-addressed imports are reused when provider metadata permits.
      */
-    suspend fun importFromSaf(context: Context, uri: Uri): File {
+    suspend fun importFromSaf(context: Context, uri: Uri, displayName: String? = null): File {
         require(uri.scheme == "content") { "Only Android content URIs can be imported" }
         return com.mydocanizer.llm.engine.internal.ModelSourceResolver.resolveToFile(
             context.applicationContext,
-            ModelSource.ContentUri(uriString = uri.toString())
+            ModelSource.ContentUri(uriString = uri.toString(), displayName = displayName)
         )
     }
 }

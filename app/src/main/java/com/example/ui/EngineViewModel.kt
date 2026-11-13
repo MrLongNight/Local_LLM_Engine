@@ -334,6 +334,81 @@ class EngineViewModel(
      * loading each model into RAM. Each document is handled independently so one
      * provider failure does not discard successful imports from the same selection.
      */
+    /**
+     * Imports every GGUF file below a user-selected SAF folder, including nested folders.
+     * The complete folder scan happens before copying begins; each model is then verified
+     * and published independently without loading it into inference memory.
+     */
+    fun importModelsFromTree(treeUri: Uri) {
+        if (_isImporting.value || _isBenchmarking.value) return
+        _isImporting.value = true
+        _errorMessage.value = null
+        _statusMessage.value = "Durchsuche Modellordner nach GGUF-Dateien…"
+
+        viewModelScope.launch {
+            var imported = 0
+            var skipped = 0
+            val failures = mutableListOf<String>()
+            try {
+                val resolver = getApplication<Application>().contentResolver
+                val hasGrant = resolver.persistedUriPermissions.any {
+                    it.uri == treeUri && it.isReadPermission
+                }
+                if (!hasGrant) {
+                    resolver.takePersistableUriPermission(
+                        treeUri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+
+                val documents = SafGgufFolderScanner.scan(getApplication(), treeUri)
+                if (documents.isEmpty()) {
+                    _statusMessage.value = "Im ausgewählten Ordner wurden keine .gguf-Dateien gefunden."
+                    return@launch
+                }
+
+                for ((index, document) in documents.withIndex()) {
+                    try {
+                        ModelLibrary.importFromSaf(
+                            getApplication(),
+                            document.uri,
+                            document.displayName
+                        )
+                        imported++
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        skipped++
+                        failures += "${document.displayName}: ${error.message ?: error.javaClass.simpleName}"
+                        EngineDiagnostics.error("model_import", "FOLDER_IMPORT_FAILED", error)
+                    }
+                    _statusMessage.value =
+                        "Ordnerimport: ${index + 1}/${documents.size} – ${document.displayName}"
+                }
+
+                refreshModelFiles()
+                _statusMessage.value =
+                    "Ordnerimport abgeschlossen: $imported importiert, $skipped fehlgeschlagen."
+                if (failures.isNotEmpty()) {
+                    _errorMessage.value = failures.take(5).joinToString("\\n")
+                }
+                EngineDiagnostics.info(
+                    "model_import",
+                    "FOLDER_IMPORT_COMPLETED",
+                    "found=${documents.size}, imported=$imported, failed=$skipped"
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                EngineDiagnostics.error("model_import", "FOLDER_SCAN_FAILED", error)
+                _errorMessage.value =
+                    "Modellordner konnte nicht importiert werden: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
     fun importModelsFromSaf(uris: List<Uri>) {
         if (uris.isEmpty() || _isImporting.value || _isBenchmarking.value) return
         _isImporting.value = true
@@ -375,7 +450,7 @@ class EngineViewModel(
                             )
                         }
                         withContext(Dispatchers.IO) {
-                            ModelLibrary.importFromSaf(getApplication(), uri)
+                            ModelLibrary.importFromSaf(getApplication(), uri, displayName)
                         }
                         imported++
                         _statusMessage.value =

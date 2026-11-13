@@ -72,6 +72,12 @@ fun ModelImportScreen(
         if (uris.isNotEmpty()) viewModel.importModelsFromSaf(uris)
     }
 
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        treeUri?.let { viewModel.importModelsFromTree(it) }
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -310,6 +316,20 @@ fun ModelImportScreen(
                         Icon(imageVector = Icons.Default.Folder, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Mehrere GGUF-Modelle gesammelt importieren")
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = { folderPickerLauncher.launch(null) },
+                        enabled = !isImporting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("import_gguf_folder_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Folder, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Kompletten Modellordner importieren")
                     }
                 }
             }
