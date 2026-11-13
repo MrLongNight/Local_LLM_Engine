@@ -1485,7 +1485,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelMetada
     const int32_t architecture_size = llama_model_meta_val_str(
         engine->model, "general.architecture", architecture, sizeof(architecture));
     const std::string architecture_value =
-        architecture_size >= 0 && architecture[0] != '\\0' ? architecture : "GGUF";
+        architecture_size >= 0 && architecture[0] != '\0' ? architecture : "GGUF";
     uint64_t n_params = llama_model_n_params(engine->model);
     int32_t n_ctx_train = llama_model_n_ctx_train(engine->model);
     uint64_t size_bytes = llama_model_size(engine->model);
