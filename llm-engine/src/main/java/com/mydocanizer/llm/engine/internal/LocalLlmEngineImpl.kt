@@ -217,6 +217,7 @@ internal class LocalLlmEngineImpl(
                 microBatchSize = config.microBatchSize,
                 flashAttentionMode = config.flashAttentionMode.nativeId,
                 vulkanDmmvWorkgroup = config.vulkanMatvecWorkgroup.nativeId,
+                gdnPolicy = config.gdnPolicy.nativeId,
                 progressCallback = progressCallback
             )
 

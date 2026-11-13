@@ -56,6 +56,23 @@ extern "C" int local_llm_vulkan_dmmv_workgroup_override() {
     return g_vulkan_dmmv_workgroup_override.load(std::memory_order_relaxed);
 }
 
+static std::atomic<int> g_gdn_policy_override{0};
+
+// GdnPolicy.nativeId: 0=architecture default, 1=both fused, 2=both unfused,
+// 3=AR fused/CH unfused, 4=AR unfused/CH fused.
+// Return bit 0 = fused AR, bit 1 = fused CH.
+extern "C" int local_llm_gdn_policy_for_arch(int is_qwen35_arch) {
+    const int policy = g_gdn_policy_override.load(std::memory_order_relaxed);
+    switch (policy) {
+        case 1: return 3;
+        case 2: return 0;
+        case 3: return 1;
+        case 4: return 2;
+        case 0:
+        default: return is_qwen35_arch ? 0 : 3;
+    }
+}
+
 static void configure_local_sampling(
         common_params_sampling& params,
         float temperature,
@@ -1053,6 +1070,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jint micro_batch_size,
         jint flash_attention_mode,
         jint vulkan_dmmv_workgroup,
+        jint gdn_policy,
         jobject progress_listener) try {
     auto* engine = fromHandle(handle);
     if (!engine) return 1;
@@ -1060,10 +1078,21 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     std::lock_guard<std::mutex> lock(engine->mtx);
     engine->unload_unlocked();
 
-    if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 6) {
+    if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 7) {
         LOGE("Invalid Vulkan matvec override mode: %d", vulkan_dmmv_workgroup);
         return 7;
     }
+    if (gdn_policy < 0 || gdn_policy > 4) {
+        LOGE("Invalid GDN policy: %d", gdn_policy);
+        return 7;
+    }
+    g_gdn_policy_override.store(gdn_policy, std::memory_order_relaxed);
+    const char * gdn_policy_name =
+        gdn_policy == 0 ? "ARCH_DEFAULT" :
+        (gdn_policy == 1 ? "BOTH_FUSED" :
+        (gdn_policy == 2 ? "BOTH_UNFUSED" :
+        (gdn_policy == 3 ? "AR_FUSED_CH_UNFUSED" : "AR_UNFUSED_CH_FUSED")));
+    LOGI("LOCAL_LLM_GDN_POLICY_REQUEST - id=%d,policy=%s", gdn_policy, gdn_policy_name);
     if (flash_attention_mode < -1 || flash_attention_mode > 1) {
         LOGE("Invalid Flash Attention mode: %d", flash_attention_mode);
         return 7;
@@ -1079,7 +1108,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         (vulkan_dmmv_workgroup == 2 ? "LARGE" :
         (vulkan_dmmv_workgroup == 3 ? "Q4K_BASE_DMMV" :
         (vulkan_dmmv_workgroup == 4 ? "Q5K_BASE_DMMV" :
-        (vulkan_dmmv_workgroup == 5 ? "Q6K_BASE_DMMV" : "Q4K_PREFILL_F16")))));
+        (vulkan_dmmv_workgroup == 5 ? "Q6K_BASE_DMMV" :
+        (vulkan_dmmv_workgroup == 6 ? "Q4K_PREFILL_F16" : "MMVQ_FORCE"))))));
     LOGI("Vulkan DMMV workgroup override: %s", dmmv_mode_name);
 
     const char* model_path = env->GetStringUTFChars(jmodel_path, nullptr);

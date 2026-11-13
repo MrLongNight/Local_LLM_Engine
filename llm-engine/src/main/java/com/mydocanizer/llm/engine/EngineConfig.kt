@@ -15,7 +15,8 @@ enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
     Q4K_BASE_DMMV(3, "Q4_K Basis-DMMV (ohne Integer-Dot)"),
     Q5K_BASE_DMMV(4, "Q5_K Basis-DMMV (A/B)"),
     Q6K_BASE_DMMV(5, "Q6_K Basis-DMMV (A/B)"),
-    Q4K_PREFILL_F16(6, "Q4_K Prefill F16/F32 (A/B)");
+    Q4K_PREFILL_F16(6, "Q4_K Prefill F16/F32 (A/B)"),
+    MMVQ_FORCE(7, "MMVQ Integer-Dot erzwungen (A/B)");
 
     companion object {
         fun fromNativeId(id: Int): VulkanMatvecWorkgroup =
@@ -32,6 +33,23 @@ enum class ReloadAfterAbort {
     LAZY,
     /** Reload the remembered model immediately after the inference process reconnects. */
     EAGER
+}
+
+/**
+ * llama.cpp Gated Delta Net fusion policy. ARCH_DEFAULT keeps the conservative
+ * Qwen3.5 unfused path while retaining upstream defaults for other architectures.
+ */
+enum class GdnPolicy(val nativeId: Int, val label: String) {
+    ARCH_DEFAULT(0, "AUTO nach Architektur"),
+    BOTH_FUSED(1, "AR + CH fused"),
+    BOTH_UNFUSED(2, "AR + CH unfused"),
+    AR_FUSED_CH_UNFUSED(3, "AR fused / CH unfused"),
+    AR_UNFUSED_CH_FUSED(4, "AR unfused / CH fused");
+
+    companion object {
+        fun fromNativeId(id: Int): GdnPolicy = entries.firstOrNull { it.nativeId == id } ?: ARCH_DEFAULT
+        fun fromName(name: String?): GdnPolicy = entries.firstOrNull { it.name == name } ?: ARCH_DEFAULT
+    }
 }
 
 enum class FlashAttentionMode(val nativeId: Int) {
@@ -112,7 +130,9 @@ data class EngineConfig(
     val topK: Int = 20,
     val minP: Float = 0.05f,
     /** Explicit one-load acknowledgement for a model exceeding the 85% total-RAM guard. */
-    val memoryGuardOverride: Boolean = false
+    val memoryGuardOverride: Boolean = false,
+    /** Architecture-aware fused/unfused Gated Delta Net execution policy. */
+    val gdnPolicy: GdnPolicy = GdnPolicy.ARCH_DEFAULT
 ) : Parcelable {
     /**
      * Effective llama.cpp thread count for prompt/batch processing.
@@ -176,7 +196,8 @@ data class EngineConfig(
         reloadAfterAbort = readReloadAfterAbort(parcel),
         topK = if (parcel.dataAvail() > 0) parcel.readInt() else 20,
         minP = if (parcel.dataAvail() > 0) parcel.readFloat() else 0.05f,
-        memoryGuardOverride = if (parcel.dataAvail() > 0) parcel.readInt() != 0 else false
+        memoryGuardOverride = if (parcel.dataAvail() > 0) parcel.readInt() != 0 else false,
+        gdnPolicy = if (parcel.dataAvail() > 0) GdnPolicy.fromName(parcel.readString()) else GdnPolicy.ARCH_DEFAULT
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -197,6 +218,7 @@ data class EngineConfig(
         parcel.writeInt(topK)
         parcel.writeFloat(minP)
         parcel.writeInt(if (memoryGuardOverride) 1 else 0)
+        parcel.writeString(gdnPolicy.name)
     }
 
     override fun describeContents(): Int = 0

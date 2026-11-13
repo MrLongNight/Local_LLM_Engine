@@ -4,6 +4,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import com.mydocanizer.llm.engine.FlashAttentionMode
+import com.mydocanizer.llm.engine.GdnPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -226,6 +227,50 @@ class BackendBenchmarkPlanTest {
         assertTrue(autoAt64.filter { it.backend == BackendPreference.VULKAN }.all {
             it.config.gpuLayers == 99
         })
+    }
+
+    @Test
+    fun qwen35RunsExactGdnFusionMatrixWithCpuReferencesBeforeAutoAndForcedMmvq() {
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(
+            EngineConfig(batchSize = 128),
+            "Qwen3.5-2B-Q4_K_M.gguf",
+            "qwen35"
+        )
+        assertEquals(48, profiles.size)
+        assertEquals(16, profiles.count { it.backend == BackendPreference.CPU })
+        assertEquals(32, profiles.count { it.backend == BackendPreference.VULKAN })
+        assertEquals(
+            setOf(
+                GdnPolicy.BOTH_FUSED,
+                GdnPolicy.BOTH_UNFUSED,
+                GdnPolicy.AR_FUSED_CH_UNFUSED,
+                GdnPolicy.AR_UNFUSED_CH_FUSED
+            ),
+            profiles.map { it.config.gdnPolicy }.toSet()
+        )
+        assertEquals(setOf(32, 128), profiles.map { it.microBatchSize }.toSet())
+        assertEquals(
+            setOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED),
+            profiles.map { it.flashAttention }.toSet()
+        )
+        assertEquals(16, profiles.count {
+            it.backend == BackendPreference.VULKAN && it.kernelProfile == VulkanMatvecWorkgroup.AUTO
+        })
+        assertEquals(16, profiles.count {
+            it.backend == BackendPreference.VULKAN && it.kernelProfile == VulkanMatvecWorkgroup.MMVQ_FORCE
+        })
+        for (policy in listOf(
+            GdnPolicy.BOTH_FUSED,
+            GdnPolicy.BOTH_UNFUSED,
+            GdnPolicy.AR_FUSED_CH_UNFUSED,
+            GdnPolicy.AR_UNFUSED_CH_FUSED
+        )) {
+            val group = profiles.filter { it.config.gdnPolicy == policy }
+            assertEquals(12, group.size)
+            assertEquals(4, group.takeWhile { it.backend == BackendPreference.CPU }.size)
+            assertTrue(group.take(4).all { it.backend == BackendPreference.CPU && it.config.gpuLayers == 0 })
+            assertTrue(group.drop(4).all { it.backend == BackendPreference.VULKAN && it.config.gpuLayers == 99 })
+        }
     }
 
     @Test

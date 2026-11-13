@@ -3,6 +3,7 @@ package com.example.ui
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FlashAttentionMode
+import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 
 /**
@@ -42,10 +43,23 @@ internal object BackendBenchmarkPlan {
      */
     fun fullMatrixProfiles(
         original: EngineConfig,
-        modelNameAndMetadata: String = ""
+        modelNameAndMetadata: String = "",
+        modelArchitecture: String = ""
     ): List<FullMatrixProfile> {
         val profiles = mutableListOf<FullMatrixProfile>()
         val modelHint = modelNameAndMetadata.uppercase()
+        val isQwen35 = modelArchitecture.equals("qwen35", ignoreCase = true) ||
+            modelArchitecture.equals("qwen35moe", ignoreCase = true)
+        val gdnPolicies = if (isQwen35) {
+            listOf(
+                GdnPolicy.BOTH_FUSED,
+                GdnPolicy.BOTH_UNFUSED,
+                GdnPolicy.AR_FUSED_CH_UNFUSED,
+                GdnPolicy.AR_UNFUSED_CH_FUSED
+            )
+        } else {
+            listOf(original.gdnPolicy)
+        }
         val quantSpecificProfiles = when {
             "Q4_K" in modelHint -> listOf(
                 VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
@@ -55,48 +69,60 @@ internal object BackendBenchmarkPlan {
             "Q6_K" in modelHint -> listOf(VulkanMatvecWorkgroup.Q6K_BASE_DMMV)
             else -> emptyList()
         }
-        // CPU references must be measured before their matching Vulkan candidates.
-        for (backend in listOf(BackendPreference.CPU, BackendPreference.VULKAN)) {
-            val kernelProfiles = if (backend == BackendPreference.VULKAN) {
-                listOf(
-                    VulkanMatvecWorkgroup.AUTO,
-                    VulkanMatvecWorkgroup.SUBGROUP,
-                    VulkanMatvecWorkgroup.LARGE
-                ) + quantSpecificProfiles
-            } else {
-                listOf(VulkanMatvecWorkgroup.AUTO)
-            }
-            for (kernelProfile in kernelProfiles) {
-                for (microBatch in listOf(32, 64, 128)) {
-                    // Keep the ON/OFF matrix and add AUTO at the Mali reference point.
-                    val flashModes = if (microBatch == 64) {
-                        listOf(FlashAttentionMode.AUTO, FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)
-                    } else {
-                        listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)
-                    }
-                    for (flashAttention in flashModes) {
-                        val isVulkan = backend == BackendPreference.VULKAN
-                        val config = configuration(original).copy(
-                            backendPreference = backend,
-                            gpuLayers = if (isVulkan) 99 else 0,
-                            threads = if (isVulkan) original.threads.coerceIn(1, 2) else original.threads,
-                            batchThreads = if (isVulkan) {
-                                original.batchThreads.takeIf { it > 0 }?.coerceIn(1, 2) ?: 0
-                            } else original.batchThreads,
-                            batchSize = maxOf(original.batchSize, microBatch),
-                            microBatchSize = microBatch,
-                            vulkanMatvecWorkgroup = kernelProfile,
-                            flashAttentionMode = flashAttention
-                        )
-                        val id = "${backend.name}_${kernelProfile.name}_UB${microBatch}_FA_${flashAttention.name}"
-                        profiles += FullMatrixProfile(
-                            id = id,
-                            backend = backend,
-                            kernelProfile = kernelProfile,
-                            microBatchSize = microBatch,
-                            flashAttention = flashAttention,
-                            config = config
-                        )
+        val microBatches = if (isQwen35) listOf(32, 128) else listOf(32, 64, 128)
+
+        // Run the CPU reference first for every GDN fusion/ubatch/Flash-Attention key.
+        // Qwen3.5 uses CPU, Vulkan AUTO and Vulkan forced MMVQ for all four AR/CH
+        // fusion combinations, n_ubatch 32/128 and Flash Attention OFF/ON.
+        for (gdnPolicy in gdnPolicies) {
+            for (backend in listOf(BackendPreference.CPU, BackendPreference.VULKAN)) {
+                val kernelProfiles = when {
+                    isQwen35 && backend == BackendPreference.CPU ->
+                        listOf(VulkanMatvecWorkgroup.AUTO)
+                    isQwen35 && backend == BackendPreference.VULKAN ->
+                        listOf(VulkanMatvecWorkgroup.AUTO, VulkanMatvecWorkgroup.MMVQ_FORCE)
+                    backend == BackendPreference.VULKAN ->
+                        listOf(
+                            VulkanMatvecWorkgroup.AUTO,
+                            VulkanMatvecWorkgroup.SUBGROUP,
+                            VulkanMatvecWorkgroup.LARGE
+                        ) + quantSpecificProfiles
+                    else -> listOf(VulkanMatvecWorkgroup.AUTO)
+                }
+                for (kernelProfile in kernelProfiles) {
+                    for (microBatch in microBatches) {
+                        val flashModes = if (isQwen35) {
+                            listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)
+                        } else if (microBatch == 64) {
+                            listOf(FlashAttentionMode.AUTO, FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)
+                        } else {
+                            listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)
+                        }
+                        for (flashAttention in flashModes) {
+                            val isVulkan = backend == BackendPreference.VULKAN
+                            val config = configuration(original).copy(
+                                backendPreference = backend,
+                                gpuLayers = if (isVulkan) 99 else 0,
+                                threads = if (isVulkan) original.threads.coerceIn(1, 2) else original.threads,
+                                batchThreads = if (isVulkan) {
+                                    original.batchThreads.takeIf { it > 0 }?.coerceIn(1, 2) ?: 0
+                                } else original.batchThreads,
+                                batchSize = maxOf(original.batchSize, microBatch),
+                                microBatchSize = microBatch,
+                                vulkanMatvecWorkgroup = kernelProfile,
+                                flashAttentionMode = flashAttention,
+                                gdnPolicy = gdnPolicy
+                            )
+                            val id = "${backend.name}_${kernelProfile.name}_${gdnPolicy.name}_UB${microBatch}_FA_${flashAttention.name}"
+                            profiles += FullMatrixProfile(
+                                id = id,
+                                backend = backend,
+                                kernelProfile = kernelProfile,
+                                microBatchSize = microBatch,
+                                flashAttention = flashAttention,
+                                config = config
+                            )
+                        }
                     }
                 }
             }

@@ -57,6 +57,13 @@ function(local_llm_prepare_graph_backend_diagnostics source_dir)
     endif()
 
     file(READ "${_context_source}" _context_contents)
+
+    set(_gdn_bridge_anchor "#include \"llama.h\"")
+    string(FIND "${_context_contents}" "${_gdn_bridge_anchor}" _gdn_bridge_position)
+    if(_gdn_bridge_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: llama-context.cpp GDN-policy bridge anchor changed.")
+    endif()
+    string(REPLACE "${_gdn_bridge_anchor}" "${_gdn_bridge_anchor}\nextern \"C\" int local_llm_gdn_policy_for_arch(int is_qwen35_arch);" _context_contents "${_context_contents}")
     set(_graph_callback_anchor [=[
 void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph * gf, bool backend_ids_changed, bool graph_size_changed, void * user_data) {
     // reallocating after the backend assignments changed is expected, trace only the unexpected ones
@@ -155,17 +162,19 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
         message(FATAL_ERROR "LocalLLM: pinned llama-context.cpp GDN policy anchor changed; review the Qwen3.5 fallback.")
     endif()
     set(_gdn_policy_replacement [=[
-    // Qwen3.5/qwen35moe uses recurrent Gated Delta Net state. Disable both
-    // fused GDN implementations for this architecture until the Vulkan/CPU
-    // correctness matrix proves parity. Other architectures keep upstream defaults.
     const bool local_llm_qwen35_arch =
         model.arch == LLM_ARCH_QWEN35 || model.arch == LLM_ARCH_QWEN35MOE;
-    cparams.fused_gdn_ar = !local_llm_qwen35_arch;
-    cparams.fused_gdn_ch = !local_llm_qwen35_arch;
+    const int local_llm_gdn_fused_flags =
+        local_llm_gdn_policy_for_arch(local_llm_qwen35_arch ? 1 : 0);
+    cparams.fused_gdn_ar = (local_llm_gdn_fused_flags & 1) != 0;
+    cparams.fused_gdn_ch = (local_llm_gdn_fused_flags & 2) != 0;
     cparams.auto_fgdn    = false;
     if (local_llm_qwen35_arch) {
         LLAMA_LOG_WARN(
-            "llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused,vulkanGdn=cpu-fallback\\n");
+            "llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=%s,chunked=%s,vulkanGdn=cpu-fallback,fusionFlags=%d\\n",
+            (local_llm_gdn_fused_flags & 1) != 0 ? "fused" : "unfused",
+            (local_llm_gdn_fused_flags & 2) != 0 ? "fused" : "unfused",
+            local_llm_gdn_fused_flags);
     }
 ]=])
     string(REPLACE "${_gdn_policy_anchor}" "${_gdn_policy_replacement}" _context_contents "${_context_contents}")
@@ -179,9 +188,10 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
         message(FATAL_ERROR "LocalLLM: graph backend distribution overlay did not apply completely.")
     endif()
     if(NOT _context_contents MATCHES "LOCAL_LLM_QWEN35_GDN_POLICY" OR
-       NOT _context_contents MATCHES "cparams.fused_gdn_ar = !local_llm_qwen35_arch" OR
-       NOT _context_contents MATCHES "cparams.fused_gdn_ch = !local_llm_qwen35_arch" OR
-       NOT _context_contents MATCHES "chunked=unfused")
+       NOT _context_contents MATCHES "local_llm_gdn_policy_for_arch" OR
+       NOT _context_contents MATCHES "cparams.fused_gdn_ar" OR
+       NOT _context_contents MATCHES "cparams.fused_gdn_ch" OR
+       NOT _context_contents MATCHES "autoregressive=%s,chunked=%s")
         message(FATAL_ERROR "LocalLLM: Qwen3.5 unfused AR+CH GDN fallback overlay did not apply completely.")
     endif()
     set(LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP "${_patched_context}" PARENT_SCOPE)
@@ -446,6 +456,19 @@ static void ggml_vk_get_physical_device_features2(
     # Force only Q4_K decode to use the existing base DMMV implementation.
     # Q4_K prefill and all non-Q4_K tensor types retain their normal MMVQ selection.
     set(_q4k_base_dmmv_anchor [=[
+    // LOCAL_LLM_VULKAN_MMVQ_FORCE: mode 7 bypasses the upstream shape heuristic
+    // only when Q8_1 integer-dot prerequisites are met. If no compatible pipeline
+    // exists, the unchanged null-pipeline branch falls back to base DMMV.
+    const bool local_llm_mmvq_force_requested =
+        local_llm_vulkan_dmmv_workgroup_override() == 7 &&
+        ctx->device->integer_dot_product &&
+        src1->type == GGML_TYPE_F32 &&
+        ggml_is_contiguous(src1) && !y_non_contig &&
+        (ne11 * ne10) % 4 == 0 &&
+        (swap_inputs || ggml_vk_src1_prec_allows_q8(dst));
+    if (local_llm_mmvq_force_requested) {
+        quantize_y = true;
+    }
     // Check for mmq first
     vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
     string(FIND "${_vulkan_contents}" "${_q4k_base_dmmv_anchor}" _q4k_base_dmmv_position)
@@ -695,6 +718,7 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_MMVQ_FORCE" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()

@@ -93,6 +93,7 @@ internal object NativeEngineHandle {
         microBatchSize: Int,
         flashAttentionMode: Int,
         vulkanDmmvWorkgroup: Int,
+        gdnPolicy: Int,
         progressCallback: NativeModelLoadProgressCallback
     ): Int
 

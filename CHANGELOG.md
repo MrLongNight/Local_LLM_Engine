@@ -5,6 +5,9 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Added Parcelable-compatible architecture-aware `GdnPolicy` with all four AR/CH fusion states. Qwen3.5 full-matrix runs execute 48 correctness-gated profiles: CPU reference plus Vulkan AUTO and forced MMVQ, crossed with ubatch 32/128 and Flash Attention OFF/ON. The selected flags are applied in the native llama-context overlay and reported in `LOCAL_LLM_QWEN35_GDN_POLICY`.
+
+### Changed
 - ModelInfo now reads `general.architecture` from GGUF metadata while preserving the legacy JNI metadata format and semicolon-containing backend description. The chat status card explicitly warns when the Qwen3.5 GDN CPU fallback is active and distinguishes Vulkan hybrid execution from CPU-only execution.
 - The correctness-gated full matrix keeps Flash Attention ON/OFF coverage and adds matching CPU/Vulkan AUTO profiles at `n_ubatch=64`, so the Mali reference setting is measured without changing runtime defaults.
 

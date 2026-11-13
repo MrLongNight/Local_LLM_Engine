@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
@@ -174,6 +175,29 @@ fun SettingsScreen(
                                     .testTag("vulkan_matvec_workgroup_${workgroup.name}")
                             )
                         }
+                    }
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+                    Text(
+                        text = "Gated Delta Net (GDN)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "ARCH_DEFAULT verwendet für Qwen3.5 die unfused Referenzpfade und lässt andere Architekturen bei den Upstream-Defaults. Die übrigen Modi sind für die CPU/Vulkan-Korrektheitsmatrix und werden beim nächsten Modellladen aktiv.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    GdnPolicy.entries.forEach { policy ->
+                        FilterChip(
+                            selected = config.gdnPolicy == policy,
+                            onClick = { viewModel.updateConfig(config.copy(gdnPolicy = policy)) },
+                            label = { Text(policy.label) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .testTag("gdn_policy_${policy.name.lowercase()}")
+                        )
                     }
 
                     val activeModel = currentModel

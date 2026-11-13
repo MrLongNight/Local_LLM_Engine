@@ -124,6 +124,18 @@ class LocalLlmEngineApiTest {
     }
 
     @Test
+    fun engineConfigDefaultsToArchitectureAwareGdnPolicyAndSupportsAllFusionModes() {
+        assertEquals(GdnPolicy.ARCH_DEFAULT, EngineConfig().gdnPolicy)
+        assertEquals(0, GdnPolicy.ARCH_DEFAULT.nativeId)
+        assertEquals(1, GdnPolicy.BOTH_FUSED.nativeId)
+        assertEquals(2, GdnPolicy.BOTH_UNFUSED.nativeId)
+        assertEquals(3, GdnPolicy.AR_FUSED_CH_UNFUSED.nativeId)
+        assertEquals(4, GdnPolicy.AR_UNFUSED_CH_FUSED.nativeId)
+        assertEquals(GdnPolicy.AR_UNFUSED_CH_FUSED,
+            EngineConfig(gdnPolicy = GdnPolicy.AR_UNFUSED_CH_FUSED).gdnPolicy)
+    }
+
+    @Test
     fun testModelInfoFormatting() {
         val info = ModelInfo(
             name = "qwen2.5-0.5b-instruct-q4_k_m.gguf",

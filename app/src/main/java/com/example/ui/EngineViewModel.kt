@@ -13,6 +13,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.ChatMessage
 import com.mydocanizer.llm.engine.ChatRole
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.InferenceEvent
@@ -482,7 +483,11 @@ class EngineViewModel(
         val source = if (model.path.startsWith("content://", ignoreCase = true)) {
             ModelSource.ContentUri(model.path, model.name)
         } else ModelSource.FilePath(model.path)
-        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(originalConfig, model.name + " " + model.description)
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(
+            originalConfig,
+            model.name + " " + model.description,
+            model.architecture
+        )
         val benchmarkPrompt =
             "Gib die Zahlen 1 bis 48 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
 
@@ -495,13 +500,13 @@ class EngineViewModel(
             var restoreRequired = false
             var stoppedReason: String? = null
             var successfulRuns = 0
-            val cpuGateReferences = mutableMapOf<Pair<Int, com.mydocanizer.llm.engine.FlashAttentionMode>, CorrectnessGatePlan.GateRun>()
+            val cpuGateReferences = mutableMapOf<Triple<Int, com.mydocanizer.llm.engine.FlashAttentionMode, GdnPolicy>, CorrectnessGatePlan.GateRun>()
             EngineDiagnostics.info(
                 "benchmark",
                 "FULL_MATRIX_STARTED",
                 "model=${model.name},modelBytes=${model.sizeBytes},profiles=${profiles.size}," +
                     "backends=VULKAN,CPU,kernelProfiles=AUTO,SUBGROUP,LARGE,QUANTIZATION_MATCHED_AB_PATHS,nUbatch=32,64,128," +
-                    "flashAttention=DISABLED,ENABLED,AUTO_UB64,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
+                    "flashAttention=DISABLED,ENABLED,AUTO_UB64,gdnPolicyMatrix=AR_CH_FUSION_COMBINATIONS,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
                     "batch=${originalConfig.batchSize},prompt=fixed_counting_sequence"
             )
@@ -522,7 +527,7 @@ class EngineViewModel(
                         "FULL_MATRIX_PROFILE_STARTED",
                         "index=${index + 1},total=${profiles.size},profile=${profile.id}," +
                             "backend=${profile.backend},nUbatch=${profile.microBatchSize}," +
-                            "flashAttention=${profile.flashAttention},model=${model.name}"
+                            "flashAttention=${profile.flashAttention},gdnPolicy=${profile.config.gdnPolicy},model=${model.name}"
                     )
                     restoreRequired = true
                     var profileGateStatus: CorrectnessGatePlan.Status? = null
@@ -554,7 +559,7 @@ class EngineViewModel(
                             getApplication(), gateSample.result.diagnosticRunId
                         )
                         val gateRun = CorrectnessGatePlan.parse(gateSample.result.text, gateTraceLines)
-                        val gateKey = profile.microBatchSize to profile.flashAttention
+                        val gateKey = Triple(profile.microBatchSize, profile.flashAttention, profile.config.gdnPolicy)
                         val cpuReference = cpuGateReferences[gateKey]
                         val gateEvaluation = CorrectnessGatePlan.evaluate(
                             candidate = gateRun,
@@ -629,7 +634,7 @@ class EngineViewModel(
                             "profile=${profile.id},model=${model.name},backend=${actualBackend},gateStatus=PASS," +
                                 "gateRunId=${gateSample.result.diagnosticRunId},minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}," +
                                 "kernelProfile=${profile.kernelProfile.name},nUbatch=${profile.microBatchSize}," +
-                                "flashAttention=${profile.flashAttention.name},graphSplits=${measured.result.graphSplits}," +
+                                "flashAttention=${profile.flashAttention.name},gdnPolicy=${profile.config.gdnPolicy.name},graphSplits=${measured.result.graphSplits}," +
                                     "diagnosticRunId=${measured.result.diagnosticRunId},resourcePhase=INFERENCE_${measured.result.diagnosticRunId}," +
                                     "modelLoadMs=${modelLoadMs}," +
                                 "promptTokens=${measured.promptTokens},prefillMs=${measured.promptEvaluationMs ?: -1L}," +

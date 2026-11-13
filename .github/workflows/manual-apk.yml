@@ -302,6 +302,8 @@ jobs:
                           "LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE",
                       "Qwen3.5 GDN CPU fallback":
                           "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK",
+                      "Forced MMVQ selection":
+                          "LOCAL_LLM_VULKAN_MMVQ_FORCE",
                   }
                   for vulkan_entry in vulkan_sources:
                       vulkan_file = vulkan_entry.get("file", "")
@@ -358,8 +360,8 @@ jobs:
                           and "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" in compiled_source
                           and "ggml_backend_sched_get_tensor_backend" in compiled_source
                           and "LOCAL_LLM_QWEN35_GDN_POLICY" in compiled_source
-                          and "cparams.fused_gdn_ar = !local_llm_qwen35_arch" in compiled_source
-                          and "cparams.fused_gdn_ch = !local_llm_qwen35_arch" in compiled_source
+                          and "local_llm_gdn_policy_for_arch" in compiled_source
+                          and "local_llm_gdn_fused_flags" in compiled_source
                           and "vulkanGdn=cpu-fallback" in compiled_source
                       ):
                           graph_context_sources.append(source_file)
@@ -380,8 +382,8 @@ jobs:
                                   "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" in overlay_source
                                   and "ggml_backend_sched_get_tensor_backend" in overlay_source
                                   and "LOCAL_LLM_QWEN35_GDN_POLICY" in overlay_source
-                                  and "cparams.fused_gdn_ar = !local_llm_qwen35_arch" in overlay_source
-                                  and "cparams.fused_gdn_ch = !local_llm_qwen35_arch" in overlay_source
+                                  and "local_llm_gdn_policy_for_arch" in overlay_source
+                                  and "local_llm_gdn_fused_flags" in overlay_source
                                   and "vulkanGdn=cpu-fallback" in overlay_source
                               ):
                                   compiled_graph_overlays.append(candidate)
