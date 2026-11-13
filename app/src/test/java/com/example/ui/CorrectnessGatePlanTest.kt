@@ -80,7 +80,7 @@ class CorrectnessGatePlanTest {
         val incomplete = CorrectnessGatePlan.parse(expectedOutput, trace("short", "CPU").take(15))
         val incompleteResult = CorrectnessGatePlan.evaluate(incomplete, expectedBackend = "CPU")
         assertFalse(incompleteResult.passed)
-        assertEquals("TRACE_INCOMPLETE_15_OF_16", incompleteResult.reason)
+        assertEquals("TRACE_INCOMPLETE", incompleteResult.reason)
     }
 
 
