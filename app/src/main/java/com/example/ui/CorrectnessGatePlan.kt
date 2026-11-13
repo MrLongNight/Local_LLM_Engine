@@ -11,7 +11,9 @@ internal object CorrectnessGatePlan {
         val output: String,
         val runId: String,
         val backend: String,
-        val steps: List<TokenStep>
+        val steps: List<TokenStep>,
+        val invalidTraceRows: Int,
+        val traceMetadataConsistent: Boolean
     )
 
     enum class Status { PASS, FAIL }
@@ -26,14 +28,21 @@ internal object CorrectnessGatePlan {
         val passed: Boolean get() = status == Status.PASS
     }
 
-    private val numberPattern = Regex("""\d+""")
-
     fun parse(output: String, traceLines: List<String>): GateRun {
-        val steps = traceLines.mapNotNull(::parseTraceLine).sortedBy { it.step }
         val payloads = traceLines.map { it.substringAfter("TOKEN_SELECTION_TRACE - ", "") }
-        val runId = payloads.firstNotNullOfOrNull { field(it, "runId") }.orEmpty()
-        val backend = payloads.firstNotNullOfOrNull { field(it, "backend") }.orEmpty()
-        return GateRun(output, runId, backend, steps)
+        val parsed = traceLines.mapNotNull(::parseTraceLine).sortedBy { it.step }
+        val runIds = payloads.mapNotNull { field(it, "runId") }.distinct()
+        val backends = payloads.mapNotNull { field(it, "backend") }.distinct()
+        val hasMetadataOnEveryRow = payloads.isNotEmpty() &&
+            payloads.all { !field(it, "runId").isNullOrBlank() && !field(it, "backend").isNullOrBlank() }
+        return GateRun(
+            output = output,
+            runId = runIds.singleOrNull().orEmpty(),
+            backend = backends.singleOrNull().orEmpty(),
+            steps = parsed,
+            invalidTraceRows = traceLines.size - parsed.size,
+            traceMetadataConsistent = hasMetadataOnEveryRow && runIds.size == 1 && backends.size == 1
+        )
     }
 
     fun evaluate(
@@ -48,11 +57,14 @@ internal object CorrectnessGatePlan {
         }
 
         if (cpuReference != null) {
+            if (candidate.runId == cpuReference.runId) {
+                return fail("CPU_REFERENCE_RUN_ID_REUSED", candidate)
+            }
             val referenceFailure = validateRun(cpuReference, "CPU")
             if (referenceFailure != null) return fail("CPU_REFERENCE_$referenceFailure", candidate)
 
-            val candidateSteps = candidate.steps.take(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
-            val referenceSteps = cpuReference.steps.take(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
+            val candidateSteps = candidate.steps
+            val referenceSteps = cpuReference.steps
             val overlaps = candidateSteps.zip(referenceSteps).map { (actual, reference) ->
                 actual.top5.map { it.tokenId }.toSet()
                     .intersect(reference.top5.map { it.tokenId }.toSet()).size
@@ -85,7 +97,7 @@ internal object CorrectnessGatePlan {
         return Evaluation(
             Status.PASS, "EXPECTED_OUTPUT_AND_LOCAL_TRACE_VALID",
             BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, 5,
-            maxConsecutiveRepeat(candidate.steps.take(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS))
+            maxConsecutiveRepeat(candidate.steps)
         )
     }
 
@@ -95,12 +107,19 @@ internal object CorrectnessGatePlan {
         if (!run.backend.contains(expectedBackend, ignoreCase = true)) {
             return "BACKEND_MISMATCH_EXPECTED_$expectedBackend"
         }
+        if (!run.traceMetadataConsistent) return "TRACE_METADATA_INCONSISTENT"
+        if (run.invalidTraceRows > 0) return "TRACE_ROW_INVALID"
         val requiredSteps = BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS
-        if (run.steps.size < requiredSteps) return "TRACE_INCOMPLETE_${run.steps.size}_OF_$requiredSteps"
-        val steps = run.steps.take(requiredSteps)
+        if (run.steps.size < requiredSteps) return "TRACE_INCOMPLETE"
+        if (run.steps.size > requiredSteps) return "TRACE_EXTRA_STEPS"
+        val steps = run.steps
         if (steps.map { it.step } != (1..requiredSteps).toList()) return "TRACE_STEP_SEQUENCE_INVALID"
         if (steps.any { it.top5.size != 5 || it.top5.map(Candidate::tokenId).distinct().size != 5 }) {
             return "TOP5_INCOMPLETE"
+        }
+        if (steps.any { step -> step.top5.any { !it.logit.isFinite() } }) return "TOP5_NONFINITE_LOGIT"
+        if (steps.any { step -> step.top5.zipWithNext().any { (a, b) -> a.logit < b.logit } }) {
+            return "TOP5_LOGITS_UNSORTED"
         }
         if (steps.any { it.selectedId != it.top5.first().tokenId }) return "SELECTED_TOKEN_NOT_TOP1"
 
@@ -158,6 +177,6 @@ internal object CorrectnessGatePlan {
             reason,
             candidate.steps.size.coerceAtMost(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS),
             0,
-            maxConsecutiveRepeat(candidate.steps.take(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS))
+            maxConsecutiveRepeat(candidate.steps)
         )
 }

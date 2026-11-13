@@ -83,6 +83,73 @@ class CorrectnessGatePlanTest {
         assertEquals("TRACE_INCOMPLETE_15_OF_16", incompleteResult.reason)
     }
 
+
+    @Test
+    fun rejectsAnyMalformedTraceRowEvenWhenSixteenOtherRowsAreValid() {
+        val lines = trace("malformed", "CPU").toMutableList()
+        lines += "2026-11-13 12:00:01.000 [INFO] [inference] TOKEN_SELECTION_TRACE - runId=malformed,backend=CPU,step=x"
+        val result = CorrectnessGatePlan.evaluate(
+            CorrectnessGatePlan.parse(expectedOutput, lines),
+            expectedBackend = "CPU"
+        )
+        assertFalse(result.passed)
+        assertEquals("TRACE_ROW_INVALID", result.reason)
+    }
+
+    @Test
+    fun rejectsExtraOrDuplicateTraceStepsInsteadOfIgnoringThem() {
+        val lines = trace("extra", "CPU").toMutableList()
+        lines += lines.last()
+        val result = CorrectnessGatePlan.evaluate(
+            CorrectnessGatePlan.parse(expectedOutput, lines),
+            expectedBackend = "CPU"
+        )
+        assertFalse(result.passed)
+        assertEquals("TRACE_EXTRA_STEPS", result.reason)
+    }
+
+    @Test
+    fun rejectsMixedRunIdsInsideOneTrace() {
+        val lines = trace("mixed", "CPU").toMutableList()
+        lines[7] = lines[7].replace("runId=mixed", "runId=foreign")
+        val result = CorrectnessGatePlan.evaluate(
+            CorrectnessGatePlan.parse(expectedOutput, lines),
+            expectedBackend = "CPU"
+        )
+        assertFalse(result.passed)
+        assertEquals("TRACE_METADATA_INCONSISTENT", result.reason)
+    }
+
+    @Test
+    fun rejectsNonFiniteOrUnsortedTopFiveLogits() {
+        val nonFinite = trace("nonfinite", "CPU").toMutableList()
+        nonFinite[0] = nonFinite[0].replace("101:9.0", "101:NaN")
+        val nonFiniteResult = CorrectnessGatePlan.evaluate(
+            CorrectnessGatePlan.parse(expectedOutput, nonFinite),
+            expectedBackend = "CPU"
+        )
+        assertFalse(nonFiniteResult.passed)
+        assertEquals("TOP5_NONFINITE_LOGIT", nonFiniteResult.reason)
+
+        val unsorted = trace("unsorted", "CPU").toMutableList()
+        unsorted[0] = unsorted[0].replace("101:9.0|102:8.0", "101:7.0|102:8.0")
+        val unsortedResult = CorrectnessGatePlan.evaluate(
+            CorrectnessGatePlan.parse(expectedOutput, unsorted),
+            expectedBackend = "CPU"
+        )
+        assertFalse(unsortedResult.passed)
+        assertEquals("TOP5_LOGITS_UNSORTED", unsortedResult.reason)
+    }
+
+    @Test
+    fun rejectsCpuReferenceReusedAsCandidateRun() {
+        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("same-run", "CPU"))
+        val candidate = CorrectnessGatePlan.parse(expectedOutput, trace("same-run", "Vulkan"))
+        val result = CorrectnessGatePlan.evaluate(candidate, cpu, expectedBackend = "Vulkan")
+        assertFalse(result.passed)
+        assertEquals("CPU_REFERENCE_RUN_ID_REUSED", result.reason)
+    }
+
     private fun trace(
         runId: String,
         backend: String,
