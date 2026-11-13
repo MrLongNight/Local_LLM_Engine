@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Qwen3.5/Qwen3.5-MoE now disable both fused autoregressive and chunked Gated Delta Net paths in the Android llama.cpp overlay. CMake validates both architecture-specific overrides and the exported `autoregressive=unfused,chunked=unfused` policy line; other architectures retain upstream defaults. This is a correctness-isolation fallback, not a measured performance optimization.
 - Restricted TEXT_DIAGNOSTICS and native prompt/token tracing to Debug builds only. The standard compact export now excludes rendered prompts, token-piece text and generated test responses while retaining GDN policy, graph split/CPU-Vulkan node shares and per-profile correctness-gate statuses.
 - Reworked ModelMemoryGuard to hard-fail only when GGUF + estimated KV cache + 256 MiB exceeds 85% of total RAM, after context reduction. Available RAM and Android low-memory status are soft warnings; Qwen3-4B (2381 MiB) with 2770 MiB available now loads with a reduced context instead of being blocked. Added one-shot “Trotzdem laden” acknowledgement for the hard-limit case.
 - Native prompt boundary handling now preserves/deduplicates template BOS markers and suppresses model-requested EOS while `add_generation_prompt=true`; EOS is appended only when explicitly closing a completed sequence. Host tests cover Qwen, LFM3, Llama-3, Gemma, missing/duplicate BOS and EOS sequence closure.
