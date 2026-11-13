@@ -427,7 +427,7 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("graphSplits=2"))
         assertTrue(report.contains("cpuNodes=5(5.0%)"))
         assertTrue(report.contains("vulkanNodes=90(90.0%)"))
-        assertTrue(report.contains("status=PASS"))
+        assertTrue(report.contains("PASS=1"))
         assertFalse(report.contains("private prompt text"))
         assertFalse(report.contains("secret-token-piece"))
         assertFalse(report.contains("private generated response"))

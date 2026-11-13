@@ -451,6 +451,7 @@ object EngineDiagnostics {
                     event.startsWith("VULKAN_DMMV_SWEEP_") ||
                         event.startsWith("VULKAN_Q4K_PATH_SWEEP_") ||
                         event.startsWith("FULL_MATRIX_") ||
+                        event.startsWith("CORRECTNESS_GATE_") ||
                         event.endsWith("_TEST_OUTPUT")
                 }
                 .takeLast(12) + vulkanKernelSweepEvents
@@ -744,14 +745,13 @@ object EngineDiagnostics {
                 "vulkanNodes=${vulkan ?: "n/a"}(${nodePercent(vulkan, total)})," +
                 "otherNodes=${other ?: "n/a"}(${nodePercent(other, total)})"
         } ?: "graphSplits=n/a,graphNodes=n/a,cpuNodes=n/a,vulkanNodes=n/a,otherNodes=n/a"
-        val gateStatusSummary = correctnessGateEvents
+        val correctnessGateEvents = kotlinLines
             .filter { eventName(it) == "CORRECTNESS_GATE_RESULT" }
-            .takeLast(16)
-            .map { line ->
-                "model=${field(line, "model") ?: "n/a"},profile=${field(line, "profile") ?: "n/a"}," +
-                    "backend=${field(line, "backend") ?: "n/a"},status=${field(line, "status") ?: "n/a"}," +
-                    "reason=${field(line, "reason") ?: "n/a"},top5=${field(line, "minimumTop5Overlap") ?: "n/a"}"
-            }
+        val gateStatusSummary = correctnessGateEvents
+            .groupingBy { field(it, "status") ?: "UNKNOWN" }
+            .eachCount()
+            .toSortedMap()
+            .map { (status, count) -> "$status=$count" }
 
         return buildString {
             appendLine("LOCAL LLM ENGINE – KOMPAKTER DIAGNOSEBERICHT")
