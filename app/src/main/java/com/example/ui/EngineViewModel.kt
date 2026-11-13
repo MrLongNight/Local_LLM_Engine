@@ -21,6 +21,8 @@ import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.ModelLibrary
+import android.provider.OpenableColumns
 import com.mydocanizer.llm.engine.InferenceResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -327,6 +329,79 @@ class EngineViewModel(
         }
         return false
     }
+    /**
+     * Bulk-imports selected SAF documents into the private model library without
+     * loading each model into RAM. Each document is handled independently so one
+     * provider failure does not discard successful imports from the same selection.
+     */
+    fun importModelsFromSaf(uris: List<Uri>) {
+        if (uris.isEmpty() || _isImporting.value || _isBenchmarking.value) return
+        _isImporting.value = true
+        _errorMessage.value = null
+        _statusMessage.value = "Importiere ${uris.size} GGUF-Datei(en)…"
+
+        viewModelScope.launch {
+            var imported = 0
+            var skipped = 0
+            val failures = mutableListOf<String>()
+            try {
+                for ((index, uri) in uris.withIndex()) {
+                    val displayName = runCatching {
+                        getApplication<Application>().contentResolver.query(
+                            uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                if (column >= 0) cursor.getString(column) else null
+                            } else null
+                        }
+                    }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Modell ${index + 1}.gguf"
+
+                    if (!displayName.endsWith(".gguf", ignoreCase = true)) {
+                        skipped++
+                        failures += "$displayName: keine GGUF-Datei"
+                        continue
+                    }
+
+                    try {
+                        val resolver = getApplication<Application>().contentResolver
+                        val hasGrant = resolver.persistedUriPermissions.any {
+                            it.uri == uri && it.isReadPermission
+                        }
+                        if (!hasGrant) {
+                            resolver.takePersistableUriPermission(
+                                uri,
+                                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        }
+                        withContext(Dispatchers.IO) {
+                            ModelLibrary.importFromSaf(getApplication(), uri)
+                        }
+                        imported++
+                        _statusMessage.value =
+                            "Importiere Modelle: ${index + 1}/${uris.size} – $displayName"
+                    } catch (error: Exception) {
+                        skipped++
+                        failures += "$displayName: ${error.message ?: error.javaClass.simpleName}"
+                        EngineDiagnostics.error("model_import", "BULK_IMPORT_FAILED", error)
+                    }
+                }
+                refreshModelFiles()
+                _statusMessage.value = "GGUF-Import abgeschlossen: $imported importiert, $skipped übersprungen/fehlgeschlagen."
+                if (failures.isNotEmpty()) {
+                    _errorMessage.value = failures.take(5).joinToString("\n")
+                }
+                EngineDiagnostics.info(
+                    "model_import",
+                    "BULK_IMPORT_COMPLETED",
+                    "selected=${uris.size}, imported=$imported, skipped=$skipped"
+                )
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
     fun importModelFromSaf(uri: Uri) {
         // Auto-restore requires a persisted read grant, not the temporary picker grant.
         val permissionResult = runCatching {

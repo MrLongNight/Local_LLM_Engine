@@ -66,6 +66,12 @@ fun ModelImportScreen(
         uri?.let { viewModel.importModelFromSaf(it) }
     }
 
+    val multiFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) viewModel.importModelsFromSaf(uris)
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -286,6 +292,24 @@ fun ModelImportScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("GGUF-Datei direkt öffnen")
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            multiFilePickerLauncher.launch(
+                                arrayOf("application/octet-stream", "application/x-gguf", "application/x-binary")
+                            )
+                        },
+                        enabled = !isImporting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("import_multiple_files_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Folder, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Mehrere GGUF-Modelle gesammelt importieren")
                     }
                 }
             }
