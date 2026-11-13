@@ -122,7 +122,7 @@ inference run ID and operator, including interpolated p50/p90 GPU operation
 timings. Operation descriptors are sanitized so commas in Vulkan operator
 shapes do not truncate the export fields. The RAM summary stays before verbose
 token samples. The native log retention limit is 2 MiB per process and
-the compact report limit is 32 KiB. Prompt and response contents remain
+the compact report limit is 128 KiB. Prompt and response contents remain
 excluded.
 
 ## Full backend benchmark matrix

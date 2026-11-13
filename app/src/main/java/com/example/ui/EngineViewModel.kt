@@ -1962,7 +1962,11 @@ class EngineViewModel(
                 _errorMessage.value = null
             }.onFailure { error ->
                 EngineDiagnostics.error("diagnostics", "EXPORT_FAILED", error)
-                _errorMessage.value = "Diagnoseprotokoll konnte nicht exportiert werden: ${error.message ?: error.javaClass.simpleName}"
+                val detail = error.message ?: error.javaClass.simpleName
+                // statusMessage is rendered by MainScreen on every tab; don't leave
+                // export failures hidden in a screen-specific error panel.
+                _statusMessage.value = "Diagnose-Export fehlgeschlagen: $detail"
+                _errorMessage.value = "Diagnoseprotokoll konnte nicht exportiert werden: $detail"
             }
         }
     }

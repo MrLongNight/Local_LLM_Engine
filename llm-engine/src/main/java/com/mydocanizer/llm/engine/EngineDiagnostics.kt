@@ -260,7 +260,9 @@ object EngineDiagnostics {
         val thermalStatus: String?
     )
 
-    private const val MAX_EXPORT_BYTES = 32 * 1024
+    // Matrix rows and Vulkan profiles need more room than the old 32 KiB cap.
+    // Keep the export bounded while retaining the complete structured evidence.
+    private const val MAX_EXPORT_BYTES = 128 * 1024
     private const val MAX_EVENT_LINES = 24
     private const val MAX_NATIVE_LINES = 14
     private const val MAX_MEMORY_TIMELINE_LINES = 16
@@ -359,6 +361,8 @@ object EngineDiagnostics {
             "PROCESS_ABORT_CONFIRMED",
             "PROCESS_ABORT_UNCONFIRMED",
             "PROCESS_ABORT_SKIPPED_REPLACEMENT",
+            "EXPORT_REQUESTED",
+            "EXPORT_COMPLETED",
             "COOPERATIVE_CANCEL_ESCALATED",
             "TIMEOUT_COOPERATIVE_CANCEL_SENT",
             "TIMEOUT_COOPERATIVE_CANCEL_ACKNOWLEDGED",
@@ -816,10 +820,10 @@ object EngineDiagnostics {
             appendLine(
                 if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
                     "Hinweis: Debug-Textdiagnostik ist aktiv. Rohdaten bleiben auf Debug-Logs begrenzt; " +
-                        "der Standard-Export enthält keine Prompt-Inhalte, Token-Texte oder Testantworten. Exportlimit: 32 KiB."
+                        "der Standard-Export enthält keine Prompt-Inhalte, Token-Texte oder Testantworten. Exportlimit: 128 KiB."
                 } else {
                     "Hinweis: Chat-Prompts und Modellantworten werden nicht exportiert. " +
-                        "Der Bericht ist auf maximal 32 KiB begrenzt; GPU-Operatorzeiten werden aggregiert und RAM-Samples zusammengefasst."
+                        "Der Bericht ist auf maximal 128 KiB begrenzt; GPU-Operatorzeiten werden aggregiert und RAM-Samples zusammengefasst."
                 }
             )
         }.let { limitUtf8(it, MAX_EXPORT_BYTES) }
@@ -839,13 +843,36 @@ object EngineDiagnostics {
 
     fun exportTo(context: Context, destination: Uri): Result<Long> {
         return runCatching {
-            val content = buildCompactReport(readAllProcessLogs(context))
+            info(
+                "diagnostics",
+                "EXPORT_REQUESTED",
+                "destinationScheme=${destination.scheme ?: "unknown"}"
+            )
+            val sourceLines = readAllProcessLogs(context)
+            val content = buildCompactReport(sourceLines)
             val bytes = content.toByteArray(Charsets.UTF_8)
-            context.contentResolver.openOutputStream(destination)?.use { outputStream ->
-                outputStream.write(bytes)
-                outputStream.flush()
-            } ?: throw IllegalStateException("Could not open output stream for destination URI")
+            check(bytes.isNotEmpty()) { "Der Diagnosebericht ist leer; es wurden keine Exportdaten erzeugt." }
+
+            // CreateDocument returns a provider URI. Use explicit truncate-or-create
+            // mode so repeated exports cannot append to a stale, partially written file.
+            val outputStream = context.contentResolver.openOutputStream(destination, "wt")
+                ?: throw IllegalStateException(
+                    "Der Android-Dokumentanbieter hat keinen Schreibstream für das ausgewählte Ziel geöffnet."
+                )
+            outputStream.use { stream ->
+                stream.write(bytes)
+                stream.flush()
+            }
+
+            info(
+                "diagnostics",
+                "EXPORT_COMPLETED",
+                "bytes=${bytes.size},sourceLines=${sourceLines.size}"
+            )
+            Log.i(TAG, "Diagnostic export completed: bytes=${bytes.size}, sourceLines=${sourceLines.size}")
             bytes.size.toLong()
+        }.onFailure { error ->
+            Log.e(TAG, "Diagnostic export failed", error)
         }
     }
 }

@@ -431,6 +431,7 @@ class EngineDiagnosticsTest {
         assertFalse(report.contains("private prompt text"))
         assertFalse(report.contains("secret-token-piece"))
         assertFalse(report.contains("private generated response"))
+        assertFalse(report.contains("BACKEND_BENCHMARK_TEST_OUTPUT"))
         assertFalse(report.contains("LOCAL_LLM_TEXT_TRACE"))
     }
 

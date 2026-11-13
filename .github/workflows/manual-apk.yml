@@ -108,6 +108,13 @@ jobs:
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
 
+      - name: Cache pinned Vulkan SDK
+        id: vulkan-sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vulkan-sdk
+          key: vulkan-sdk-linux-x86_64-1.4.363.0-197962f5cbf80baf2775a03336a01cee7c8745686c65aaa70d3f751ade4d7e43
+
       - name: Install pinned Vulkan SDK and verify integer-dot shader support
         shell: bash
         run: |
@@ -118,16 +125,22 @@ jobs:
           SDK_DOWNLOAD="$RUNNER_TEMP/$SDK_ARCHIVE"
           SDK_EXTRACT="$RUNNER_TEMP/vulkan-sdk"
 
-          sudo apt-get update
-          sudo apt-get install -y curl xz-utils
+          if [[ ! -x "$SDK_EXTRACT/$SDK_VERSION/x86_64/bin/glslc" ]]; then
+            command -v curl >/dev/null
+            if ! command -v xz >/dev/null; then
+              sudo apt-get update
+              sudo apt-get install -y xz-utils
+            fi
+            curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 600 \
+              "https://sdk.lunarg.com/sdk/download/${SDK_VERSION}/linux/vulkan_sdk.tar.xz" \
+              --output "$SDK_DOWNLOAD"
+            printf '%s  %s' "$SDK_SHA256" "$SDK_DOWNLOAD" | sha256sum --check --strict
 
-          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 600 \
-            "https://sdk.lunarg.com/sdk/download/${SDK_VERSION}/linux/vulkan_sdk.tar.xz" \
-            --output "$SDK_DOWNLOAD"
-          printf '%s  %s' "$SDK_SHA256" "$SDK_DOWNLOAD" | sha256sum --check --strict
-
-          mkdir -p "$SDK_EXTRACT"
-          tar -xJf "$SDK_DOWNLOAD" -C "$SDK_EXTRACT"
+            mkdir -p "$SDK_EXTRACT"
+            tar -xJf "$SDK_DOWNLOAD" -C "$SDK_EXTRACT"
+          else
+            echo "Using cached Vulkan SDK $SDK_VERSION."
+          fi
           VULKAN_SDK="$SDK_EXTRACT/$SDK_VERSION/x86_64"
           test -x "$VULKAN_SDK/bin/glslc"
           test -f "$VULKAN_SDK/include/spirv/unified1/spirv.hpp"
