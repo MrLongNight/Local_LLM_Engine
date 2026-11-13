@@ -251,14 +251,19 @@ internal class LocalLlmEngineImpl(
             )
             val rawMetadata = NativeEngineHandle.nativeGetModelMetadata(handle)
             updateModelLoadProgress(87) // native runtime ready; metadata has been read
-            // The backend description itself contains a semicolon (device; requested layers X/Y).
-            // Preserve it as the final field instead of truncating ModelInfo.activeBackend.
-            val parts = rawMetadata.split(";", limit = 5)
-            val desc = parts.getOrNull(0) ?: ""
-            val nParams = parts.getOrNull(1)?.toLongOrNull() ?: 0L
-            val nCtxTrain = parts.getOrNull(2)?.toIntOrNull() ?: 0
-            val sizeBytes = parts.getOrNull(3)?.toLongOrNull() ?: file.length()
-            val activeBackend = parts.getOrNull(4) ?: NativeEngineHandle.nativeGetActiveBackend(handle)
+            // Architecture is read from GGUF metadata. The parser accepts the new
+            // ARCH= field and still preserves legacy semicolon-containing backend strings.
+            val parsedMetadata = NativeModelMetadataParser.parse(
+                rawMetadata = rawMetadata,
+                fallbackBackend = NativeEngineHandle.nativeGetActiveBackend(handle),
+                fallbackSizeBytes = file.length()
+            )
+            val desc = parsedMetadata.description
+            val nParams = parsedMetadata.parameterCount
+            val nCtxTrain = parsedMetadata.contextLengthTrain
+            val sizeBytes = parsedMetadata.sizeBytes
+            val architecture = parsedMetadata.architecture
+            val activeBackend = parsedMetadata.activeBackend
 
             val isDirectDescriptor = source is ModelSource.FilePath &&
                 source.path.startsWith("/proc/self/fd/")
@@ -297,7 +302,7 @@ internal class LocalLlmEngineImpl(
                 sizeBytes = sizeBytes,
                 parameterCount = nParams,
                 contextLengthTrain = nCtxTrain,
-                architecture = "GGUF",
+                architecture = architecture,
                 description = desc,
                 activeBackend = activeBackend,
                 sha256 = sha256
