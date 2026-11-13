@@ -123,7 +123,7 @@ class CorrectnessGatePlanTest {
     @Test
     fun rejectsNonFiniteOrUnsortedTopFiveLogits() {
         val nonFinite = trace("nonfinite", "CPU").toMutableList()
-        nonFinite[0] = nonFinite[0].replace("101:9.0", "101:NaN")
+        nonFinite[0] = nonFinite[0].replace("102:9.0", "102:NaN")
         val nonFiniteResult = CorrectnessGatePlan.evaluate(
             CorrectnessGatePlan.parse(expectedOutput, nonFinite),
             expectedBackend = "CPU"
@@ -132,7 +132,7 @@ class CorrectnessGatePlanTest {
         assertEquals("TOP5_NONFINITE_LOGIT", nonFiniteResult.reason)
 
         val unsorted = trace("unsorted", "CPU").toMutableList()
-        unsorted[0] = unsorted[0].replace("101:9.0|102:8.0", "101:7.0|102:8.0")
+        unsorted[0] = unsorted[0].replace("102:9.0|103:8.0", "102:7.0|103:8.0")
         val unsortedResult = CorrectnessGatePlan.evaluate(
             CorrectnessGatePlan.parse(expectedOutput, unsorted),
             expectedBackend = "CPU"
