@@ -418,6 +418,7 @@ object EngineDiagnostics {
             "FAILED", "ERROR", "WARN", "UNSUPPORTED", "FALLBACK",
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST",
             "CPU_RUNTIME_FEATURES", "ABORT_CALLBACK_POLICY", "GRAPH_SPLITS",
+            "GATED_DELTA_NET", "QWEN35_GDN",
             "LOCAL_LLM_TEXT_TRACE",
             "GRAPH_BACKEND_DISTRIBUTION"
         )
@@ -480,6 +481,9 @@ object EngineDiagnostics {
         val graphBackendDistributionEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION") }
             .takeLast(72)
+        val qwen35GdnPolicyEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_QWEN35_GDN_POLICY") }
+            .takeLast(4)
         // Keep prompt/template evidence separate from per-token selection rows. The
         // latter are compact and bounded so a short broken answer still shows where
         // the selected tokens diverge from the model's top logits.
@@ -495,7 +499,8 @@ object EngineDiagnostics {
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
                 q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence +
                 cpuFeatureEvidence + abortPolicyEvidence + graphSplitEvidence +
-                graphBackendDistributionEvidence + promptTraceEvidence + tokenSelectionEvidence
+                graphBackendDistributionEvidence + qwen35GdnPolicyEvidence +
+                promptTraceEvidence + tokenSelectionEvidence
             ).distinct().map {
                 compactLine(
                     it,

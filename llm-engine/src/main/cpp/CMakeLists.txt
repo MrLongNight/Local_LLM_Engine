@@ -143,6 +143,34 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
 ]=])
     string(REPLACE "${_graph_callback_anchor}" "${_graph_callback_replacement}" _context_contents "${_context_contents}")
 
+    # Qwen3.5 autoregressive GDN parity guard. Chunked prefill remains fused;
+    # only the one-token decode path uses the unfused reference graph.
+    set(_gdn_policy_anchor [=[
+    cparams.fused_gdn_ar = true;
+    cparams.fused_gdn_ch = true;
+    cparams.auto_fgdn    = false;
+]=])
+    string(FIND "${_context_contents}" "${_gdn_policy_anchor}" _gdn_policy_position)
+    if(_gdn_policy_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: pinned llama-context.cpp GDN policy anchor changed; review the Qwen3.5 fallback.")
+    endif()
+    set(_gdn_policy_replacement [=[
+    // Qwen3.5/qwen35moe uses recurrent Gated Delta Net state. Keep chunked
+    // prefill fused, but route autoregressive single-token decode through the
+    // unfused reference graph until backend parity is proven. Other models keep
+    // the exact upstream defaults.
+    const bool local_llm_qwen35_arch =
+        model.arch == LLM_ARCH_QWEN35 || model.arch == LLM_ARCH_QWEN35MOE;
+    cparams.fused_gdn_ar = !local_llm_qwen35_arch;
+    cparams.fused_gdn_ch = true;
+    cparams.auto_fgdn    = false;
+    if (local_llm_qwen35_arch) {
+        LLAMA_LOG_WARN(
+            "llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=fused\\n");
+    }
+]=])
+    string(REPLACE "${_gdn_policy_anchor}" "${_gdn_policy_replacement}" _context_contents "${_context_contents}")
+
     set(_patched_dir "${CMAKE_CURRENT_BINARY_DIR}/local-android-llama")
     file(MAKE_DIRECTORY "${_patched_dir}")
     set(_patched_context "${_patched_dir}/llama-context.cpp")
@@ -150,6 +178,10 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
     if(NOT _context_contents MATCHES "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" OR
        NOT _context_contents MATCHES "ggml_backend_sched_get_tensor_backend")
         message(FATAL_ERROR "LocalLLM: graph backend distribution overlay did not apply completely.")
+    endif()
+    if(NOT _context_contents MATCHES "LOCAL_LLM_QWEN35_GDN_POLICY" OR
+       NOT _context_contents MATCHES "cparams.fused_gdn_ar = !local_llm_qwen35_arch")
+        message(FATAL_ERROR "LocalLLM: Qwen3.5 autoregressive GDN fallback overlay did not apply completely.")
     endif()
     set(LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP "${_patched_context}" PARENT_SCOPE)
 endfunction()

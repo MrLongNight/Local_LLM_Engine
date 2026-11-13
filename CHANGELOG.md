@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Qwen3.5 (qwen35/qwen35moe) uses the unfused autoregressive Gated Delta Net path while retaining fused chunked prefill. This correctness-first fallback isolates malformed decode logits to the fused single-token path without changing other model architectures.
+
 ### Verified
 - 12.11.2026, commit `528e1d3` (APK run `#264`, unit-test run `#344`): Android Debug APK CI passed, including the 7/7 Android-36 x86_64 process-isolation instrumentation tests, native Vulkan/graph-overlay checks, APK manifest validation and explicit profiler-disabled BuildConfig assertion. Unit tests, native host prompt-cache/truncation tests and pre-commit checks also passed.
 - Documentation-only follow-up commit `d5fdb1b` also passed unit-test run `#346`. The unit-test push trigger is now path-filtered so prose-only commits do not rerun Android builds; pull requests remain fully checked.
