@@ -168,7 +168,11 @@ fun ChatScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Qwen3.5: Gated Delta Net läuft aus Korrektheitsgründen auf der CPU. Andere Vulkan-Operatoren bleiben aktiv.",
+                                text = if (currentModel?.hasVulkanBackend == true) {
+                                    "Qwen3.5: Gated Delta Net läuft aus Korrektheitsgründen auf der CPU. Andere Vulkan-Operatoren bleiben aktiv."
+                                } else {
+                                    "Qwen3.5: Gated Delta Net läuft auf der CPU; das Modell verwendet das CPU-Backend."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer
                             )

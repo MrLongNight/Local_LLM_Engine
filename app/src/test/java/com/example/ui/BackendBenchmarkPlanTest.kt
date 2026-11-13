@@ -75,7 +75,7 @@ class BackendBenchmarkPlanTest {
             "Qwen3.5-4B-Q4_K_M.gguf"
         )
         assertEquals(42, profiles.size)
-        assertEquals(36, profiles.map { it.id }.distinct().size)
+        assertEquals(42, profiles.map { it.id }.distinct().size)
         assertEquals(35, profiles.count { it.backend == BackendPreference.VULKAN })
         assertEquals(7, profiles.count { it.backend == BackendPreference.CPU })
         assertEquals(setOf(32, 64, 128), profiles.map { it.microBatchSize }.toSet())

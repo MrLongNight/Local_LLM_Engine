@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Changed
-- ModelInfo now reads `general.architecture` from GGUF metadata while preserving the legacy JNI metadata format and semicolon-containing backend description. The chat status card explicitly warns when the Qwen3.5 GDN CPU fallback is active.
+- ModelInfo now reads `general.architecture` from GGUF metadata while preserving the legacy JNI metadata format and semicolon-containing backend description. The chat status card explicitly warns when the Qwen3.5 GDN CPU fallback is active and distinguishes Vulkan hybrid execution from CPU-only execution.
 - The correctness-gated full matrix keeps Flash Attention ON/OFF coverage and adds matching CPU/Vulkan AUTO profiles at `n_ubatch=64`, so the Mali reference setting is measured without changing runtime defaults.
 
 ### Fixed

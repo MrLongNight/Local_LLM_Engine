@@ -166,16 +166,19 @@ class LocalLlmEngineApiTest {
 
     @Test
     fun qwen35ArchitectureEnablesCpuFallbackWarningOnlyForQwen35Families() {
-        fun model(architecture: String) = ModelInfo(
+        fun model(architecture: String, backend: String = "CPU") = ModelInfo(
             name = "model.gguf",
             path = "/models/model.gguf",
             sizeBytes = 1L,
-            architecture = architecture
+            architecture = architecture,
+            activeBackend = backend
         )
-        assertTrue(model("qwen35").usesQwen35GdnCpuFallback)
+        assertTrue(model("qwen35", "Vulkan GPU").usesQwen35GdnCpuFallback)
         assertTrue(model("QWEN35MOE").usesQwen35GdnCpuFallback)
         assertTrue(!model("qwen3").usesQwen35GdnCpuFallback)
         assertTrue(!model("GGUF").usesQwen35GdnCpuFallback)
+        assertTrue(model("qwen35", "Vulkan GPU").hasVulkanBackend)
+        assertTrue(!model("qwen35", "CPU").hasVulkanBackend)
     }
 
     @Test

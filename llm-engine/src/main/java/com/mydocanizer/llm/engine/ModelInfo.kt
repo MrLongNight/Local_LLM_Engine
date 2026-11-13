@@ -65,6 +65,9 @@ data class ModelInfo(
         get() = architecture.equals("qwen35", ignoreCase = true) ||
             architecture.equals("qwen35moe", ignoreCase = true)
 
+    val hasVulkanBackend: Boolean
+        get() = activeBackend.contains("Vulkan", ignoreCase = true)
+
     val formattedParamCount: String
         get() = when {
             parameterCount >= 1_000_000_000 -> String.format("%.2fB", parameterCount / 1e9)
