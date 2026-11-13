@@ -4,6 +4,7 @@ import android.content.Context
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FlashAttentionMode
+import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.TimeoutConfig
@@ -59,6 +60,7 @@ internal class LastModelStore(context: Context) {
             .putString(KEY_VULKAN_MATVEC_WORKGROUP, config.vulkanMatvecWorkgroup.name)
             .putString(KEY_FLASH_ATTENTION_MODE, config.flashAttentionMode.name)
             .putString(KEY_RELOAD_AFTER_ABORT, config.reloadAfterAbort.name)
+            .putString(KEY_GDN_POLICY, config.gdnPolicy.name)
             .putInt(KEY_TOP_K, config.topK)
             .putFloat(KEY_MIN_P, config.minP)
             .putLong(KEY_TIMEOUT_BIND, config.timeoutConfig.serviceBindMs)
@@ -133,6 +135,12 @@ internal class LastModelStore(context: Context) {
                         ?: ReloadAfterAbort.LAZY.name
                 )
             }.getOrDefault(ReloadAfterAbort.LAZY),
+            gdnPolicy = runCatching {
+                GdnPolicy.valueOf(
+                    preferences.getString(KEY_GDN_POLICY, GdnPolicy.ARCH_DEFAULT.name)
+                        ?: GdnPolicy.ARCH_DEFAULT.name
+                )
+            }.getOrDefault(GdnPolicy.ARCH_DEFAULT),
             topK = preferences.getInt(KEY_TOP_K, 20),
             minP = preferences.getFloat(KEY_MIN_P, 0.05f)
         )
@@ -171,6 +179,7 @@ internal class LastModelStore(context: Context) {
         const val KEY_MICRO_BATCH_SIZE = "micro_batch_size"
         const val KEY_VULKAN_MATVEC_WORKGROUP = "vulkan_matvec_workgroup"
         const val KEY_RELOAD_AFTER_ABORT = "reload_after_abort"
+        const val KEY_GDN_POLICY = "gdn_policy"
         const val KEY_TOP_K = "sampler_top_k"
         const val KEY_MIN_P = "sampler_min_p"
         const val KEY_FLASH_ATTENTION_MODE = "flash_attention_mode"

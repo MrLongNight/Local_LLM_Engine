@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FlashAttentionMode
+import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
@@ -47,7 +48,8 @@ class LastModelStoreTest {
             microBatchSize = 64,
             vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.LARGE,
             flashAttentionMode = FlashAttentionMode.ENABLED,
-            reloadAfterAbort = ReloadAfterAbort.EAGER
+            reloadAfterAbort = ReloadAfterAbort.EAGER,
+            gdnPolicy = GdnPolicy.AR_UNFUSED_CH_FUSED
         )
         val source = ModelSource.ContentUri(
             uriString = "content://com.android.externalstorage.documents/document/primary%3AModels%2Fqwen.gguf"
@@ -71,7 +73,8 @@ class LastModelStoreTest {
             gpuLayers = 99,
             batchThreads = 4,
             microBatchSize = 128,
-            vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.LARGE
+            vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.LARGE,
+            gdnPolicy = GdnPolicy.BOTH_UNFUSED
         )
         val parcel = Parcel.obtain()
         try {
@@ -80,6 +83,7 @@ class LastModelStoreTest {
             val restored = EngineConfig.CREATOR.createFromParcel(parcel)
             assertEquals(config, restored)
             assertEquals(VulkanMatvecWorkgroup.LARGE, restored.vulkanMatvecWorkgroup)
+            assertEquals(GdnPolicy.BOTH_UNFUSED, restored.gdnPolicy)
         } finally {
             parcel.recycle()
         }
