@@ -297,7 +297,7 @@ class InferenceService : Service() {
                             "requestedContext=${config.contextSize},effectiveContext=${effectiveConfig.contextSize}," +
                             "contextReduced=${memoryPlan.contextReduced},pressureWarning=${memoryPlan.pressureWarning}," +
                             "hardLimitExceeded=${memoryPlan.hardLimitExceeded},overrideApplied=${memoryPlan.overrideApplied}," +
-                            "lowMemory=${memoryInfo.lowMemory}
+                            "lowMemory=${memoryInfo.lowMemory}"
                     )
 
                     val result = e.loadModel(
