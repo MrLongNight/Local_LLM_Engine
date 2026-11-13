@@ -165,7 +165,7 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
     cparams.auto_fgdn    = false;
     if (local_llm_qwen35_arch) {
         LLAMA_LOG_WARN(
-            "llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused\\n");
+            "llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused,vulkanGdn=cpu-fallback\\n");
     }
 ]=])
     string(REPLACE "${_gdn_policy_anchor}" "${_gdn_policy_replacement}" _context_contents "${_context_contents}")
@@ -370,6 +370,35 @@ static void ggml_vk_get_physical_device_features2(
 
     # These anchors are checked against the pinned upstream Vulkan source, then
     # injected only into the generated Android build copy (the submodule remains pristine).
+    # Conservative Vulkan fallback for Gated Delta Net:
+    # until device parity is demonstrated, let the CPU backend execute this op.
+    # The policy is op-scoped; unrelated Vulkan operators retain their normal support.
+    set(_gdn_vk_support_anchor [=[
+        case GGML_OP_GATED_DELTA_NET:
+            {
+                const uint32_t S_v = op->src[2]->ne[0];
+                if (S_v != 16 && S_v != 32 && S_v != 64 && S_v != 128) {
+                    return false;
+                }
+                for (int i = 0; i < 6; i++) {
+                    if (op->src[i] == nullptr || op->src[i]->type != GGML_TYPE_F32) {
+                        return false;
+                    }
+                }
+                return op->type == GGML_TYPE_F32;
+            }
+]=])
+    string(FIND "${_vulkan_contents}" "${_gdn_vk_support_anchor}" _gdn_vk_support_position)
+    if(_gdn_vk_support_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: pinned Vulkan GATED_DELTA_NET supports_op anchor changed; review the CPU fallback.")
+    endif()
+    set(_gdn_vk_support_replacement [=[
+        case GGML_OP_GATED_DELTA_NET:
+            // LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK: Vulkan must not claim GDN support.
+            return false;
+]=])
+    string(REPLACE "${_gdn_vk_support_anchor}" "${_gdn_vk_support_replacement}" _vulkan_contents "${_vulkan_contents}")
+
     # Q4_K prefill F16/F32 selection for a controlled A/B run.
     set(_q4_prefill_type_anchor [=[
     const ggml_type y_kernel_type = ggml_vk_mul_mat_b_type(ctx, src0->type, src1, f16_type,
@@ -665,6 +694,7 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()

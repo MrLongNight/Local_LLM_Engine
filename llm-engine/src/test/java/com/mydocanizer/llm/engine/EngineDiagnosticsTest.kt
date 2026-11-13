@@ -390,6 +390,7 @@ class EngineDiagnosticsTest {
         )
         val report = EngineDiagnostics.buildCompactReportForTest(lines)
         assertTrue(report.contains("gdnPolicy=autoregressive=unfused,chunked=unfused"))
+        assertTrue(report.contains("vulkanGdn=cpu-fallback"))
         assertTrue(report.contains("graphSplits=2"))
         assertTrue(report.contains("cpuNodes=5(5.0%)"))
         assertTrue(report.contains("vulkanNodes=90(90.0%)"))
