@@ -22,6 +22,7 @@ object EngineDiagnostics {
     private val logQueue = ConcurrentLinkedQueue<String>()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private val persistLock = Any()
+    private val timestampPrefix = Regex("""^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}""")
 
     @Volatile
     private var processLogFile: File? = null
@@ -74,8 +75,11 @@ object EngineDiagnostics {
 
     private fun formatLog(level: String, tag: String, event: String, details: String): String {
         val timestamp = synchronized(dateFormat) { dateFormat.format(Date()) }
-        return if (details.isNotBlank()) {
-            "$timestamp [$level] [$tag] $event - $details"
+        // Throwable messages may contain embedded stack/callbackFlow newlines. Keep each
+        // persisted diagnostic row atomic so it cannot corrupt parsing of later headers.
+        val oneLineDetails = details.replace("\\r\\n", "\\\\n").replace('\\r', ' ').replace("\\n", "\\\\n")
+        return if (oneLineDetails.isNotBlank()) {
+            "$timestamp [$level] [$tag] $event - $oneLineDetails"
         } else {
             "$timestamp [$level] [$tag] $event"
         }
@@ -710,11 +714,17 @@ object EngineDiagnostics {
                 "${sample.timestamp} pid=${sample.pid} ${sample.phase} $values$backend"
             }
 
+        val timestampedRows = ordered.mapNotNull { line ->
+            timestampPrefix.find(line)?.value
+        }
+        val periodStart = timestampedRows.minOrNull() ?: "n/a"
+        val periodEnd = timestampedRows.maxOrNull() ?: "n/a"
+
         return buildString {
             appendLine("LOCAL LLM ENGINE – KOMPAKTER DIAGNOSEBERICHT")
             appendLine("Erstellt: ${Date()}")
             appendLine("Erfasste Logzeilen: ${ordered.size}; RAM-Samples: ${samples.size}")
-            appendLine("Zeitraum: ${ordered.firstOrNull()?.substringBefore(" [") ?: "n/a"} bis ${ordered.lastOrNull()?.substringBefore(" [") ?: "n/a"}")
+            appendLine("Zeitraum: $periodStart bis $periodEnd")
             appendLine()
             appendLine("[VULKAN-LAUFZEITBELEG – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET]")
             if (nativePriorityEvidence.isEmpty()) {

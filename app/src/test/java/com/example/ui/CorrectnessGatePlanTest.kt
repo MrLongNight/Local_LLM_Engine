@@ -117,4 +117,23 @@ class CorrectnessGatePlanTest {
         assertEquals("CPU_REFERENCE_MISSING", result.reason)
     }
 
+    @Test
+    fun rejectsAdditionalNumbersOrExplanatoryTextAfterExpectedFiveNumbers() {
+        val extraNumber = CorrectnessGatePlan.parse(
+            "322, 324, 326, 328, 330, 332",
+            trace("extra", "CPU")
+        )
+        val extraResult = CorrectnessGatePlan.evaluate(extraNumber, expectedBackend = "CPU")
+        assertFalse(extraResult.passed)
+        assertEquals("EXPECTED_OUTPUT_MISMATCH", extraResult.reason)
+
+        val explanation = CorrectnessGatePlan.parse(
+            "Die Antwort lautet: 322, 324, 326, 328, 330",
+            trace("explanation", "CPU")
+        )
+        val explanationResult = CorrectnessGatePlan.evaluate(explanation, expectedBackend = "CPU")
+        assertFalse(explanationResult.passed)
+        assertEquals("EXPECTED_OUTPUT_MISMATCH", explanationResult.reason)
+    }
+
 }

@@ -766,6 +766,7 @@ internal class InferenceClient(
                     EngineDiagnostics.error("ipc_client", "LAZY_MODEL_RESTORE_FAILED", restoreError)
                     trySend(InferenceEvent.Error(restoreError))
                     channel.close()
+                    awaitClose { /* No Binder callback has been registered yet. */ }
                     return@callbackFlow
                 }
                 EngineDiagnostics.info("ipc_client", "LAZY_MODEL_RESTORE_COMPLETED")
@@ -776,6 +777,7 @@ internal class InferenceClient(
         if (!activeRequestId.compareAndSet(null, requestId)) {
             trySend(InferenceEvent.Error(IllegalStateException("Another inference request is already active")))
             channel.close()
+            awaitClose { /* This request never acquired the active slot or registered a callback. */ }
             return@callbackFlow
         }
         _state.value = EngineState.Inferring(request)

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Diagnostic log entries now escape embedded newlines, and compact-export start/end times are derived only from valid timestamp-prefixed rows; multiline exceptions can no longer corrupt the report header.
+- Binder stream early exits now pass through `awaitClose` cleanup, and the greedy gate requires exactly the five expected numbers with no extra answer text.
+
 ### Added
 - Added a Debug/TEXT_DIAGNOSTICS correctness gate to the G1 matrix. It captures the actual selected token and pre-decode top-five logits for 16 greedy steps, checks the fixed 2..320 continuation, and compares every Vulkan profile against its matching CPU reference (same GGUF, micro-batch and Flash Attention setting). The result now preserves the native run ID; missing CPU references, incomplete gates and measurement failures fail closed, and invalid rows do not report tok/s.
 

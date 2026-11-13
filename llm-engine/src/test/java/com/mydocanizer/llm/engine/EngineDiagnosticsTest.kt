@@ -361,4 +361,18 @@ class EngineDiagnosticsTest {
         "2026-11-09 21:00:00.000 [INFO] [inference] TOKEN_STEP_METRIC - " +
             "runId=$runId,pid=$pid,nativeStep=$index,jniWallUs=$jniWallUs," +
             "visiblePieces=$index,backend=$backend"
+    @Test
+    fun exportPeriodIgnoresMultilineExceptionContinuationWithoutTimestamp() {
+        val first = "2026-11-13 00:00:49.737 [INFO] [engine] STARTED"
+        val last = "2026-11-13 08:27:18.900 [INFO] [engine] COMPLETED"
+        val continuation = "See callbackFlow API documentation for the details."
+
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(first, continuation, last)
+        )
+
+        assertTrue(report.contains("Zeitraum: 2026-11-13 00:00:49.737 bis 2026-11-13 08:27:18.900"))
+        assertFalse(report.contains("Zeitraum: 2026-11-13 00:00:49.737 bis See callbackFlow"))
+    }
+
 }

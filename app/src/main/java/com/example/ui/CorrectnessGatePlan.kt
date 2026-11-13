@@ -104,8 +104,9 @@ internal object CorrectnessGatePlan {
         }
         if (steps.any { it.selectedId != it.top5.first().tokenId }) return "SELECTED_TOKEN_NOT_TOP1"
 
-        val actualNumbers = numberPattern.findAll(run.output).take(5).map { it.value }.toList()
-        if (actualNumbers != BackendBenchmarkPlan.CORRECTNESS_GATE_EXPECTED) {
+        val normalizedOutput = run.output.trim().replace(Regex("\\\\s+"), "")
+        val expectedOutput = BackendBenchmarkPlan.CORRECTNESS_GATE_EXPECTED.joinToString(",")
+        if (normalizedOutput != expectedOutput) {
             return "EXPECTED_OUTPUT_MISMATCH"
         }
         if (maxConsecutiveRepeat(steps) > 8) return "TOKEN_REPEAT_OVER_8"
