@@ -71,3 +71,18 @@ The engine already passes the request's `enableThinking` flag through JNI to lla
 - Repeat AUTO between kernel profiles to expose thermal/frequency drift.
 - Do not promote an experimental workgroup, MMVQ/DMMV, Flash Attention or quantization path to the default without repeated target-device measurements.
 - A benchmark run under the Debug Vulkan operation profiler is diagnostic only; use profiler-disabled builds for throughput acceptance.
+
+
+## Gated Delta Net upstream pin rationale
+
+The Android overlay currently targets the pinned llama.cpp revision
+`a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5`. Upstream commit
+`ccd360f060a0f17b87ee0d4c5d91ee84cfdff484` (2026-11-11) removes the
+non-fused GDN graph builders and the `fused_gdn_ar` / `fused_gdn_ch`
+context parameters, making the four-way AR/CH fusion correctness matrix
+impossible to run unchanged and invalidating the current CMake overlay anchor.
+That upstream change is therefore not merged into this branch until the
+required CPU/Vulkan fusion matrix is completed and a replacement validation
+strategy exists. The CMake overlay deliberately fails configuration if its
+pinned-source anchors change; do not update the submodule by moving the pointer
+alone.

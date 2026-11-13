@@ -326,6 +326,39 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("PSS_peak=123.4MB"))
     }
 
+    @Test
+    fun compactExportRetainsAll48MatrixProfileRowsWithoutLifecycleEventsDisplacingThem() {
+        val lines = mutableListOf<String>()
+        for (index in 1..48) {
+            val profile = "PROFILE_%02d".format(index)
+            val timestamp = "2026-11-13 10:00:%02d.000".format(index)
+            lines += "$timestamp [INFO] [benchmark] FULL_MATRIX_PROFILE_STARTED - profile=$profile"
+            lines += "$timestamp [INFO] [benchmark] CORRECTNESS_GATE_RESULT - " +
+                "model=qwen35,profile=$profile,backend=Vulkan,status=PASS," +
+                "reason=TOP1_IDENTICAL_TOP5_OVERLAP_GE_4,minimumTop5Overlap=5/5"
+            if (index < 48) {
+                lines += "$timestamp [INFO] [benchmark] FULL_MATRIX_RESULT - " +
+                    "profile=$profile,model=qwen35,backend=Vulkan,gateStatus=PASS," +
+                    "decodeTokensPerSecond=2.125,nativeTokensPerSecond=2.100," +
+                    "nUbatch=128,flashAttention=DISABLED,gdnPolicy=BOTH_UNFUSED,graphSplits=2"
+            } else {
+                lines += "$timestamp [INFO] [benchmark] FULL_MATRIX_ROW_INVALID - " +
+                    "profile=$profile,model=qwen35,backend=Vulkan,gateStatus=FAIL," +
+                    "reason=CPU_TOP1_MISMATCH,tok/s=n/a,gateRunId=failed-gate"
+            }
+        }
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+
+        assertTrue(report.contains("PROFILE_01"))
+        assertTrue(report.contains("PROFILE_48"))
+        assertTrue(report.contains("decodeTokensPerSecond=2.125"))
+        assertTrue(report.contains("gateStatus=FAIL"))
+        assertTrue(report.contains("tok/s=n/a"))
+        assertFalse(report.contains("FULL_MATRIX_PROFILE_STARTED"))
+        assertFalse(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
+    }
+
     private fun vulkanOperationMetric(
         pid: Int,
         runId: String,

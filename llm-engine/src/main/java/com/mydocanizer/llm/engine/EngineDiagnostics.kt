@@ -413,12 +413,35 @@ object EngineDiagnostics {
         // Keep every matrix profile row in the compact export. Each result carries
         // graphSplits and diagnosticRunId; the RAM summary below joins that ID to the
         // exact INFERENCE_<runId> Peak-PSS/available-RAM/thermal samples.
-        val fullMatrixEvents = kotlinLines
-            .filter { eventName(it).startsWith("FULL_MATRIX_") }
+        // Keep one compact row per profile. PROFILE_STARTED and gate PASS events
+        // are not matrix result rows; counting them against the 48-row cap silently
+        // discarded the first half of a 48-profile Qwen3.5 matrix.
+        val fullMatrixRows = kotlinLines
+            .filter {
+                eventName(it) == "FULL_MATRIX_RESULT" ||
+                    eventName(it) == "FULL_MATRIX_ROW_INVALID"
+            }
             .takeLast(48)
-        val correctnessGateEvents = kotlinLines
-            .filter { eventName(it).startsWith("CORRECTNESS_GATE_") }
-            .takeLast(48)
+        val fullMatrixLifecycleEvents = kotlinLines
+            .filter {
+                eventName(it) in setOf(
+                    "FULL_MATRIX_STARTED",
+                    "FULL_MATRIX_SAFETY_STOP",
+                    "FULL_MATRIX_CANCELLED",
+                    "FULL_MATRIX_FAILED",
+                    "FULL_MATRIX_RESTORED",
+                    "FULL_MATRIX_RESTORE_FAILED"
+                )
+            }
+            .takeLast(6)
+        // PASS is already encoded in each FULL_MATRIX_RESULT row. Keep only recent
+        // gate failures as supplemental detail so they cannot evict profile rows.
+        val correctnessGateFailures = kotlinLines
+            .filter {
+                eventName(it) == "CORRECTNESS_GATE_RESULT" &&
+                    field(it, "status") == "FAIL"
+            }
+            .takeLast(8)
         val performanceEvents = (
             kotlinLines
                 .filterNot { it.contains("RESOURCE_SNAPSHOT") }
@@ -430,7 +453,7 @@ object EngineDiagnostics {
                         event.startsWith("FULL_MATRIX_") ||
                         event.endsWith("_TEST_OUTPUT")
                 }
-                .takeLast(12) + vulkanKernelSweepEvents + fullMatrixEvents + correctnessGateEvents
+                .takeLast(12) + vulkanKernelSweepEvents
             )
             .distinct()
             .sorted()
@@ -740,6 +763,18 @@ object EngineDiagnostics {
             appendLine("Gate-Status:")
             if (gateStatusSummary.isEmpty()) appendLine("Keine Korrektheits-Gate-Ergebnisse vorhanden.")
             else gateStatusSummary.forEach(::appendLine)
+            appendLine()
+            appendLine("[VOLLSTÄNDIGE MODELLMATRIX – PROFILERGEBNISSE]")
+            if (fullMatrixRows.isEmpty()) {
+                appendLine("Keine Matrix-Profilzeilen vorhanden.")
+            } else {
+                fullMatrixRows.forEach { appendLine(compactLine(it, 360)) }
+            }
+            fullMatrixLifecycleEvents.forEach { appendLine(compactLine(it, 220)) }
+            if (correctnessGateFailures.isNotEmpty()) {
+                appendLine("Zusätzliche Korrektheits-Gate-Fehlerdetails:")
+                correctnessGateFailures.forEach { appendLine(compactLine(it, 300)) }
+            }
             appendLine()
             appendLine("[VULKAN-LAUFZEITBELEG – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET]")
             if (nativePriorityEvidence.isEmpty()) {

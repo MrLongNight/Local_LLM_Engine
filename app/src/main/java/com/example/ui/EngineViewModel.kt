@@ -172,6 +172,7 @@ class EngineViewModel(
             previous.gpuLayers != config.gpuLayers ||
             previous.vulkanMatvecWorkgroup != config.vulkanMatvecWorkgroup ||
             previous.flashAttentionMode != config.flashAttentionMode ||
+            previous.gdnPolicy != config.gdnPolicy ||
             previous.reloadAfterAbort != config.reloadAfterAbort ||
             previous.threads != config.threads ||
             previous.batchThreads != config.batchThreads ||
@@ -186,7 +187,8 @@ class EngineViewModel(
                 "EXECUTION_CONFIG_UPDATED",
                 "backendPreference=${config.backendPreference}, gpuLayers=${config.gpuLayers}, " +
                     "vulkanMatvecWorkgroup=${config.vulkanMatvecWorkgroup}, " +
-                    "flashAttentionMode=${config.flashAttentionMode}, reloadAfterAbort=${config.reloadAfterAbort}, " +
+                    "flashAttentionMode=${config.flashAttentionMode}, gdnPolicy=${config.gdnPolicy}, " +
+                    "reloadAfterAbort=${config.reloadAfterAbort}, " +
                     "threads=${config.threads}, batchThreads=${config.effectiveBatchThreads}, " +
                     "batch=${config.batchSize}, microBatchRequested=${config.microBatchSize}, " +
                     "context=${config.contextSize}, topK=${config.topK}, minP=${config.minP}"
@@ -632,20 +634,18 @@ class EngineViewModel(
                             "benchmark",
                             "FULL_MATRIX_RESULT",
                             "profile=${profile.id},model=${model.name},backend=${actualBackend},gateStatus=PASS," +
-                                "gateRunId=${gateSample.result.diagnosticRunId},minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}," +
+                                "decodeTokensPerSecond=${measured.measuredTokensPerSecond},nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
                                 "kernelProfile=${profile.kernelProfile.name},nUbatch=${profile.microBatchSize}," +
-                                "flashAttention=${profile.flashAttention.name},gdnPolicy=${profile.config.gdnPolicy.name},graphSplits=${measured.result.graphSplits}," +
-                                    "diagnosticRunId=${measured.result.diagnosticRunId},resourcePhase=INFERENCE_${measured.result.diagnosticRunId}," +
-                                    "modelLoadMs=${modelLoadMs}," +
+                                "flashAttention=${profile.flashAttention.name},gdnPolicy=${profile.config.gdnPolicy.name}," +
+                                "graphSplits=${measured.result.graphSplits},diagnosticRunId=${measured.result.diagnosticRunId}," +
+                                "gateRunId=${gateSample.result.diagnosticRunId},minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}," +
+                                "activeBackend=${loaded.activeBackend},modelLoadMs=${modelLoadMs}," +
                                 "promptTokens=${measured.promptTokens},prefillMs=${measured.promptEvaluationMs ?: -1L}," +
                                 "firstTokenAfterPrefillMs=${measured.firstTokenAfterPrefillMs ?: -1L}," +
                                 "warmupTokens=${measured.warmupTokens},measuredTokens=${measured.measuredTokens}," +
-                                "measuredWallMs=${measured.measuredWallMs ?: -1L}," +
-                                "decodeTokensPerSecond=${measured.measuredTokensPerSecond}," +
-                                "nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
-                                "generationMs=${measured.result.durationMs},finishReason=${measured.result.finishReason.name}," +
-                                "batch=${profile.config.batchSize},threads=${profile.config.threads}," +
-                                "batchThreads=${profile.config.effectiveBatchThreads},activeBackend=${loaded.activeBackend}"
+                                "measuredWallMs=${measured.measuredWallMs ?: -1L},generationMs=${measured.result.durationMs}," +
+                                "finishReason=${measured.result.finishReason.name},batch=${profile.config.batchSize}," +
+                                "threads=${profile.config.threads},batchThreads=${profile.config.effectiveBatchThreads}"
                         )
                         } else {
                             val reason = gateEvaluation.reason.replace(',', ';').replace('\n', ' ')
@@ -654,7 +654,7 @@ class EngineViewModel(
                                 "benchmark",
                                 "FULL_MATRIX_ROW_INVALID",
                                 "profile=${profile.id},model=${model.name},backend=$actualBackend," +
-                                    "gateStatus=FAIL,reason=$reason,gateRunId=${gateSample.result.diagnosticRunId}"
+                                    "gateStatus=FAIL,reason=$reason,tok/s=n/a,gateRunId=${gateSample.result.diagnosticRunId}"
                             )
                         }
                     } catch (cancelled: CancellationException) {
@@ -675,6 +675,12 @@ class EngineViewModel(
                                 "GATE_FAILED"
                             } else "GATE_NOT_COMPLETED"
                             rows += "${profile.id} | gate=FAIL ($gateFailure: $message) | INVALID | tok/s=n/a"
+                            EngineDiagnostics.info(
+                                "benchmark",
+                                "FULL_MATRIX_ROW_INVALID",
+                                "profile=${profile.id},model=${model.name},backend=${profile.backend.name}," +
+                                    "gateStatus=FAIL,reason=$gateFailure,tok/s=n/a,gateRunId=$profileGateRunId,detail=$message"
+                            )
                             EngineDiagnostics.info(
                                 "benchmark",
                                 "CORRECTNESS_GATE_RESULT",

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Remembered-model storage now persists the selected GDN fusion policy; older preference records safely restore to `ARCH_DEFAULT`. Configuration-change diagnostics include GDN policy changes.
+- Compact diagnostics now export all 48 matrix profile rows independently of profile-start and gate-pass events. Invalid rows explicitly carry `tok/s=n/a`; the matrix section is prioritized within the 32 KiB export limit.
+
 ### Changed
 - Added Parcelable-compatible architecture-aware `GdnPolicy` with all four AR/CH fusion states. Qwen3.5 full-matrix runs execute 48 correctness-gated profiles: CPU reference plus Vulkan AUTO and forced MMVQ, crossed with ubatch 32/128 and Flash Attention OFF/ON. The selected flags are applied in the native llama-context overlay and reported in `LOCAL_LLM_QWEN35_GDN_POLICY`.
 
