@@ -282,7 +282,9 @@ class InferenceService : Service() {
                         modelBytes = modelBytes,
                         requestedContextTokens = config.contextSize,
                         availableBytes = memoryInfo.availMem,
-                        lowMemory = memoryInfo.lowMemory
+                        totalBytes = memoryInfo.totalMem,
+                        lowMemory = memoryInfo.lowMemory,
+                        allowHardLimitOverride = config.memoryGuardOverride
                     )
                     val effectiveConfig = if (memoryPlan.contextReduced) {
                         config.copy(contextSize = memoryPlan.effectiveContextTokens)
@@ -291,8 +293,11 @@ class InferenceService : Service() {
                         "memory", "MODEL_LOAD_MEMORY_PLAN",
                         "modelBytes=${memoryPlan.modelBytes},kvEstimateBytes=${memoryPlan.estimatedKvBytes}," +
                             "requiredBytes=${memoryPlan.requiredBytes},availableBytes=${memoryPlan.availableBytes}," +
+                            "totalBytes=${memoryPlan.totalBytes},hardLimitBytes=${memoryPlan.hardLimitBytes}," +
                             "requestedContext=${config.contextSize},effectiveContext=${effectiveConfig.contextSize}," +
-                            "contextReduced=${memoryPlan.contextReduced}"
+                            "contextReduced=${memoryPlan.contextReduced},pressureWarning=${memoryPlan.pressureWarning}," +
+                            "hardLimitExceeded=${memoryPlan.hardLimitExceeded},overrideApplied=${memoryPlan.overrideApplied}," +
+                            "lowMemory=${memoryInfo.lowMemory}
                     )
 
                     val result = e.loadModel(

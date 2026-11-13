@@ -110,7 +110,9 @@ data class EngineConfig(
     val flashAttentionMode: FlashAttentionMode = FlashAttentionMode.AUTO,
     val reloadAfterAbort: ReloadAfterAbort = ReloadAfterAbort.LAZY,
     val topK: Int = 20,
-    val minP: Float = 0.05f
+    val minP: Float = 0.05f,
+    /** Explicit one-load acknowledgement for a model exceeding the 85% total-RAM guard. */
+    val memoryGuardOverride: Boolean = false
 ) : Parcelable {
     /**
      * Effective llama.cpp thread count for prompt/batch processing.
@@ -173,7 +175,8 @@ data class EngineConfig(
         } else FlashAttentionMode.AUTO,
         reloadAfterAbort = readReloadAfterAbort(parcel),
         topK = if (parcel.dataAvail() > 0) parcel.readInt() else 20,
-        minP = if (parcel.dataAvail() > 0) parcel.readFloat() else 0.05f
+        minP = if (parcel.dataAvail() > 0) parcel.readFloat() else 0.05f,
+        memoryGuardOverride = if (parcel.dataAvail() > 0) parcel.readInt() != 0 else false
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -193,6 +196,7 @@ data class EngineConfig(
         parcel.writeString(reloadAfterAbort.name)
         parcel.writeInt(topK)
         parcel.writeFloat(minP)
+        parcel.writeInt(if (memoryGuardOverride) 1 else 0)
     }
 
     override fun describeContents(): Int = 0

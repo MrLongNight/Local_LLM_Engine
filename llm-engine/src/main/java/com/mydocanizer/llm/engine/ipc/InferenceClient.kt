@@ -607,7 +607,7 @@ internal class InferenceClient(
                         // Keep only a model confirmed by the service as the automatic
                         // recovery target after a later process restart.
                         lastLoadedSource = recoverySource
-                        lastLoadedConfig = config
+                        lastLoadedConfig = config.copy(memoryGuardOverride = false)
                         _modelLoadProgress.value = 100
                         _modelLoadProgressEvents.tryEmit(100)
                         val publicInfo = if (source is ModelSource.ContentUri) {

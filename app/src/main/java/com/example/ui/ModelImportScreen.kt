@@ -58,6 +58,7 @@ fun ModelImportScreen(
     val isImporting: Boolean by viewModel.isImporting.collectAsState()
     val modelLoadProgress: Int? by viewModel.modelLoadProgress.collectAsState()
     val errorMessage: String? by viewModel.errorMessage.collectAsState()
+    val memoryOverrideAvailable: Boolean by viewModel.memoryOverrideAvailable.collectAsState()
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -101,6 +102,14 @@ fun ModelImportScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
+                        }
+                        if (memoryOverrideAvailable) {
+                            TextButton(
+                                onClick = { viewModel.loadModelDespiteMemoryWarning() },
+                                enabled = !isImporting
+                            ) {
+                                Text("Trotzdem laden", color = MaterialTheme.colorScheme.onErrorContainer)
+                            }
                         }
                         TextButton(onClick = { viewModel.dismissError() }) {
                             Text("OK", color = MaterialTheme.colorScheme.onErrorContainer)

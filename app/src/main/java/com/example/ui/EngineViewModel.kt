@@ -120,6 +120,10 @@ class EngineViewModel(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private val _memoryOverrideAvailable = MutableStateFlow(false)
+    val memoryOverrideAvailable: StateFlow<Boolean> = _memoryOverrideAvailable.asStateFlow()
+    private var pendingMemoryOverride: Pair<ModelSource, EngineConfig>? = null
+
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
 
@@ -225,7 +229,7 @@ class EngineViewModel(
      * All model-load entry points share one state/error/progress lifecycle. Only the
      * source adapter differs between a selected private file and a SAF content URI.
      */
-    private fun startModelLoad(source: ModelSource, operationLabel: String) {
+    private fun startModelLoad(source: ModelSource, operationLabel: String, loadConfigOverride: EngineConfig? = null) {
         if (_isBenchmarking.value) {
             _errorMessage.value = "Während des Benchmarks sind Modellwechsel gesperrt."
             return
@@ -237,10 +241,12 @@ class EngineViewModel(
 
         _isImporting.value = true
         _errorMessage.value = null
+        _memoryOverrideAvailable.value = false
+        pendingMemoryOverride = null
         _statusMessage.value = operationLabel
         // Capture the exact settings at the user's load action. A later slider/chip
         // change must not silently alter a queued model-load operation.
-        val loadConfig = _engineConfig.value
+        val loadConfig = loadConfigOverride ?: _engineConfig.value
         EngineDiagnostics.info(
             "ui",
             "MODEL_LOAD_CONFIGURATION",
@@ -255,7 +261,7 @@ class EngineViewModel(
             try {
                 val result = engine.loadModel(source, loadConfig)
                 result.onSuccess { info ->
-                    runCatching { lastModelStore.save(source, loadConfig, info.name) }
+                    runCatching { lastModelStore.save(source, loadConfig.copy(memoryGuardOverride = false), info.name) }
                         .onSuccess {
                             EngineDiagnostics.info(
                                 "model_restore",
@@ -277,12 +283,20 @@ class EngineViewModel(
                     )
                 }.onFailure { error ->
                     EngineDiagnostics.error("ui", "MODEL_LOAD_UI_FAILURE", error)
+                    if (requiresMemoryGuardOverride(error)) {
+                        pendingMemoryOverride = source to loadConfig.copy(memoryGuardOverride = false)
+                        _memoryOverrideAvailable.value = true
+                    }
                     _errorMessage.value = "Modell konnte nicht geladen werden: ${error.message ?: error.javaClass.simpleName}"
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 EngineDiagnostics.error("ui", "MODEL_LOAD_UI_EXCEPTION", error)
+                if (requiresMemoryGuardOverride(error)) {
+                    pendingMemoryOverride = source to loadConfig.copy(memoryGuardOverride = false)
+                    _memoryOverrideAvailable.value = true
+                }
                 _errorMessage.value = "Modell konnte nicht geladen werden: ${error.message ?: error.javaClass.simpleName}"
             } finally {
                 _isImporting.value = false
@@ -290,6 +304,26 @@ class EngineViewModel(
         }
     }
 
+    fun loadModelDespiteMemoryWarning() {
+        if (_isImporting.value || _isBenchmarking.value) return
+        val pending = pendingMemoryOverride ?: return
+        pendingMemoryOverride = null
+        _memoryOverrideAvailable.value = false
+        startModelLoad(
+            source = pending.first,
+            operationLabel = "Modell wird trotz Speicherwarnung geladen…",
+            loadConfigOverride = pending.second.copy(memoryGuardOverride = true)
+        )
+    }
+
+    private fun requiresMemoryGuardOverride(error: Throwable): Boolean {
+        var current: Throwable? = error
+        repeat(8) {
+            if (current?.message?.startsWith("MEMORY_GUARD_OVERRIDE_REQUIRED:") == true) return true
+            current = current?.cause
+        }
+        return false
+    }
     fun importModelFromSaf(uri: Uri) {
         // Auto-restore requires a persisted read grant, not the temporary picker grant.
         val permissionResult = runCatching {
