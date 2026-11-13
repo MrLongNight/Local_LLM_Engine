@@ -104,7 +104,7 @@ internal object CorrectnessGatePlan {
         }
         if (steps.any { it.selectedId != it.top5.first().tokenId }) return "SELECTED_TOKEN_NOT_TOP1"
 
-        val normalizedOutput = run.output.trim().replace(Regex("\\\\s+"), "")
+        val normalizedOutput = run.output.filterNot { it.isWhitespace() }
         val expectedOutput = BackendBenchmarkPlan.CORRECTNESS_GATE_EXPECTED.joinToString(",")
         if (normalizedOutput != expectedOutput) {
             return "EXPECTED_OUTPUT_MISMATCH"
