@@ -456,19 +456,6 @@ static void ggml_vk_get_physical_device_features2(
     # Force only Q4_K decode to use the existing base DMMV implementation.
     # Q4_K prefill and all non-Q4_K tensor types retain their normal MMVQ selection.
     set(_q4k_base_dmmv_anchor [=[
-    // LOCAL_LLM_VULKAN_MMVQ_FORCE: mode 7 bypasses the upstream shape heuristic
-    // only when Q8_1 integer-dot prerequisites are met. If no compatible pipeline
-    // exists, the unchanged null-pipeline branch falls back to base DMMV.
-    const bool local_llm_mmvq_force_requested =
-        local_llm_vulkan_dmmv_workgroup_override() == 7 &&
-        ctx->device->integer_dot_product &&
-        src1->type == GGML_TYPE_F32 &&
-        ggml_is_contiguous(src1) && !y_non_contig &&
-        (ne11 * ne10) % 4 == 0 &&
-        (swap_inputs || ggml_vk_src1_prec_allows_q8(dst));
-    if (local_llm_mmvq_force_requested) {
-        quantize_y = true;
-    }
     // Check for mmq first
     vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
     string(FIND "${_vulkan_contents}" "${_q4k_base_dmmv_anchor}" _q4k_base_dmmv_position)
@@ -489,6 +476,19 @@ static void ggml_vk_get_physical_device_features2(
         quantize_y = false;
     } else if (src0->type == GGML_TYPE_Q6_K && ne11 == 1 && local_llm_quant_override == 5) {
         quantize_y = false;
+    }
+    // LOCAL_LLM_VULKAN_MMVQ_FORCE: mode 7 bypasses the upstream shape heuristic
+    // only when Q8_1 integer-dot prerequisites are met. Unsupported pipelines
+    // still follow the existing null-pipeline fallback to base DMMV.
+    const bool local_llm_mmvq_force_requested =
+        local_llm_quant_override == 7 &&
+        ctx->device->integer_dot_product &&
+        src1->type == GGML_TYPE_F32 &&
+        ggml_is_contiguous(src1) && !y_non_contig &&
+        (ne11 * ne10) % 4 == 0 &&
+        (swap_inputs || ggml_vk_src1_prec_allows_q8(dst));
+    if (local_llm_mmvq_force_requested) {
+        quantize_y = true;
     }
     // Check for mmq first
     vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
