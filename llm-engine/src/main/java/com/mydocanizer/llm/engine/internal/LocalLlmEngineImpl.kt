@@ -642,7 +642,8 @@ internal class LocalLlmEngineImpl(
                         durationMs = durationMs,
                         tokensPerSecond = tokensPerSec,
                         finishReason = finishReason,
-                        graphSplits = graphSplits
+                        graphSplits = graphSplits,
+                        diagnosticRunId = inferenceRunId
                     )
                     trySend(InferenceEvent.Completed(result))
                 }

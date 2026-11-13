@@ -43,6 +43,9 @@ internal object CorrectnessGatePlan {
     ): Evaluation {
         val localFailure = validateRun(candidate, expectedBackend)
         if (localFailure != null) return fail(localFailure, candidate)
+        if (expectedBackend.contains("VULKAN", ignoreCase = true) && cpuReference == null) {
+            return fail("CPU_REFERENCE_MISSING", candidate)
+        }
 
         if (cpuReference != null) {
             val referenceFailure = validateRun(cpuReference, "CPU")

@@ -491,6 +491,8 @@ class EngineViewModel(
                             "flashAttention=${profile.flashAttention},model=${model.name}"
                     )
                     restoreRequired = true
+                    var profileGateStatus: CorrectnessGatePlan.Status? = null
+                    var profileGateRunId = ""
                     try {
                         val loadStarted = System.nanoTime()
                         val loaded = engine.loadModel(source, profile.config).getOrElse { throw it }
@@ -525,6 +527,8 @@ class EngineViewModel(
                             cpuReference = if (profile.backend == BackendPreference.CPU) null else cpuReference,
                             expectedBackend = actualBackend
                         )
+                        profileGateStatus = gateEvaluation.status
+                        profileGateRunId = gateSample.result.diagnosticRunId
                         if (profile.backend == BackendPreference.CPU) {
                             cpuGateReferences[gateKey] = gateRun
                         }
@@ -605,7 +609,7 @@ class EngineViewModel(
                                 "batchThreads=${profile.config.effectiveBatchThreads},activeBackend=${loaded.activeBackend}"
                         )
                         } else {
-                            val reason = gateEvaluation.reason.replace(',', ';').replace('\\n', ' ')
+                            val reason = gateEvaluation.reason.replace(',', ';').replace('\n', ' ')
                             rows += "${profile.id} | gate=FAIL ($reason) | INVALID | tok/s=n/a"
                             EngineDiagnostics.info(
                                 "benchmark",
@@ -617,8 +621,28 @@ class EngineViewModel(
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Throwable) {
-                        val message = error.message ?: error.javaClass.simpleName
-                        rows += "${profile.id} | FEHLER: ${message}"
+                        val message = (error.message ?: error.javaClass.simpleName)
+                            .replace(',', ';').replace('\n', ' ')
+                        if (profileGateStatus == CorrectnessGatePlan.Status.PASS) {
+                            rows += "${profile.id} | gate=PASS | INVALID (MESSUNG_FEHLER: $message) | tok/s=n/a"
+                            EngineDiagnostics.info(
+                                "benchmark",
+                                "FULL_MATRIX_ROW_INVALID",
+                                "profile=${profile.id},model=${model.name},backend=${profile.backend.name}," +
+                                    "gateStatus=PASS,reason=MEASUREMENT_FAILED,gateRunId=$profileGateRunId,detail=$message"
+                            )
+                        } else {
+                            val gateFailure = if (profileGateStatus == CorrectnessGatePlan.Status.FAIL) {
+                                "GATE_FAILED"
+                            } else "GATE_NOT_COMPLETED"
+                            rows += "${profile.id} | gate=FAIL ($gateFailure: $message) | INVALID | tok/s=n/a"
+                            EngineDiagnostics.info(
+                                "benchmark",
+                                "CORRECTNESS_GATE_RESULT",
+                                "model=${model.name},profile=${profile.id},backend=${profile.backend.name}," +
+                                    "gateRunId=$profileGateRunId,status=FAIL,reason=$gateFailure,detail=$message"
+                            )
+                        }
                         EngineDiagnostics.error("benchmark", "FULL_MATRIX_PROFILE_FAILED", error)
                     }
                     if (index < profiles.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)

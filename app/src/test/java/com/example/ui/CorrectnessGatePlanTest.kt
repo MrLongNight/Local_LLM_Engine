@@ -108,4 +108,13 @@ class CorrectnessGatePlanTest {
     private companion object {
         const val expectedOutput = "322, 324, 326, 328, 330"
     }
+    @Test
+    fun rejectsVulkanWhenCpuReferenceIsMissing() {
+        val vulkan = CorrectnessGatePlan.parse(expectedOutput, trace("vulkan-run", "Vulkan"))
+        val result = CorrectnessGatePlan.evaluate(vulkan, expectedBackend = "Vulkan")
+
+        assertFalse(result.passed)
+        assertEquals("CPU_REFERENCE_MISSING", result.reason)
+    }
+
 }

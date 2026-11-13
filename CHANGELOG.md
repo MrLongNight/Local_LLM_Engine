@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
-- Added a Debug/TEXT_DIAGNOSTICS correctness gate to the G1 matrix. It captures the actual selected token and pre-decode top-five logits for 16 greedy steps, checks the fixed 2..320 continuation, and compares every Vulkan profile against its matching CPU reference (same GGUF, micro-batch and Flash Attention setting). Profiles without PASS are marked INVALID and do not report tok/s.
+- Added a Debug/TEXT_DIAGNOSTICS correctness gate to the G1 matrix. It captures the actual selected token and pre-decode top-five logits for 16 greedy steps, checks the fixed 2..320 continuation, and compares every Vulkan profile against its matching CPU reference (same GGUF, micro-batch and Flash Attention setting). The result now preserves the native run ID; missing CPU references, incomplete gates and measurement failures fail closed, and invalid rows do not report tok/s.
 
 ### Changed
 - Qwen3.5 (qwen35/qwen35moe) uses the unfused autoregressive Gated Delta Net path while retaining fused chunked prefill. This correctness-first fallback isolates malformed decode logits to the fused single-token path without changing other model architectures.
