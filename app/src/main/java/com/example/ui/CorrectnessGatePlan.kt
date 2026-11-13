@@ -37,8 +37,8 @@ internal object CorrectnessGatePlan {
             payloads.all { !field(it, "runId").isNullOrBlank() && !field(it, "backend").isNullOrBlank() }
         return GateRun(
             output = output,
-            runId = runIds.singleOrNull().orEmpty(),
-            backend = backends.singleOrNull().orEmpty(),
+            runId = runIds.firstOrNull().orEmpty(),
+            backend = backends.firstOrNull().orEmpty(),
             steps = parsed,
             invalidTraceRows = traceLines.size - parsed.size,
             traceMetadataConsistent = hasMetadataOnEveryRow && runIds.size == 1 && backends.size == 1
