@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- ModelInfo now reads `general.architecture` from GGUF metadata while preserving the legacy JNI metadata format and semicolon-containing backend description. The chat status card explicitly warns when the Qwen3.5 GDN CPU fallback is active.
+
 ### Fixed
 - Tightened the 16-step greedy correctness gate to reject malformed/extra trace rows, mixed run/backend metadata, non-finite or unsorted Top-5 logits, and reused CPU-reference run IDs; synthetic regression tests cover each fail-closed condition.
 - Qwen3.5/Qwen3.5-MoE now disable both fused autoregressive and chunked Gated Delta Net paths. The Android Vulkan `supports_op` overlay also rejects `GGML_OP_GATED_DELTA_NET`, forcing that operator to the CPU reference backend while leaving unrelated Vulkan operations enabled. CMake validates both source anchors and the exported `vulkanGdn=cpu-fallback` policy line; this is a correctness fallback, not a measured performance optimization.

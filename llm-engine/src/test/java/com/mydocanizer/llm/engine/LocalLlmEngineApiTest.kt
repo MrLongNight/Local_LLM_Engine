@@ -139,6 +139,46 @@ class LocalLlmEngineApiTest {
     }
 
     @Test
+    fun nativeMetadataParserPreservesArchitectureAndSemicolonContainingBackend() {
+        val parsed = NativeModelMetadataParser.parse(
+            rawMetadata = "Qwen3.5 2B;2000000000;65536;123456;ARCH=qwen35;Vulkan GPU; requested layers 99/37",
+            fallbackBackend = "CPU",
+            fallbackSizeBytes = 1L
+        )
+        assertEquals("Qwen3.5 2B", parsed.description)
+        assertEquals(2_000_000_000L, parsed.parameterCount)
+        assertEquals(65536, parsed.contextLengthTrain)
+        assertEquals(123456L, parsed.sizeBytes)
+        assertEquals("qwen35", parsed.architecture)
+        assertEquals("Vulkan GPU; requested layers 99/37", parsed.activeBackend)
+    }
+
+    @Test
+    fun nativeMetadataParserKeepsLegacyBackendFieldIntact() {
+        val parsed = NativeModelMetadataParser.parse(
+            rawMetadata = "Qwen2;500000000;32768;456;Vulkan GPU; requested layers 99/32",
+            fallbackBackend = "CPU",
+            fallbackSizeBytes = 10L
+        )
+        assertEquals("GGUF", parsed.architecture)
+        assertEquals("Vulkan GPU; requested layers 99/32", parsed.activeBackend)
+    }
+
+    @Test
+    fun qwen35ArchitectureEnablesCpuFallbackWarningOnlyForQwen35Families() {
+        fun model(architecture: String) = ModelInfo(
+            name = "model.gguf",
+            path = "/models/model.gguf",
+            sizeBytes = 1L,
+            architecture = architecture
+        )
+        assertTrue(model("qwen35").usesQwen35GdnCpuFallback)
+        assertTrue(model("QWEN35MOE").usesQwen35GdnCpuFallback)
+        assertTrue(!model("qwen3").usesQwen35GdnCpuFallback)
+        assertTrue(!model("GGUF").usesQwen35GdnCpuFallback)
+    }
+
+    @Test
     fun testInferenceEvents() {
         val tokenEvent = InferenceEvent.Token("token", 0)
         assertEquals("token", tokenEvent.token)

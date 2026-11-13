@@ -1481,12 +1481,18 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelMetada
 
     char desc[256];
     llama_model_desc(engine->model, desc, sizeof(desc));
+    char architecture[128] = {};
+    const int32_t architecture_size = llama_model_meta_val_str(
+        engine->model, "general.architecture", architecture, sizeof(architecture));
+    const std::string architecture_value =
+        architecture_size >= 0 && architecture[0] != '\\0' ? architecture : "GGUF";
     uint64_t n_params = llama_model_n_params(engine->model);
     int32_t n_ctx_train = llama_model_n_ctx_train(engine->model);
     uint64_t size_bytes = llama_model_size(engine->model);
 
     std::ostringstream ss;
-    ss << desc << ";" << n_params << ";" << n_ctx_train << ";" << size_bytes << ";" << engine->active_backend;
+    ss << desc << ";" << n_params << ";" << n_ctx_train << ";" << size_bytes
+       << ";ARCH=" << architecture_value << ";" << engine->active_backend;
     return env->NewStringUTF(ss.str().c_str());
 } catch (const std::exception& error) {
     local_llm_report_jni_exception(env, "nativeGetModelMetadata", error.what());

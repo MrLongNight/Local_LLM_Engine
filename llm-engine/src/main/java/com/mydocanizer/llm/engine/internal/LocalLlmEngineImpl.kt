@@ -14,6 +14,7 @@ import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
+import com.mydocanizer.llm.engine.NativeModelMetadataParser
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel

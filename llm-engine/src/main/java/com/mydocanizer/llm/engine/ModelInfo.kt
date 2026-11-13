@@ -58,6 +58,13 @@ data class ModelInfo(
     val sizeGb: Double
         get() = sizeBytes / (1024.0 * 1024.0 * 1024.0)
 
+    /**
+     * Qwen3.5 GDN operators are intentionally routed to CPU until device parity is proven.
+     */
+    val usesQwen35GdnCpuFallback: Boolean
+        get() = architecture.equals("qwen35", ignoreCase = true) ||
+            architecture.equals("qwen35moe", ignoreCase = true)
+
     val formattedParamCount: String
         get() = when {
             parameterCount >= 1_000_000_000 -> String.format("%.2fB", parameterCount / 1e9)
