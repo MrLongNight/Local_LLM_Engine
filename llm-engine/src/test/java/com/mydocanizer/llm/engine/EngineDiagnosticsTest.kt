@@ -379,7 +379,7 @@ class EngineDiagnosticsTest {
     @Test
     fun compactExportShowsGdnGraphAndGateHeadersButNeverPromptOrTokenText() {
         val lines = listOf(
-            "2026-11-13 09:00:00.000 [NATIVE] llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused\\n",
+            "2026-11-13 09:00:00.000 [NATIVE] llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused,vulkanGdn=cpu-fallback\\n",
             "2026-11-13 09:00:01.000 [NATIVE] llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - " +
                 "runId=gate-run,graphNodes=100,graphSplits=2,cpuNodes=5,vulkanNodes=90,otherNodes=1,unassignedNodes=4,backendIdsChanged=0,graphSizeChanged=1",
             "2026-11-13 09:00:02.000 [INFO] [benchmark] CORRECTNESS_GATE_RESULT - " +
