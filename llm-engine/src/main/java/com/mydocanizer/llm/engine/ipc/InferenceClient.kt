@@ -807,9 +807,11 @@ internal class InferenceClient(
 
         val pendingTimeout = AtomicReference<TimeoutSnapshot?>(null)
         val timeoutReported = AtomicBoolean(false)
-        // Preserve every token across Binder callbacks while allowing progress updates
-        // to collapse to the latest pending value when the collector/UI is slow.
-        val progressEvents = Channel<InferenceEvent.Progress>(Channel.CONFLATED)
+        // Preserve all progress phase transitions. Binder callbacks can report prompt
+        // progress, Started and first-token progress synchronously; a conflated channel
+        // may overwrite the short PROMPT_EVALUATION phase before the forwarder is scheduled.
+        // The public callbackFlow is buffered and max generation length is bounded.
+        val progressEvents = Channel<InferenceEvent.Progress>(Channel.UNLIMITED)
         val tokenDeliveryFailureHandled = AtomicBoolean(false)
         val progressForwarder = launch(Dispatchers.Default) {
             for (progress in progressEvents) {
@@ -837,11 +839,10 @@ internal class InferenceClient(
             activeRequestId.compareAndSet(requestId, null)
             streamControl?.let { activeStreamControl.compareAndSet(it, null) }
 
-            // Close the conflated progress channel and let its forwarder drain the
-            // newest pending value before publishing the terminal event. Without
-            // this barrier, an immediate Completed/Cancelled callback could close
-            // the callbackFlow while the last real progress update was still queued,
-            // making progress delivery nondeterministic for fast CPU/Vulkan requests.
+            // Close the progress channel and let its forwarder drain every queued
+            // phase/update before publishing the terminal event. Without this barrier,
+            // an immediate Completed/Cancelled callback could close the callbackFlow
+            // while the last real progress update was still queued.
             progressEvents.close()
             launch(Dispatchers.Default) {
                 progressForwarder.join()
