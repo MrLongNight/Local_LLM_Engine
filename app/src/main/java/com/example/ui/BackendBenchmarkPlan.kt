@@ -68,7 +68,13 @@ internal object BackendBenchmarkPlan {
             }
             for (kernelProfile in kernelProfiles) {
                 for (microBatch in listOf(32, 64, 128)) {
-                    for (flashAttention in listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)) {
+                    // Keep the ON/OFF matrix and add AUTO at the Mali reference point.
+                    val flashModes = if (microBatch == 64) {
+                        listOf(FlashAttentionMode.AUTO, FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)
+                    } else {
+                        listOf(FlashAttentionMode.DISABLED, FlashAttentionMode.ENABLED)
+                    }
+                    for (flashAttention in flashModes) {
                         val isVulkan = backend == BackendPreference.VULKAN
                         val config = configuration(original).copy(
                             backendPreference = backend,

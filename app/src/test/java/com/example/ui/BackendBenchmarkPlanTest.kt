@@ -74,10 +74,10 @@ class BackendBenchmarkPlanTest {
             EngineConfig(batchSize = 128, threads = 6),
             "Qwen3.5-4B-Q4_K_M.gguf"
         )
-        assertEquals(36, profiles.size)
+        assertEquals(42, profiles.size)
         assertEquals(36, profiles.map { it.id }.distinct().size)
-        assertEquals(30, profiles.count { it.backend == BackendPreference.VULKAN })
-        assertEquals(6, profiles.count { it.backend == BackendPreference.CPU })
+        assertEquals(35, profiles.count { it.backend == BackendPreference.VULKAN })
+        assertEquals(7, profiles.count { it.backend == BackendPreference.CPU })
         assertEquals(setOf(32, 64, 128), profiles.map { it.microBatchSize }.toSet())
         assertTrue(profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.SUBGROUP })
         assertTrue(profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.LARGE })
@@ -106,8 +106,8 @@ class BackendBenchmarkPlanTest {
         val config = EngineConfig(batchSize = 128)
         val q5Profiles = BackendBenchmarkPlan.fullMatrixProfiles(config, "Qwen3.5-4B-Q5_K_M.gguf")
         val q6Profiles = BackendBenchmarkPlan.fullMatrixProfiles(config, "Qwen3.5-4B-Q6_K.gguf")
-        assertEquals(30, q5Profiles.size)
-        assertEquals(30, q6Profiles.size)
+        assertEquals(35, q5Profiles.size)
+        assertEquals(35, q6Profiles.size)
         assertTrue(q5Profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.Q5K_BASE_DMMV })
         assertTrue(q6Profiles.any { it.kernelProfile == VulkanMatvecWorkgroup.Q6K_BASE_DMMV })
         assertTrue(q5Profiles.none { it.kernelProfile == VulkanMatvecWorkgroup.Q6K_BASE_DMMV })
@@ -198,6 +198,36 @@ class BackendBenchmarkPlanTest {
             assertEquals(original.microBatchSize, profile.microBatchSize)
         }
     }
+    @Test
+    fun fullMatrixIncludesFlashAttentionAutoAtUbatch64ForCpuAndVulkanReferences() {
+        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(
+            EngineConfig(batchSize = 128),
+            "Qwen3.5-4B-Q4_K_M.gguf"
+        )
+        val autoAt64 = profiles.filter {
+            it.microBatchSize == 64 && it.flashAttention == FlashAttentionMode.AUTO
+        }
+        assertEquals(6, autoAt64.size)
+        assertTrue(autoAt64.any { it.backend == BackendPreference.CPU })
+        assertEquals(
+            setOf(
+                VulkanMatvecWorkgroup.AUTO,
+                VulkanMatvecWorkgroup.SUBGROUP,
+                VulkanMatvecWorkgroup.LARGE,
+                VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+                VulkanMatvecWorkgroup.Q4K_PREFILL_F16
+            ),
+            autoAt64.filter { it.backend == BackendPreference.VULKAN }
+                .map { it.kernelProfile }.toSet()
+        )
+        assertTrue(autoAt64.filter { it.backend == BackendPreference.CPU }.all {
+            it.kernelProfile == VulkanMatvecWorkgroup.AUTO && it.config.gpuLayers == 0
+        })
+        assertTrue(autoAt64.filter { it.backend == BackendPreference.VULKAN }.all {
+            it.config.gpuLayers == 99
+        })
+    }
+
     @Test
     fun fullMatrixRunsCpuReferenceProfilesBeforeVulkanCandidates() {
         val profiles = BackendBenchmarkPlan.fullMatrixProfiles(

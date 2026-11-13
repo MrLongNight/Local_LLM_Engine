@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - ModelInfo now reads `general.architecture` from GGUF metadata while preserving the legacy JNI metadata format and semicolon-containing backend description. The chat status card explicitly warns when the Qwen3.5 GDN CPU fallback is active.
+- The correctness-gated full matrix keeps Flash Attention ON/OFF coverage and adds matching CPU/Vulkan AUTO profiles at `n_ubatch=64`, so the Mali reference setting is measured without changing runtime defaults.
 
 ### Fixed
 - Tightened the 16-step greedy correctness gate to reject malformed/extra trace rows, mixed run/backend metadata, non-finite or unsorted Top-5 logits, and reused CPU-reference run IDs; synthetic regression tests cover each fail-closed condition.

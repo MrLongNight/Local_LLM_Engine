@@ -501,7 +501,7 @@ class EngineViewModel(
                 "FULL_MATRIX_STARTED",
                 "model=${model.name},modelBytes=${model.sizeBytes},profiles=${profiles.size}," +
                     "backends=VULKAN,CPU,kernelProfiles=AUTO,SUBGROUP,LARGE,QUANTIZATION_MATCHED_AB_PATHS,nUbatch=32,64,128," +
-                    "flashAttention=DISABLED,ENABLED,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
+                    "flashAttention=DISABLED,ENABLED,AUTO_UB64,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
                     "batch=${originalConfig.batchSize},prompt=fixed_counting_sequence"
             )
