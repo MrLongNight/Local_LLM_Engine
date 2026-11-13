@@ -57,7 +57,7 @@ object EngineDiagnostics {
      * unless localLlmReleaseTextDiagnostics=true was explicitly enabled.
      */
     fun testText(tag: String, event: String, details: String) {
-        if (!BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
+        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
         val oneLine = details.replace("\r", " ").replace("\n", "\\n").take(1400)
         info(tag, event, oneLine)
     }
@@ -95,7 +95,7 @@ object EngineDiagnostics {
      * Prompt and token-piece text is deliberately not returned by this helper.
      */
     fun tokenSelectionTraceLines(context: Context, runId: String): List<String> {
-        if (!BuildConfig.TEXT_DIAGNOSTICS_ENABLED || runId.isBlank()) return emptyList()
+        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED || runId.isBlank()) return emptyList()
         val marker = "TOKEN_SELECTION_TRACE - "
         return readAllProcessLogs(context).filter { line ->
             if (!line.contains(marker)) return@filter false
@@ -321,7 +321,7 @@ object EngineDiagnostics {
         ) || event.startsWith("BACKEND_BENCHMARK_") ||
             event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
             event.startsWith("VULKAN_Q4K_PATH_SWEEP_") || event.startsWith("FULL_MATRIX_") ||
-            event.startsWith("CORRECTNESS_GATE_") || event.endsWith("_TEST_OUTPUT")
+            event.startsWith("CORRECTNESS_GATE_")
     }
 
     private fun isImportantEvent(line: String): Boolean {
@@ -442,13 +442,14 @@ object EngineDiagnostics {
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST",
             "CPU_RUNTIME_FEATURES", "ABORT_CALLBACK_POLICY", "GRAPH_SPLITS",
             "GATED_DELTA_NET", "QWEN35_GDN",
-            "LOCAL_LLM_TEXT_TRACE",
             "GRAPH_BACKEND_DISTRIBUTION"
         )
         val relevantNative = nativeLines
             .filterNot {
                 it.contains("TOKEN_STEP_METRIC") ||
-                    it.contains("LOCAL_LLM_VULKAN_OP_TIMING")
+                    it.contains("LOCAL_LLM_VULKAN_OP_TIMING") ||
+                    it.contains("LOCAL_LLM_TEXT_TRACE") ||
+                    it.contains("kind=TOKEN_SELECTION")
             }
             .filter { line ->
             val upper = line.uppercase(Locale.US)
@@ -510,30 +511,12 @@ object EngineDiagnostics {
         // Keep prompt/template evidence separate from per-token selection rows. The
         // latter are compact and bounded so a short broken answer still shows where
         // the selected tokens diverge from the model's top logits.
-        val promptTraceEvidence = nativeLines
-            .filter {
-                it.contains("LOCAL_LLM_TEXT_TRACE") && !it.contains("kind=TOKEN_SELECTION")
-            }
-            .takeLast(12)
-        val tokenSelectionEvidence = nativeLines
-            .filter { it.contains("kind=TOKEN_SELECTION") }
-            .takeLast(40)
         val nativePriorityEvidence = (
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
                 q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence +
                 cpuFeatureEvidence + abortPolicyEvidence + graphSplitEvidence +
-                graphBackendDistributionEvidence + qwen35GdnPolicyEvidence +
-                promptTraceEvidence + tokenSelectionEvidence
-            ).distinct().map {
-                compactLine(
-                    it,
-                    when {
-                        it.contains("kind=TOKEN_SELECTION") -> 360
-                        it.contains("LOCAL_LLM_TEXT_TRACE") -> 1500
-                        else -> 360
-                    }
-                )
-            }
+                graphBackendDistributionEvidence + qwen35GdnPolicyEvidence
+            ).distinct().map { compactLine(it, 360) }
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.
         // Keep only the newest snapshots, then report per-op p50/p90 instead of
@@ -584,10 +567,6 @@ object EngineDiagnostics {
             }
         }
 
-        val textOutputEvents = kotlinLines
-            .filter { eventName(it).endsWith("_TEST_OUTPUT") }
-            .takeLast(12)
-            .map { compactLine(it, 1500) }
         val nativeSelected = (
             relevantNative.take(10) + relevantNative.takeLast(4)
         ).distinct().map { compactLine(it, 360) }
@@ -722,12 +701,44 @@ object EngineDiagnostics {
         }
         val periodStart = timestampedRows.minOrNull() ?: "n/a"
         val periodEnd = timestampedRows.maxOrNull() ?: "n/a"
+        val latestGdnPolicy = qwen35GdnPolicyEvidence.lastOrNull()
+            ?.substringAfter("LOCAL_LLM_QWEN35_GDN_POLICY - ")
+            ?.replace("\\n", "")
+            ?.trim()
+            ?: "n/a"
+        val latestGraphDistribution = graphBackendDistributionEvidence.lastOrNull()
+        fun nodePercent(nodes: Int?, total: Int?): String =
+            if (nodes == null || total == null || total <= 0) "n/a"
+            else String.format(Locale.US, "%.1f%%", nodes * 100.0 / total)
+        val graphSummary = latestGraphDistribution?.let { line ->
+            val total = field(line, "graphNodes")?.toIntOrNull()
+            val cpu = field(line, "cpuNodes")?.toIntOrNull()
+            val vulkan = field(line, "vulkanNodes")?.toIntOrNull()
+            val other = field(line, "otherNodes")?.toIntOrNull()
+            "graphSplits=${field(line, "graphSplits") ?: "n/a"},graphNodes=${total ?: "n/a"}," +
+                "cpuNodes=${cpu ?: "n/a"}(${nodePercent(cpu, total)})," +
+                "vulkanNodes=${vulkan ?: "n/a"}(${nodePercent(vulkan, total)})," +
+                "otherNodes=${other ?: "n/a"}(${nodePercent(other, total)})"
+        } ?: "graphSplits=n/a,graphNodes=n/a,cpuNodes=n/a,vulkanNodes=n/a,otherNodes=n/a"
+        val gateStatusSummary = correctnessGateEvents
+            .filter { eventName(it) == "CORRECTNESS_GATE_RESULT" }
+            .takeLast(16)
+            .map { line ->
+                "model=${field(line, "model") ?: "n/a"},profile=${field(line, "profile") ?: "n/a"}," +
+                    "backend=${field(line, "backend") ?: "n/a"},status=${field(line, "status") ?: "n/a"}," +
+                    "reason=${field(line, "reason") ?: "n/a"},top5=${field(line, "minimumTop5Overlap") ?: "n/a"}"
+            }
 
         return buildString {
             appendLine("LOCAL LLM ENGINE – KOMPAKTER DIAGNOSEBERICHT")
             appendLine("Erstellt: ${Date()}")
             appendLine("Erfasste Logzeilen: ${ordered.size}; RAM-Samples: ${samples.size}")
             appendLine("Zeitraum: $periodStart bis $periodEnd")
+            appendLine("gdnPolicy=$latestGdnPolicy")
+            appendLine("graphBackend=$graphSummary")
+            appendLine("Gate-Status:")
+            if (gateStatusSummary.isEmpty()) appendLine("Keine Korrektheits-Gate-Ergebnisse vorhanden.")
+            else gateStatusSummary.forEach(::appendLine)
             appendLine()
             appendLine("[VULKAN-LAUFZEITBELEG – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET]")
             if (nativePriorityEvidence.isEmpty()) {
@@ -759,24 +770,17 @@ object EngineDiagnostics {
             appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
             tokenMetricSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
-            appendLine("[TESTAUSGABEN – EXPLIZITE DEBUG-TESTS]")
-            if (!BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
-                appendLine("Textausgaben sind in diesem Build deaktiviert.")
-            } else if (textOutputEvents.isEmpty()) {
-                appendLine("Keine Testausgaben protokolliert. Starte einen Diagnose-/Benchmarktest.")
-            } else {
-                textOutputEvents.forEach(::appendLine)
-            }
+            appendLine("[TESTAUSGABEN – IM STANDARD-EXPORT AUSGEBLENDET]")
+            appendLine("Prompt-Inhalte, Token-Text und generierte Testantworten werden nicht exportiert.")
             appendLine()
             appendLine("[NATIVE / VULKAN – GEFILTERTE MELDUNGEN]")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
             nativeSelected.forEach(::appendLine)
             appendLine()
             appendLine(
-                if (BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
-                    "Hinweis: Debug-Textdiagnostik ist aktiv. Der Export enthält gerenderte Prompts, Prompt-Token-IDs, " +
-                        "detokenisierte Prompts, Sampling-Parameter und ausdrücklich protokollierte Testausgaben; " +
-                        "normale Chat-Antworten werden weiterhin nicht aufgezeichnet. Exportlimit: 32 KiB."
+                if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+                    "Hinweis: Debug-Textdiagnostik ist aktiv. Rohdaten bleiben auf Debug-Logs begrenzt; " +
+                        "der Standard-Export enthält keine Prompt-Inhalte, Token-Texte oder Testantworten. Exportlimit: 32 KiB."
                 } else {
                     "Hinweis: Chat-Prompts und Modellantworten werden nicht exportiert. " +
                         "Der Bericht ist auf maximal 32 KiB begrenzt; GPU-Operatorzeiten werden aggregiert und RAM-Samples zusammengefasst."
