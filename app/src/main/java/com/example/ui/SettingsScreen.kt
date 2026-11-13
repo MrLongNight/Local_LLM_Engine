@@ -166,6 +166,7 @@ fun SettingsScreen(
                                             VulkanMatvecWorkgroup.Q5K_BASE_DMMV -> "Q5_K Basis-DMMV (A/B, intern)"
                                             VulkanMatvecWorkgroup.Q6K_BASE_DMMV -> "Q6_K Basis-DMMV (A/B, intern)"
                                             VulkanMatvecWorkgroup.Q4K_PREFILL_F16 -> "Q4_K Prefill F16/F32 (A/B, intern)"
+                                            VulkanMatvecWorkgroup.MMVQ_FORCE -> "MMVQ Integer-Dot (A/B, intern)"
                                         }
                                     )
                                 },
