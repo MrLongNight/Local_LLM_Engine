@@ -657,6 +657,18 @@ static void ggml_vk_get_physical_device_features2(
         }
     }]=])
     string(REPLACE "${_q4_decode_anchor}" "${_q4_decode_replacement}" _vulkan_contents "${_vulkan_contents}")
+    # Require the Q8_1 pipeline failure reason to be recorded before quantize_y
+    # is cleared; otherwise runtime evidence would lose the actual fallback cause.
+    set(_q4k_fallback_order_anchor [=[
+        if (src0->type == GGML_TYPE_Q4_K && quantize_y) {
+            local_llm_q4k_decode_reason = "q8_1_pipeline_unavailable_fallback";
+        }
+        quantize_y = false;]=])
+    string(FIND "${_vulkan_contents}" "${_q4k_fallback_order_anchor}" _q4k_fallback_order_position)
+    if(_q4k_fallback_order_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: Q4_K Q8_1 pipeline fallback reason is missing or recorded after quantize_y is cleared.")
+    endif()
+
 
     # Track the shared logits readback: map is measured only when the persistent
     # HOST_VISIBLE|HOST_COHERENT staging buffer is allocated; copy/sync are gated
@@ -1047,6 +1059,7 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "ggml_vk_src1_prec_allows_q8\\(dst\\)" OR
        NOT _vulkan_contents MATCHES "selected=MMVQ_INTEGER_DOT" OR
        NOT _vulkan_contents MATCHES "q8_1Eligible=%d,q8_1Eligibility=%s" OR
+       NOT _vulkan_contents MATCHES "q8_1_pipeline_unavailable_fallback" OR
        NOT _vulkan_contents MATCHES "mali_auto_base_q8_1_ineligible" OR
        NOT _vulkan_contents MATCHES "reason=%s" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
