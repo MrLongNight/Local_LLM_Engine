@@ -482,9 +482,13 @@ abstract class VulkanDiagnosticsViewModel(
                         )
                     }
                     val selectedKernelPath = observedKernelPaths.single()
+                    val requestedMmvqFallback =
+                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE &&
+                            observedReasons == setOf("q8_1_pipeline_unavailable_fallback")
                     val expectedKernelPath = when {
                         baseDmmv -> "BASE_TYPE_MMV"
-                        autoPath -> selectedKernelPath // AUTO is evidence-driven and may legitimately choose either path.
+                        autoPath || requestedMmvqFallback ->
+                            selectedKernelPath // AUTO and an explicitly evidenced missing-pipeline fallback are evidence-driven.
                         else -> "MMVQ_INTEGER_DOT"
                     }
                     if (selectedKernelPath != expectedKernelPath) {
