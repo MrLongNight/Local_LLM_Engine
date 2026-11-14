@@ -70,6 +70,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [ ] Trace cancellation from UI/coroutine through `InferenceClient`, Binder/AIDL, JNI and llama.cpp. Confirm cancellation reaches the active request and cannot be swallowed or delivered to a stale request.
 - [ ] Verify the effective `abortGracePeriodMs` from the actual run configuration (the current source default is 3,000 ms; older diagnostic runs may override it). Do not tune it based on a single token timing.
 - [x] Capture the actual service PID when the Binder request is dispatched and use that immutable request PID for timeout, explicit cancel and collector-close escalation; a reconnect cannot redirect an old request's abort to a replacement service.
+- [x] Add a regression test that changes the reported service PID mid-request and asserts cancel/kill is not sent to the replacement process.
 - [ ] Confirm cooperative cancellation is attempted first, then hard-kill targets only the original inference-service PID after the configured grace period; never kill a replacement process.
 - [ ] Verify terminal events are emitted exactly once, streams close, timeouts remain timeouts, and client calls cannot hang after process death or stale Binder callbacks.
 - [x] Treat `streamChat` collector cancellation as a real native cancellation: retain the request ID through cooperative unwind and escalate to the original service PID after the configured grace period; add a non-cooperative fake-service regression test.

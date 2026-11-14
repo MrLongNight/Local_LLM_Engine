@@ -308,6 +308,64 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun cancellationAfterReconnectNeverTargetsReplacementServicePid() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterFirstToken.set(true)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 500L,
+            firstTokenMs = 1_000L,
+            interTokenMs = 500L,
+            totalInferenceMs = 2_000L,
+            abortGracePeriodMs = 100L,
+            reconnectMs = 1_000L
+        )
+        val observedAbortPid = AtomicInteger(0)
+        val livenessChecks = AtomicInteger(0)
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig,
+            processLivenessCheck = { pid ->
+                observedAbortPid.set(pid)
+                // The original PID exits between the two liveness samples. This
+                // verifies the exact PID without killing a host process.
+                livenessChecks.incrementAndGet() == 1
+            }
+        )
+        client.initialize()
+
+        val stream = async {
+            client.streamChat(InferenceRequest.single("replacement service PID")).toList()
+        }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) delay(5L)
+        }
+
+        // Simulate the proxy reporting a replacement service after reconnect.
+        // The active request still belongs to the PID captured before streamChat().
+        fakeService.currentProcessId.set(22222)
+        client.cancelInference()
+
+        val events = withTimeout(2_000L) { stream.await() }
+        assertEquals(99999, observedAbortPid.get())
+        assertTrue("Liveness checks must target the original request PID", livenessChecks.get() >= 2)
+        assertEquals(
+            "The replacement service must not receive an old request's cooperative cancel",
+            null,
+            fakeService.cancelledRequestId.get()
+        )
+        assertFalse(
+            "The replacement service must not receive the old request's kill command",
+            fakeService.isKilled.get()
+        )
+        assertTrue(events.any { it is InferenceEvent.Cancelled })
+        client.close()
+    }
+
+    @Test
     fun cancellingStreamCollectorEscalatesWhenServiceIgnoresCooperativeCancel() = runBlocking {
         val fakeService = FakeInferenceService().apply {
             hangAfterFirstToken.set(true)
