@@ -656,8 +656,6 @@ static std::string collectBackendDiagnostics() {
     return ss.str();
 }
 
-static constexpr const char* UTF8_REPLACEMENT_CHARACTER = "\xEF\xBF\xBD";
-
 // JNI GetStringUTFChars() exposes Modified UTF-8, not standard UTF-8.
 // Convert the Java UTF-16 code units through the shared host-tested helper so
 // supplementary characters, embedded NULs and malformed surrogates are handled
