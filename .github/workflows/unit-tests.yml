@@ -64,7 +64,7 @@ jobs:
           gradle --no-daemon --continue --build-cache
           :llm-engine:testDebugUnitTest :app:testDebugUnitTest
 
-      - name: Run host-only native prompt cache and truncation tests
+      - name: Run host-only native correctness utility tests
         if: ${{ !cancelled() }}
         shell: bash
         run: |
@@ -74,7 +74,12 @@ jobs:
             llm-engine/src/test/cpp/prompt_cache_utils_test.cpp \
             -o "$RUNNER_TEMP/prompt-cache-utils-test"
           "$RUNNER_TEMP/prompt-cache-utils-test"
-          echo "Host prompt-cache and truncation tests passed (also run after JVM test failures)."
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/utf8_conversion_utils_test.cpp \
+            -o "$RUNNER_TEMP/utf8-conversion-utils-test"
+          "$RUNNER_TEMP/utf8-conversion-utils-test"
+          echo "Host prompt-cache, truncation and UTF-16 conversion tests passed (also run after JVM test failures)."
 
       - name: Print failed JUnit assertions
         if: always()

@@ -28,6 +28,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [ ] Trace the complete generation path: request/messages → chat-template selection/rendering → tokenization/BOS/EOS → prompt evaluation → sampler/token selection → detokenization/streaming → finish reason.
 - [ ] Identify why affected models emit garbage or lose output quality. Inspect model metadata, architecture detection, tokenizer/template choice, special-token handling, sampler configuration, context state and CPU/Vulkan differences. Do not mask defects with prompt wording or arbitrary parameter changes.
 - [ ] Add deterministic correctness fixtures per supported model family, including Qwen3, Qwen3.5 (dense/MoE where supported), Gemma 4 and ordinary attention models. Keep prompt fixtures synthetic and content-safe.
+- [x] Route JNI role/content conversion through the shared host-testable UTF-16→UTF-8 utility; cover BMP characters, valid/unpaired surrogates and embedded NUL bytes in host-native tests.
 - [ ] Compare CPU and Vulkan outputs using the same GGUF, messages, template, context, sampler and generation limits. Separate backend numerical variation from malformed templates, invalid token IDs, premature EOS and state corruption.
 - [ ] Assert expected structure/markers, valid UTF-8, non-empty meaningful output, correct finish reason and no unexpected control/special-token leakage. Include multi-turn and repeated-turn cases.
 - [ ] Run correctness gates before changing performance defaults. Do not accept a speed improvement that fails output parity/correctness.

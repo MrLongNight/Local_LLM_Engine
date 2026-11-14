@@ -29,6 +29,7 @@
 #include "chat.h"
 #include "sampling.h"
 #include "prompt_cache_utils.h"
+#include "utf8_conversion_utils.h"
 
 // Internal llama.cpp scheduler metric bridge compiled into the pinned llama target.
 extern "C" int local_llm_get_graph_splits(struct llama_context* context);
@@ -732,26 +733,9 @@ static std::string normalize_utf8_incremental(
 }
 
 // JNI GetStringUTFChars() exposes Modified UTF-8, not standard UTF-8.
-// Decode UTF-16 code units explicitly so supplementary characters (surrogate
-// pairs), embedded NULs and all other input reach llama.cpp as valid UTF-8.
-static void append_utf8_code_point(std::string& output, uint32_t code_point) {
-    if (code_point <= 0x7F) {
-        output.push_back(static_cast<char>(code_point));
-    } else if (code_point <= 0x7FF) {
-        output.push_back(static_cast<char>(0xC0 | (code_point >> 6)));
-        output.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-    } else if (code_point <= 0xFFFF) {
-        output.push_back(static_cast<char>(0xE0 | (code_point >> 12)));
-        output.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
-        output.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-    } else {
-        output.push_back(static_cast<char>(0xF0 | (code_point >> 18)));
-        output.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
-        output.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
-        output.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-    }
-}
-
+// Convert the Java UTF-16 code units through the shared host-tested helper so
+// supplementary characters, embedded NULs and malformed surrogates are handled
+// consistently by production code and native correctness tests.
 static bool java_string_to_utf8(JNIEnv* env, jstring value, std::string& output) {
     if (env == nullptr || value == nullptr) return false;
     const jsize length = env->GetStringLength(value);
@@ -763,29 +747,10 @@ static bool java_string_to_utf8(JNIEnv* env, jstring value, std::string& output)
         if (env->ExceptionCheck()) return false;
     }
 
-    output.clear();
-    output.reserve(static_cast<size_t>(length) * 3);
-    for (jsize index = 0; index < length; ++index) {
-        uint32_t code_point = utf16[static_cast<size_t>(index)];
-        if (code_point >= 0xD800 && code_point <= 0xDBFF) {
-            if (index + 1 < length) {
-                const uint32_t low = utf16[static_cast<size_t>(index + 1)];
-                if (low >= 0xDC00 && low <= 0xDFFF) {
-                    code_point = 0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00);
-                    ++index;
-                } else {
-                    code_point = 0xFFFD;
-                }
-            } else {
-                code_point = 0xFFFD;
-            }
-        } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
-            code_point = 0xFFFD;
-        }
-        append_utf8_code_point(output, code_point);
-    }
+    output = local_llm::utf16_to_utf8(utf16.data(), utf16.size());
     return true;
 }
+
 static jstring new_java_string_from_utf8(JNIEnv* env, const std::string& utf8) {
     if (utf8.empty()) return env->NewStringUTF("");
 
