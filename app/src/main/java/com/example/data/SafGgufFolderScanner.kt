@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.data
 
 import android.content.Context
 import android.net.Uri

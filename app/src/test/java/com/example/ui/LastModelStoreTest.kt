@@ -1,5 +1,7 @@
 package com.example.ui
 
+import com.example.data.LastModelStore
+
 import android.content.Context
 import android.os.Parcel
 import androidx.test.core.app.ApplicationProvider

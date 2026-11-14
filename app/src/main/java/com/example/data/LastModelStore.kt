@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.data
 
 import android.content.Context
 import com.mydocanizer.llm.engine.BackendPreference
