@@ -9,7 +9,7 @@
 
 ## 1. Testmethoden → Zielklasse
 
-Alle acht vorhandenen `@Test)-Methoden werden als vollständige Methodenblöcke verschoben. Namen, Annotationen, Parameter, Rückgabetypen, Coroutine-Wrapper, Assertions, Kommentare und methodeninterne `try/finally)-Aufräumlogik bleiben 1:1 erhalten.
+Alle acht vorhandenen `@Test`-Methoden werden als vollständige Methodenblöcke verschoben. Namen, Annotationen, Parameter, Rückgabetypen, Coroutine-Wrapper, Assertions, Kommentare und methodeninterne `try/finally`-Aufräumlogik bleiben 1:1 erhalten.
 
 | Testmethode | Aktuelle Zeile | Aspekt | Vorgeschlagene Zielklasse |
 |---|---:|---|---|
@@ -26,9 +26,9 @@ Alle acht vorhandenen `@Test)-Methoden werden als vollständige Methodenblöcke 
 
 ## 2. Setup-/Teardown- und gemeinsame Helper-Analyse
 
-**JUnit-Lifecycle-Hooks:** In der Ausgangsdatei gibt es keine `@Before`, `@After`, `@BeforeClass`, `@AfterClass`, `@BeforeEach` oder `@AfterEach)-Methoden. Es gibt genau eine Klassenannotation `@RunWith(AndroidJUnit4::class)` und acht `@Test)-Annotationen.
+**JUnit-Lifecycle-Hooks:** In der Ausgangsdatei gibt es keine `@Before`, `@After`, `@BeforeClass`, `@AfterClass`, `@BeforeEach` oder `@AfterEach`-Methoden. Es gibt genau eine Klassenannotation `@RunWith(AndroidJUnit4::class)` und acht `@Test`-Annotationen.
 
-Die Ressourcenbereinigung einzelner Tests liegt in deren eigenen `try/finally)-Blöcken. Diese Blöcke bleiben ungeteilt innerhalb der jeweiligen Testmethode. Es wird keine neue globale Setup-/Teardown-Logik eingeführt.
+Die Ressourcenbereinigung einzelner Tests liegt in deren eigenen `try/finally`-Blöcken. Diese Blöcke bleiben ungeteilt innerhalb der jeweiligen Testmethode. Es wird keine neue globale Setup-/Teardown-Logik eingeführt.
 
 Die vier prozessbezogenen Tests verwenden dieselben privaten Hilfsfunktionen und den gemeinsamen Binding-Datentyp. Vorgeschlagene gemeinsame Datei:
 
@@ -53,17 +53,17 @@ Die vier prozessbezogenen Zielklassen erben von `InferenceServiceProcessTestBase
 
 - Funktionssignatur einschließlich Methodenrumpf: **10.020 Bytes**
 - Rumpf ab öffnender Funktionsklammer: **9.937 Bytes**
-- Der vollständige Methodenblock einschließlich `@Test)-Annotation und Trennern ist entsprechend größer.
+- Der vollständige Methodenblock einschließlich `@Test`-Annotation und Trennern ist entsprechend größer.
 
 Diese Methode muss als Ganzes in `GgufRecoveryTest.kt` verbleiben. Eine Klassengrenze unter 10.000 Bytes ist deshalb für diese Zielklasse nicht erreichbar, ohne die Testmethode zu teilen, Teile in Helper zu verschieben oder ihren Inhalt sonst zu verändern. Das würde der 1:1-Vorgabe widersprechen. Der aktuelle Auftrag nennt kein explizites 10-KB-Limit als Akzeptanzkriterium; falls ein solches Limit zusätzlich gelten soll, besteht hier ein direkter Zielkonflikt.
 
 ## 4. Verifikationsplan für Schritt 2–4
 
 1. Gemeinsame Helper und Binding-Datentyp in `InferenceServiceProcessTestBase` verschieben; keine JUnit-Lifecycle-Hooks hinzufügen.
-2. Die fünf vorgeschlagenen Testklassen im bestehenden `androidTest)-Source-Set und Paket `com.mydocanizer.llm.engine.ipc` anlegen.
+2. Die fünf vorgeschlagenen Testklassen im bestehenden `androidTest`-Source-Set und Paket `com.mydocanizer.llm.engine.ipc` anlegen.
 3. Die acht vollständigen Testmethoden unverändert den oben genannten Zielklassen zuordnen. Jede neue konkrete Testklasse erhält weiterhin `@RunWith(AndroidJUnit4::class)`.
 4. Nach jeder neuen Testklasse `:llm-engine:test` ausführen und erst bei grünem Ergebnis committen.
-5. Vorher/Nachher die Anzahl der `@Test)-Methoden vergleichen: **8 = 8**.
+5. Vorher/Nachher die Anzahl der `@Test`-Methoden vergleichen: **8 = 8**.
 6. Den Diff gegen die Ausgangsdatei prüfen: Testmethoden dürfen ausschließlich verschoben werden; keine Testnamen, Assertions, Konstantenwerte oder methodeninternen Setup-/Cleanup-Zeilen verändern.
 
 ## 5. Umfang dieses Schritts
