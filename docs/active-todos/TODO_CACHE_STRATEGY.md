@@ -1,6 +1,6 @@
-# TODO — Model-aware llama.cpp Cache Strategy
+# Active TODO — Model-aware llama.cpp Cache Strategy
 
-**Type:** investigation and implementation plan  
+**Type:** active technical TODO and implementation plan  
 **Status:** OPEN — no implementation in this task  
 **Scope:** in-memory prompt-prefix reuse and model-specific recurrent/hybrid state reuse for the Kotlin/Android engine. No new dependency is planned.
 

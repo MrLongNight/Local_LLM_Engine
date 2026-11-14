@@ -1,4 +1,4 @@
-> **Dokumenttyp:** Historische technische Implementierungshistorie. Datierte CI- und Hardware-Statusblöcke dokumentieren jeweils ihren damaligen Snapshot. Für aktuelle offene Aufgaben und Freigaben ist `REFACTORING_ROADMAP.md` maßgeblich; für Agent-Regeln `AGENTS.md`. Technische Belege bleiben erhalten und dürfen nicht als Live-Status interpretiert werden.
+> **Dokumenttyp:** Übergeordneter Umsetzungsplan mit technischen Entscheidungen und datierter Nachweishistorie. CI- und Hardware-Statusblöcke sind historische Snapshots und kein aktueller Live-Status. Refactoring-Fortschritt steht ausschließlich in `../active-todos/REFACTORING_STATUS.md`; die offene Cache-Arbeit steht in `../active-todos/TODO_CACHE_STRATEGY.md`. Verbindliche Agent-Regeln stehen in `../AGENTS.md`.
 
 # Aktueller Stand 12.11.2026 – verifizierter CI-/APK-Stand
 
