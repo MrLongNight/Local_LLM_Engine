@@ -30,7 +30,7 @@ internal object NativeModelMetadataParser {
                 parameterCount = fields.getOrNull(1)?.toLongOrNull() ?: 0L,
                 contextLengthTrain = fields.getOrNull(2)?.toIntOrNull() ?: 0,
                 sizeBytes = fields.getOrNull(3)?.toLongOrNull() ?: fallbackSizeBytes,
-                architecture = fields[4].removePrefix("ARCH=").ifBlank { "GGUF" },
+                architecture = fields[4].substringAfter('=', missingDelimiterValue = "").ifBlank { "GGUF" },
                 activeBackend = fields.getOrNull(5)?.ifBlank { fallbackBackend } ?: fallbackBackend
             )
         } else {
