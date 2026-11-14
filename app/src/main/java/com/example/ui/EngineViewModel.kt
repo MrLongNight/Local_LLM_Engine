@@ -1347,26 +1347,6 @@ class EngineViewModel(
                         systemPromptSnapshot = systemPromptSnapshot,
                         benchmarkPrompt = prompt
                     )
-                    val nativeRunId = measured.result.nativeRunId
-                    if (nativeRunId.isBlank()) {
-                        throw IllegalStateException(
-                            "Native Inferenz-Run-ID fehlt; der Kernelpfad kann diesem A/B-Lauf nicht zugeordnet werden."
-                        )
-                    }
-                    val pathEvidence = EngineDiagnostics.vulkanQ4kDecodePathLines(
-                        getApplication(), nativeRunId
-                    )
-                    val observedKernelPaths = pathEvidence.mapNotNull { line ->
-                        Regex("selected=([^,]+)").find(line)?.groupValues?.getOrNull(1)
-                    }.toSet()
-                    val expectedKernelPath = if (baseDmmv) "BASE_TYPE_MMV" else "Q8_1_INTEGER_DOT_MMVQ"
-                    if (observedKernelPaths != setOf(expectedKernelPath)) {
-                        throw IllegalStateException(
-                            "Q4_K-Kernelpfad nicht bestätigt: erwartet=$expectedKernelPath, " +
-                                "beobachtet=${observedKernelPaths.ifEmpty { setOf("keine native Pfadmeldung") }.joinToString()} " +
-                                "(nativeRunId=$nativeRunId). Der Lauf wird nicht als gültiger A/B-Wert gewertet."
-                        )
-                    }
                     if (measured.measuredTokens < 8) {
                         throw IllegalStateException(
                             "Zu wenige Mess-Tokens nach dem Warm-up bei gpuLayers=$gpuLayers: " +
@@ -1608,6 +1588,26 @@ class EngineViewModel(
                         systemPromptSnapshot = systemPromptSnapshot,
                         benchmarkPrompt = prompt
                     )
+                    val nativeRunId = measured.result.nativeRunId
+                    if (nativeRunId.isBlank()) {
+                        throw IllegalStateException(
+                            "Native Inferenz-Run-ID fehlt; der Kernelpfad kann diesem A/B-Lauf nicht zugeordnet werden."
+                        )
+                    }
+                    val pathEvidence = EngineDiagnostics.vulkanQ4kDecodePathLines(
+                        getApplication(), nativeRunId
+                    )
+                    val observedKernelPaths = pathEvidence.mapNotNull { line ->
+                        Regex("selected=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    val expectedKernelPath = if (baseDmmv) "BASE_TYPE_MMV" else "Q8_1_INTEGER_DOT_MMVQ"
+                    if (observedKernelPaths != setOf(expectedKernelPath)) {
+                        throw IllegalStateException(
+                            "Q4_K-Kernelpfad nicht bestätigt: erwartet=$expectedKernelPath, " +
+                                "beobachtet=${observedKernelPaths.ifEmpty { setOf("keine native Pfadmeldung") }.joinToString()} " +
+                                "(nativeRunId=$nativeRunId). Der Lauf wird nicht als gültiger A/B-Wert gewertet."
+                        )
+                    }
                     if (measured.measuredTokens < 8) {
                         throw IllegalStateException(
                             "Zu wenige Mess-Tokens für ${workgroup.name}: ${measured.measuredTokens}"
