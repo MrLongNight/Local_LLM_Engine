@@ -30,7 +30,7 @@ Alle Screens verwenden weiterhin dieselbe EngineViewModel-Instanz. Der Konstrukt
 ## Verifikation auf c480904
 
 - Unit Tests Run 43561524744: completed / success.
-- APK Workflow Run 43561524767: zum letzten Check noch in_progress; APK-/Instrumentation- und Emulator-Ergebnis noch nicht abgeschlossen.
+- APK Workflow Run 43561524767 für denselben Code-SHA: APK- und Instrumentation-APK-Build erfolgreich; Manifest-/Native-Prüfungen grün; Upload erfolgreich. Artefakte: Debug APK 14100747596 (36.938.722 Bytes), Instrumentation APK 14100338808 (24.297.890 Bytes). Emulator-Prozessisolation läuft noch (zuletzt Step 22, started 05:36:12Z); Gesamtworkflow daher noch in_progress.
 - Fehlerlauf d86b2cf: Compilefehler, kein Testfehler. Host C++ prompt-cache tests waren grün.
 
 ## Abschlusskriterien Task 2
