@@ -1,5 +1,7 @@
 package com.example
 
+import com.example.ui.MainActivity
+
 import android.app.Application
 import android.os.Parcel
 import androidx.test.core.app.ApplicationProvider
