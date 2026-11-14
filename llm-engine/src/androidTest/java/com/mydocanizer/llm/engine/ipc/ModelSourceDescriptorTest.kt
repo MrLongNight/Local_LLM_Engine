@@ -33,16 +33,34 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
         val testContext = InstrumentationRegistry.getInstrumentation().context
         assertInferenceServiceManifest(appContext)
 
-        val modelFile = File(appContext.cacheDir, "provider-${System.nanoTime()}.gguf")
-        testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
-            modelFile.outputStream().use { output -> input.copyTo(output) }
-        }
-        assertTrue("Provider test GGUF must be staged in the target app cache visible to the provider",
-            modelFile.isFile && modelFile.length() > 0L)
+        val fixtureName = "provider-${System.nanoTime()}.gguf"
+        // The instrumentation provider can resolve either package cache depending on
+        // the Android test runner's manifest/process context. Stage identical bytes in
+        // both locations so the test exercises descriptor transfer, not cache routing.
+        val modelFiles = listOf(testContext.cacheDir, appContext.cacheDir)
+            .distinct()
+            .map { cacheDir ->
+                File(cacheDir, fixtureName).also { file ->
+                    testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }
+        val modelFile = modelFiles.first()
+        assertTrue("Provider test GGUF must be staged in provider-visible caches",
+            modelFiles.all { it.isFile && it.length() == modelFile.length() && it.length() > 0L })
 
         val modelUri = Uri.parse(
             "content://com.mydocanizer.llm.engine.test-model-provider/${modelFile.name}"
         )
+        testContext.contentResolver.openFileDescriptor(modelUri, "r").use { providerDescriptor ->
+            assertTrue("Provider must return an open descriptor", providerDescriptor != null)
+            assertEquals(
+                "Provider descriptor stat size must match the staged GGUF byte length",
+                modelFile.length(),
+                requireNotNull(providerDescriptor).statSize
+            )
+        }
         val resolverContext = object : ContextWrapper(appContext) {
             override fun getContentResolver(): ContentResolver = testContext.contentResolver
         }
@@ -83,8 +101,10 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             assertEquals("Provider display name must remain the model name", modelFile.name, model.name)
             assertEquals("The public model identity must remain the original content URI",
                 modelUri.toString(), model.path)
-            assertEquals("The provider descriptor size must be preserved",
-                modelFile.length(), model.sizeBytes)
+            assertTrue(
+                "Native model tensor size must be reported independently from container file size",
+                model.sizeBytes > 0L
+            )
 
             assertTrue(
                 "Client diagnostics must prove direct descriptor use without a copy",
@@ -141,7 +161,7 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             directBinding?.let { binding ->
                 runCatching { appContext.unbindService(binding.connection) }
             }
-            modelFile.delete()
+            modelFiles.forEach { it.delete() }
         }
     }
 

@@ -91,6 +91,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [x] Keep the provider URI as the in-memory model identity/recovery source and use the provider display name; explicit bulk/model-library import remains a separate copy operation.
 - [x] Reject descriptors without a known size before the memory guard; show an explicit provider/mmap limitation and do not silently copy.
 - [ ] Verify descriptor ownership end to end on Android: client copy closes only after Binder handoff, service copy survives while native mmap is active, and service closes exactly once on unload/failure/timeout/process death.
+- [x] Correct the instrumentation size assertion: compare the provider PFD's `statSize` to the staged GGUF bytes; do not compare container-file size to `llama_model_size` (tensor/model payload accounting). Stage the same fixture in both possible test-provider cache contexts.
 - [ ] Test local document provider and representative cloud/document providers, including unload/reload and follow-up inference.
 
 **Acceptance:** Original-source loading works end to end where supported; unsupported descriptors fail visibly and deterministically; no leaked descriptors or hidden copies.
