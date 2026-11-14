@@ -316,8 +316,10 @@ class BackendBenchmarkPlanTest {
         assertTrue(profiles.take(firstVulkan).all { it.backend == BackendPreference.CPU })
         assertTrue(profiles.drop(firstVulkan).all { it.backend == BackendPreference.VULKAN })
         assertEquals(16, BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
-        assertTrue(BackendBenchmarkPlan.correctnessGatePrompt().contains("2, 4, 6"))
-        assertTrue(BackendBenchmarkPlan.correctnessGatePrompt().contains("318, 320"))
+        val gatePrompt = BackendBenchmarkPlan.correctnessGatePrompt()
+        assertTrue(gatePrompt.contains("2, 4, 6"))
+        assertTrue(gatePrompt.contains("320"))
+        assertTrue("Correctness prompt must fit reduced contexts", gatePrompt.length <= 128)
     }
 
 }
