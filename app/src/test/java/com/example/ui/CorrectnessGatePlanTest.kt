@@ -142,6 +142,20 @@ class CorrectnessGatePlanTest {
     }
 
     @Test
+    fun classifiesOutputShapeWithoutPersistingGeneratedText() {
+        assertEquals("EXACT_SEQUENCE", parseOutput(expectedOutput).outputShape)
+        assertEquals("EXPECTED_PREFIX", parseOutput("322, 324, 326, 3").outputShape)
+        assertEquals("PREFIX_TOO_SHORT", parseOutput("322, 324").outputShape)
+        assertEquals("SEQUENCE_MISMATCH", parseOutput("322, 325, 326").outputShape)
+        assertEquals("NON_SEQUENCE_TEXT", parseOutput("The answer is 322, 324").outputShape)
+        assertEquals("EXTRA_SUFFIX", parseOutput("322, 324, 326, 328, 330, 332").outputShape)
+        assertEquals("EMPTY", parseOutput("").outputShape)
+    }
+
+    private fun parseOutput(output: String): CorrectnessGatePlan.GateRun =
+        CorrectnessGatePlan.parse(output, trace("output-shape", "CPU"))
+
+    @Test
     fun rejectsCpuReferenceReusedAsCandidateRun() {
         val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("same-run", "CPU"))
         val candidate = CorrectnessGatePlan.parse(expectedOutput, trace("same-run", "Vulkan"))

@@ -167,7 +167,8 @@ abstract class BackendBenchmarkViewModel(
                                 "gateRunId=$gateNativeRunId,nativeRunId=$gateNativeRunId," +
                                 "resourceRunId=${gateSample.result.diagnosticRunId}," +
                                 "cpuReferenceRunId=${cpuReference?.runId.orEmpty()},status=${gateEvaluation.status}," +
-                                "reason=${gateEvaluation.reason},steps=${gateEvaluation.comparedSteps}," +
+                                "reason=${gateEvaluation.reason},outputShape=${gateRun.outputShape}," +
+                                "outputChars=${gateRun.outputCharacters},steps=${gateEvaluation.comparedSteps}," +
                                 "minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}/5," +
                                 "maxConsecutiveRepeat=${gateEvaluation.maxConsecutiveRepeat}"
                         )

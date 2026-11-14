@@ -19,6 +19,8 @@ internal object CorrectnessGatePlan {
     data class TokenStep(val step: Int, val selectedId: Int, val top5: List<Candidate>)
     data class GateRun(
         val output: String,
+        val outputShape: String,
+        val outputCharacters: Int,
         val runId: String,
         val backend: String,
         val steps: List<TokenStep>,
@@ -47,6 +49,8 @@ internal object CorrectnessGatePlan {
             payloads.all { !field(it, "runId").isNullOrBlank() && !field(it, "backend").isNullOrBlank() }
         return GateRun(
             output = output,
+            outputShape = classifyOutput(output),
+            outputCharacters = output.count { !it.isWhitespace() },
             runId = runIds.firstOrNull().orEmpty(),
             backend = backends.firstOrNull().orEmpty(),
             steps = parsed,
@@ -109,6 +113,25 @@ internal object CorrectnessGatePlan {
             BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, 5,
             maxConsecutiveRepeat(candidate.steps)
         )
+    }
+
+    /**
+     * Content-safe output classification for persisted diagnostics. Never returns or stores
+     * generated text; it records only the shape of the in-memory answer.
+     */
+    private fun classifyOutput(output: String): String {
+        val normalized = output.filterNot { it.isWhitespace() }
+        val expected = BackendBenchmarkPlan.CORRECTNESS_GATE_EXPECTED.joinToString(",")
+        return when {
+            normalized.isEmpty() -> "EMPTY"
+            normalized == expected -> "EXACT_SEQUENCE"
+            expected.startsWith(normalized) && normalized.length < MIN_TRUNCATED_ANSWER_CHARS ->
+                "PREFIX_TOO_SHORT"
+            expected.startsWith(normalized) -> "EXPECTED_PREFIX"
+            normalized.startsWith(expected) -> "EXTRA_SUFFIX"
+            normalized.any { !it.isDigit() && it != ',' } -> "NON_SEQUENCE_TEXT"
+            else -> "SEQUENCE_MISMATCH"
+        }
     }
 
     private fun validateRun(run: GateRun, expectedBackend: String): String? {
