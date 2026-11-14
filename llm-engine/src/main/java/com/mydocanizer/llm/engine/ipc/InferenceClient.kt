@@ -89,6 +89,7 @@ internal class InferenceClient(
 
     private data class ActiveStreamControl(
         val requestId: String,
+        val timeoutConfig: TimeoutConfig,
         val cancelAfterAbort: () -> Unit,
         val failAfterDisconnect: (Throwable) -> Unit
     )
@@ -704,7 +705,8 @@ internal class InferenceClient(
                 abortRemoteProcess(
                     requestId = null,
                     reason = "model_load_timeout",
-                    targetPidOverride = targetPid
+                    targetPidOverride = targetPid,
+                    timeoutConfigOverride = effectiveTimeout
                 )
                 _modelLoadProgress.value = null
                 val timeoutEx = InferenceTimeoutException(FinishReason.TIMEOUT_MODEL_LOAD, elapsedMs)
@@ -735,7 +737,8 @@ internal class InferenceClient(
                     abortRemoteProcess(
                         requestId = null,
                         reason = "model_load_cancelled",
-                        targetPidOverride = targetPid
+                        targetPidOverride = targetPid,
+                        timeoutConfigOverride = effectiveTimeout
                     )
                 } else {
                     val error = IllegalStateException(
@@ -796,7 +799,14 @@ internal class InferenceClient(
                 )
                 EngineDiagnostics.error("ipc_client", "MODEL_UNLOAD_TIMEOUT", error)
                 _modelLoadProgress.value = null
-                if (targetPid != null) abortRemoteProcess(null, "model_unload_timeout", targetPid)
+                if (targetPid != null) {
+                    abortRemoteProcess(
+                        requestId = null,
+                        reason = "model_unload_timeout",
+                        targetPidOverride = targetPid,
+                        timeoutConfigOverride = effective
+                    )
+                }
                 Result.failure(error)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -1001,7 +1011,8 @@ internal class InferenceClient(
                     abortRemoteProcess(
                         requestId = requestId,
                         reason = "inference_timeout_${reason}_cooperative_cancel_timeout",
-                        targetPidOverride = targetPid
+                        targetPidOverride = targetPid,
+                        timeoutConfigOverride = effectiveTimeout
                     )
                 } else {
                     EngineDiagnostics.info(
@@ -1108,6 +1119,7 @@ internal class InferenceClient(
 
         val control = ActiveStreamControl(
             requestId = requestId,
+            timeoutConfig = effectiveTimeout,
             cancelAfterAbort = {
                 if (pendingTimeout.get() != null) {
                     reportTimeout()
@@ -1346,7 +1358,8 @@ internal class InferenceClient(
                     requestId = requestId,
                     reason = "stream_collector_closed",
                     targetPid = targetPid,
-                    graceMs = graceMs
+                    graceMs = graceMs,
+                    timeoutConfig = effectiveTimeout
                 ) {
                     activeStreamControl.get()
                         ?.takeIf { it.requestId == requestId }
@@ -1394,6 +1407,7 @@ internal class InferenceClient(
         reason: String,
         targetPid: Int?,
         graceMs: Long,
+        timeoutConfig: TimeoutConfig,
         onEscalated: (() -> Unit)? = null
     ) {
         val service = remoteService
@@ -1434,7 +1448,8 @@ internal class InferenceClient(
                 abortRemoteProcess(
                     requestId = requestId,
                     reason = reason,
-                    targetPidOverride = targetPid
+                    targetPidOverride = targetPid,
+                    timeoutConfigOverride = timeoutConfig
                 )
                 onEscalated?.invoke()
             } else {
@@ -1465,12 +1480,17 @@ internal class InferenceClient(
             "CANCEL_REQUESTED",
             "Cooperative cancellation requested for request=$requestId, remotePid=$targetPid"
         )
-        val graceMs = (lastLoadedConfig?.timeoutConfig ?: timeoutConfig).abortGracePeriodMs
+        val activeControl = activeStreamControl.get()?.takeIf { it.requestId == requestId }
+        val effectiveTimeout = activeControl?.timeoutConfig
+            ?: lastLoadedConfig?.timeoutConfig
+            ?: timeoutConfig
+        val graceMs = effectiveTimeout.abortGracePeriodMs
         requestCooperativeCancellation(
             requestId = requestId,
             reason = "explicit_cancel",
             targetPid = targetPid,
-            graceMs = graceMs
+            graceMs = graceMs,
+            timeoutConfig = effectiveTimeout
         ) {
             activeStreamControl.get()
                 ?.takeIf { it.requestId == requestId }
@@ -1487,14 +1507,15 @@ internal class InferenceClient(
     private fun abortRemoteProcess(
         requestId: String?,
         reason: String,
-        targetPidOverride: Int? = _remotePid.value
+        targetPidOverride: Int? = _remotePid.value,
+        timeoutConfigOverride: TimeoutConfig? = null
     ) {
         val targetPid = targetPidOverride
         val service = remoteService
         val servicePid = runCatching { service?.processId }.getOrNull()
         val serviceMatchesTarget = service != null &&
             (targetPid == null || servicePid == targetPid)
-        val effective = lastLoadedConfig?.timeoutConfig ?: timeoutConfig
+        val effective = timeoutConfigOverride ?: lastLoadedConfig?.timeoutConfig ?: timeoutConfig
 
         // Persist the abort intent before asking the remote process to terminate. The
         // remote process can exit immediately after the one-way Binder transaction.
