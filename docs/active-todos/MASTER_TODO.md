@@ -127,7 +127,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 **Evidence:** `ModelImportViewModel.importModelsFromSaf()` previously caught `Exception` per file without rethrowing `CancellationException`; the explicit rethrow is now implemented, but lifecycle/cleanup tests remain open.
 
 - [x] Rethrow `CancellationException` before handling recoverable per-file failures in the bulk SAF loop.
-- [ ] Ensure cancellation stops subsequent files, retains completed imports, removes incomplete temporary files and resets UI state once.
+- [x] Ensure cancellation stops subsequent files, retains completed imports, refreshes the model list after partial success, removes incomplete temporary files in the resolver and resets UI state once.
 - [ ] Add tests for cancellation during permission/metadata lookup, copy, verification and between files.
 
 **Acceptance:** A cancelled import cannot continue as a sequence of ordinary file failures or report success.
