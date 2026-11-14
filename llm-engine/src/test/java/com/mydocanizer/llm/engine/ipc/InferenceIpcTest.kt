@@ -517,6 +517,53 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun followUpInferenceSucceedsAfterCooperativeCancellation() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterFirstToken.set(true)
+            acknowledgeCooperativeCancel.set(true)
+        }
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = TimeoutConfig.fast(
+                prefillMs = 1_000L,
+                firstTokenMs = 1_000L,
+                interTokenMs = 1_000L,
+                totalInferenceMs = 3_000L
+            )
+        )
+
+        try {
+            client.initialize()
+            val cancelledStream = async {
+                client.streamChat(InferenceRequest.single("cancel then recover")).toList()
+            }
+            withTimeout(1_000L) {
+                while (fakeService.lastRequestId.get() == null) delay(5L)
+            }
+            client.cancelInference()
+
+            val cancelledEvents = withTimeout(1_000L) { cancelledStream.await() }
+            assertEquals(1, cancelledEvents.count { it is InferenceEvent.Cancelled })
+            assertTrue(cancelledEvents.none { it is InferenceEvent.Completed || it is InferenceEvent.Error })
+            assertFalse("Cooperative cancellation must leave the service alive", fakeService.isKilled.get())
+
+            fakeService.hangAfterFirstToken.set(false)
+            val followUpEvents = withTimeout(1_000L) {
+                client.streamChat(InferenceRequest.single("follow-up after cancel")).toList()
+            }
+            assertEquals(1, followUpEvents.count { it is InferenceEvent.Completed })
+            assertTrue(followUpEvents.none { it is InferenceEvent.Error || it is InferenceEvent.Cancelled })
+            assertTrue(
+                "A successful follow-up must leave the client out of the inferring state",
+                client.state.value !is com.mydocanizer.llm.engine.EngineState.Inferring
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun unloadModelTimeoutReturnsFailureInsteadOfWaitingForever() = runBlocking {
         val fakeService = FakeInferenceService().apply { hangUnload.set(true) }
         val timeoutConfig = TimeoutConfig(
