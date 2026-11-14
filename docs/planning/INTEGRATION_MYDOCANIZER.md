@@ -2,7 +2,7 @@
 
 **Purpose:** This guide describes how the standalone Local LLM Engine prototype can be embedded later as a reusable Android library in `MrLongNight/myDocAnizer_Mobile`. The current repository remains an independent engine-development/test prototype; this document records the intended downstream integration contract.
 
-> **Compatibility gate:** This is a plan based on the current `main` API, not proof that the library has already been integrated into myDocAnizer-Mobile. Before an integration release, pin the exact Local_LLM_Engine commit and rerun the consumer build and device acceptance tests against that commit.
+> **Compatibility gate:** This is a plan based on the current `main` API, not proof that the library has already been integrated into myDocAnizer-Mobile. Before an integration release, pin the exact Local_LLM_Engine commit and rerun the consumer build and device acceptance tests against that commit. The current prioritized actions are tracked only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md); this guide describes the integration contract, not a parallel TODO list.
 
 ## 1. Integration shape
 
