@@ -936,6 +936,8 @@ static void ggml_vk_get_physical_device_features2(
     endif()
     set(_mali_fence_wait_replacement [=[
     const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+    const auto local_llm_fence_wait_start = local_llm_sync_timing
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Mali-G57 shares system memory with the CPU. Repeatedly polling the final
     // fence can keep a CPU core busy for the full GPU decode interval.
     if (ctx->device->vendor_id == 0x13B5) {
@@ -981,8 +983,6 @@ static void ggml_vk_get_physical_device_features2(
             }
         }
     }
-    const auto local_llm_fence_wait_start = local_llm_sync_timing
-        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     ctx->device->device.resetFences({ ctx->fence });
     if (local_llm_sync_timing) {
         local_llm_vulkan_sync_phase_record(1, static_cast<uint64_t>(
