@@ -1,9 +1,10 @@
 # SettingsScreen – Analyse vor der Sektionsextraktion
 
-**Status:** SCHRITT 1 abgeschlossen – Analyse-only; Freigabe zur Extraktion ausstehend  
+**Status:** SCHRITT 2 läuft – Freigabe erteilt; SystemPromptSection extrahiert, CI-Abnahme ausstehend  
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
-**Analyse-HEAD:** `fbc1a9f88a5b537af100ad110ed9636bd60e4367`  
+**Analyse-HEAD:** `98cbaf367ba8661e2377c09cf3ca0514bcb5ec18`
+**Aktueller Extraktionsstand:** erster Code-Commit wird erstellt  
 **Datei:** `app/src/main/java/com/example/ui/SettingsScreen.kt`  
 **Datei-Snapshot (Git-Blob):** `68c1f57b8f0ffc78cb0a3ae86a2c1f07a8eff4dd`  
 **Umfang:** 22.823 Bytes laut GitHub-Dateimetadaten, 438 Zeilen
@@ -92,3 +93,24 @@ Die einfachste verhaltensneutrale Übergabe ist, die bereits vorhandene `EngineV
 **SCHRITT 1 – ANALYSE ABGESCHLOSSEN.** Es wurden keine Kotlin-Dateien verändert.
 
 **Freigabe erforderlich:** Soll die beschriebene mechanische Extraktion der bisher inline definierten `LazyColumn`-Inhalte in neue `@Composable`-Funktionen erfolgen? Die Inhalte werden 1:1 übernommen; nur die notwendige Funktionshülle und die Aufrufstellen werden ergänzt. Ohne diese Zustimmung erfolgt keine Codeänderung.
+
+
+## 8. Freigabe und laufende Umsetzung
+
+**Freigabe:** Der Nutzer hat die mechanische Extraktion am 14.11.2026 ausdrücklich freigegeben. Es dürfen die Inline-UI-Blöcke als Composable-Funktionen gekapselt werden; ihr innerer UI-Code bleibt unverändert.
+
+### Extraktionsstatus
+
+| Sektion | Status | Code-Commit | Build |
+|---|---|---|---|
+| SystemPromptSection | Extrahiert | wird erstellt | CI ausstehend |
+| BackendSettingsSection | Offen | – | – |
+| VulkanTuningSection | Offen | – | – |
+| InferenceSettingsSection | Offen | – | – |
+| BackendAcceptanceTestSection | Offen | – | – |
+| VulkanQ4kDiagnosticsSection | Offen | – | – |
+| BenchmarkResultSection | Offen | – | – |
+
+**Erste Extraktion:** Die bestehende System-Prompt-Card wurde in `SystemPromptSection.kt` verschoben. Die ursprünglichen Card-Inhalte (Text, Modifier, TestTag, Callbacks und Parameter) werden unverändert übernommen. Der vorhandene LazyColumn-Eintrag bleibt an derselben Position und ruft die neue Composable auf. `SettingsScreen`-Signatur und Screen-weite State-Sammlung bleiben unverändert.
+
+**Build-Gate:** Der Commit wird durch die vorhandenen GitHub-Actions geprüft. Weitere Sektionen werden erst nach erfolgreicher Prüfung des jeweiligen Code-Commits extrahiert. Bei einem CI-Fehler wird zuerst die Ursache behoben und erneut geprüft.

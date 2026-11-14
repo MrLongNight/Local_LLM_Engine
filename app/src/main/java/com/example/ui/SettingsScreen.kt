@@ -33,6 +33,7 @@ import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import kotlin.math.roundToInt
+import com.example.ui.settings.sections.SystemPromptSection
 
 @Composable
 fun SettingsScreen(
@@ -58,31 +59,10 @@ fun SettingsScreen(
     ) {
         // System Prompt Section
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "System-Prompt",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Wird vor jede Konversation gesetzt. Bleibt bei Kontextkürzungen stets vollständig erhalten.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = systemPrompt,
-                        onValueChange = { viewModel.updateSystemPrompt(it) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("system_prompt_input"),
-                        minLines = 3,
-                        maxLines = 6
-                    )
-                }
-            }
+            SystemPromptSection(
+                systemPrompt = systemPrompt,
+                viewModel = viewModel
+            )
         }
 
         // Hardware Acceleration / Backend Selection Card
