@@ -720,9 +720,9 @@ static jstring new_java_string_from_utf8(JNIEnv* env, const std::string& utf8) {
 }
 
 static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {
-    if (engine->cached_token_chars.empty()) return nullptr;
-    engine->cached_token_chars.clear();
-    const std::string replacement(UTF8_REPLACEMENT_CHARACTER);
+    const std::string replacement =
+        local_llm::finalize_utf8_incremental(engine->cached_token_chars);
+    if (replacement.empty()) return nullptr;
     engine->assistant_ss << replacement;
     return new_java_string_from_utf8(env, replacement);
 }
@@ -1897,7 +1897,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         LOGI("Inference cancelled cooperatively");
         engine->last_finish_reason = 2; // CANCELLED
         engine->generation_finished = true;
-        return nullptr;
+        return flush_incomplete_utf8(env, engine);
     }
 
     if (engine->current_position >= engine->context_size - OVERFLOW_HEADROOM) {
@@ -1920,7 +1920,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     if (engine->sampler == nullptr) {
         LOGE("Token generation requested without an initialized sampler");
         engine->last_finish_reason = 3; // ERROR
-        return nullptr;
+        engine->generation_finished = true;
+        return flush_incomplete_utf8(env, engine);
     }
 
     // Token decoding happens in separate JNI calls after nativeProcessChat()
@@ -1971,7 +1972,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     engine->batch.n_tokens = 0;
     if (!append_token_to_batch(engine->batch, new_token_id, engine->current_position, 0, true, engine->batch_size)) {
         engine->last_finish_reason = 3; // ERROR
-        return nullptr;
+        engine->generation_finished = true;
+        return flush_incomplete_utf8(env, engine);
     }
 
     int decode_result = 0;
@@ -2002,7 +2004,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->system_prompt_position = 0;
         engine->last_finish_reason = 2; // CANCELLED
         engine->generation_finished = true;
-        return nullptr;
+        return flush_incomplete_utf8(env, engine);
     }
     if (decode_result != 0) {
         LOGE("llama_decode failed during token generation with code %d; invalidating KV state", decode_result);
@@ -2011,7 +2013,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->current_position = 0;
         engine->system_prompt_position = 0;
         engine->last_finish_reason = 3; // ERROR
-        return nullptr;
+        engine->generation_finished = true;
+        return flush_incomplete_utf8(env, engine);
     }
     const int64_t decode_duration_us = decode_submit_duration_us + backend_sync_wait_us;
 
