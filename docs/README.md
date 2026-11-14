@@ -25,6 +25,11 @@ Located in [`planning/`](planning/):
 - [`IMPLEMENTATION_PLAN.md`](planning/IMPLEMENTATION_PLAN.md) — overall engine implementation plan, technical decisions and dated historical CI/device snapshots.
 - [`INTEGRATION_MYDOCANIZER.md`](planning/INTEGRATION_MYDOCANIZER.md) — downstream integration plan for embedding `:llm-engine` in myDocAnizer-Mobile. This is a key planned consumer integration, not a statement that this repository is myDocAnizer-Mobile.
 
+## Refactoring analyses
+
+- [`REFACTORING_MODEL_IMPORT.md`](REFACTORING_MODEL_IMPORT.md) — extraction record and verification for `ModelImportScreen`.
+- [`REFACTORING_TESTS.md`](REFACTORING_TESTS.md) — method-to-class map and lifecycle analysis for `InferenceServiceProcessTest`.
+
 ## Repository rules
 
 - [`AGENTS.md`](AGENTS.md) — contributor/agent rules and documentation ownership.
