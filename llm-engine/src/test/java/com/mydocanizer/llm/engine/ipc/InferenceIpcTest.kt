@@ -350,6 +350,12 @@ class InferenceIpcTest {
         client.cancelInference()
 
         val events = withTimeout(2_000L) { stream.await() }
+        // The stream terminal event is emitted as soon as abort escalation starts;
+        // process-death confirmation runs asynchronously afterwards. Wait for both
+        // liveness samples before asserting the original PID was observed throughout.
+        withTimeout(1_000L) {
+            while (livenessChecks.get() < 2) delay(5L)
+        }
         assertEquals(99999, observedAbortPid.get())
         assertTrue("Liveness checks must target the original request PID", livenessChecks.get() >= 2)
         assertEquals(
@@ -403,6 +409,11 @@ class InferenceIpcTest {
         // replacement before the prefill timeout is reached.
         fakeService.currentProcessId.set(22222)
         val events = withTimeout(2_000L) { stream.await() }
+        // Timeout reporting and process-death confirmation are separate asynchronous
+        // paths. Do not assert the second /proc-equivalent sample before it has run.
+        withTimeout(1_000L) {
+            while (livenessChecks.get() < 2) delay(5L)
+        }
 
         assertEquals(99999, observedAbortPid.get())
         assertTrue("Timeout checks must remain bound to the original request PID", livenessChecks.get() >= 2)
