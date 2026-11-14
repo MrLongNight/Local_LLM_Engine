@@ -133,6 +133,9 @@ class ModelSourceDescriptorTest {
             assertTrue("The original provider URI must be reopenable after unload: ${reloaded.exceptionOrNull()}",
                 reloaded.isSuccess)
             assertEquals(modelUri.toString(), client.currentModel.value?.path)
+            val finalUnload = client.unloadModel()
+            assertTrue("Final provider reload must release its descriptor: ${finalUnload.exceptionOrNull()}",
+                finalUnload.isSuccess)
         } finally {
             client.close()
             directBinding?.let { binding ->

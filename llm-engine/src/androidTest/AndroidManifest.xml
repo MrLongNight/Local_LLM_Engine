@@ -4,7 +4,7 @@
         <provider
             android:name="com.mydocanizer.llm.engine.ipc.TestModelContentProvider"
             android:authorities="com.mydocanizer.llm.engine.test-model-provider"
-            android:exported="false"
+            android:exported="true"
             android:grantUriPermissions="false" />
     </application>
 </manifest>
