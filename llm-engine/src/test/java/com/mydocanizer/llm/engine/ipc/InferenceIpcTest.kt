@@ -517,6 +517,64 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun explicitCancelUsesTheActiveRequestsAbortGracePeriod() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterFirstToken.set(true)
+        }
+        val clientTimeout = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 1_000L,
+            firstTokenMs = 1_500L,
+            interTokenMs = 1_500L,
+            totalInferenceMs = 3_000L,
+            abortGracePeriodMs = 20L,
+            reconnectMs = 2_000L
+        )
+        val requestTimeout = clientTimeout.copy(abortGracePeriodMs = 250L)
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = clientTimeout,
+            processLivenessCheck = { !fakeService.isKilled.get() }
+        )
+        val collectedEvents = mutableListOf<InferenceEvent>()
+        val tokenReceived = AtomicBoolean(false)
+
+        try {
+            client.initialize()
+            val request = InferenceRequest.single("request-specific abort grace")
+                .copy(timeoutConfig = requestTimeout)
+            val streamJob = launch {
+                client.streamChat(request).collect { event ->
+                    collectedEvents += event
+                    if (event is InferenceEvent.Token) tokenReceived.set(true)
+                }
+            }
+            withTimeout(1_000L) {
+                while (!tokenReceived.get()) delay(5L)
+            }
+
+            client.cancelInference()
+            delay(60L)
+            assertTrue(
+                "Explicit cancellation must honor the request's 250 ms grace, not the client's 20 ms default",
+                !fakeService.isKilled.get()
+            )
+            assertEquals(fakeService.lastRequestId.get(), fakeService.cancelledRequestId.get())
+
+            withTimeout(1_000L) {
+                while (!fakeService.isKilled.get()) delay(5L)
+            }
+            withTimeout(1_000L) { streamJob.join() }
+            assertEquals(1, collectedEvents.count { it is InferenceEvent.Cancelled })
+            assertTrue(collectedEvents.none { it is InferenceEvent.Completed || it is InferenceEvent.Error })
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun followUpInferenceSucceedsAfterCooperativeCancellation() = runBlocking {
         val fakeService = FakeInferenceService().apply {
             hangAfterFirstToken.set(true)
