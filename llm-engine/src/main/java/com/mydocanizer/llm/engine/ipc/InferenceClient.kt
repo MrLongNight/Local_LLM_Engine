@@ -744,7 +744,7 @@ internal class InferenceClient(
                 }
             } else {
                 // Cancellation before Binder dispatch must not disturb an existing model.
-                _state.value = previousModel?.let(EngineState::ModelLoaded) ?: EngineState.Ready
+                _state.value = if (previousModel != null) EngineState.ModelLoaded(previousModel) else EngineState.Ready
             }
             throw cancelled
         } catch (t: Throwable) {
