@@ -688,17 +688,30 @@ internal class LocalLlmEngineImpl(
                     trySend(InferenceEvent.Error(error, fullText))
                 }
                 else -> {
-                    val result = InferenceResult(
-                        text = fullText,
-                        tokensGenerated = actualTokens,
-                        durationMs = durationMs,
-                        tokensPerSecond = tokensPerSec,
-                        finishReason = finishReason,
-                        graphSplits = graphSplits,
-                        diagnosticRunId = inferenceRunId,
-                        nativeRunId = inferenceRunId
-                    )
-                    trySend(InferenceEvent.Completed(result))
+                    if (fullText.isBlank()) {
+                        // An immediate EOG / invisible-only token sequence must never look
+                        // like a successful empty assistant reply in the demo or API.
+                        // Keep response content out of diagnostics; counts and finish reason
+                        // are sufficient to correlate the native prompt/sampler investigation.
+                        val error = IllegalStateException(
+                            "Model finished without visible output " +
+                                "(tokens=$actualTokens, finishReason=$finishReason)"
+                        )
+                        EngineDiagnostics.error("inference", "EMPTY_MODEL_OUTPUT", error)
+                        trySend(InferenceEvent.Error(error))
+                    } else {
+                        val result = InferenceResult(
+                            text = fullText,
+                            tokensGenerated = actualTokens,
+                            durationMs = durationMs,
+                            tokensPerSecond = tokensPerSec,
+                            finishReason = finishReason,
+                            graphSplits = graphSplits,
+                            diagnosticRunId = inferenceRunId,
+                            nativeRunId = inferenceRunId
+                        )
+                        trySend(InferenceEvent.Completed(result))
+                    }
                 }
             }
         } catch (e: CancellationException) {
