@@ -483,8 +483,8 @@ static void ggml_vk_get_physical_device_features2(
     }]=])
     string(REPLACE "${_q4_prefill_anchor}" "${_q4_prefill_replacement}" _vulkan_contents "${_vulkan_contents}")
 
-    # Force only Q4_K decode to use the existing base DMMV implementation.
-    # Q4_K prefill and all non-Q4_K tensor types retain their normal MMVQ selection.
+    # Prefer integer-dot MMVQ for Q4_K decode at batch 1 when the device supports it.
+    # The explicit BASE A/B override, prefill, and non-Q4_K types remain isolated.
     set(_q4k_base_dmmv_anchor [=[
     // Check for mmq first
     vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
@@ -494,14 +494,26 @@ static void ggml_vk_get_physical_device_features2(
     endif()
     set(_q4k_base_dmmv_replacement [=[
     // LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE: mode 3 explicitly forces base DMMV for Q4_K.
-    // LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV: Mali Q4_K decode skips Q8_1 conversion in AUTO.
-    // Modes 3/4/5 expose explicit Q4_K/Q5_K/Q6_K A/B paths; only Q4_K changes AUTO.
+    // LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV: Mali without integer-dot keeps the AUTO base path.
+    // Modes 3/4/5 expose explicit Q4_K/Q5_K/Q6_K A/B paths; Q5_K/Q6_K logic is unchanged.
     const int local_llm_quant_override = local_llm_vulkan_dmmv_workgroup_override();
+    const bool local_llm_q4k_integer_dot_batch1 =
+        src0->type == GGML_TYPE_Q4_K &&
+        ne11 == 1 &&
+        ctx->device->integer_dot_product &&
+        local_llm_quant_override != 3;
     const bool local_llm_mali_q4k_auto =
         local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;
-    if (src0->type == GGML_TYPE_Q4_K && ne11 == 1 &&
-        (local_llm_quant_override == 3 || local_llm_mali_q4k_auto)) {
+    const char * local_llm_q4k_decode_reason = "upstream";
+    if (local_llm_q4k_integer_dot_batch1) {
+        // Expected log evidence: selected=MMVQ_INTEGER_DOT,reason=intDot_q4k_batch1,yKernelType=q8_1.
+        quantize_y = true;
+        local_llm_q4k_decode_reason = "intDot_q4k_batch1";
+    } else if (src0->type == GGML_TYPE_Q4_K && ne11 == 1 &&
+               (local_llm_quant_override == 3 || local_llm_mali_q4k_auto)) {
         quantize_y = false;
+        local_llm_q4k_decode_reason = local_llm_quant_override == 3
+            ? "explicit_base_override" : "mali_auto_base_without_intDot";
     } else if (src0->type == GGML_TYPE_Q5_K && ne11 == 1 && local_llm_quant_override == 4) {
         quantize_y = false;
     } else if (src0->type == GGML_TYPE_Q6_K && ne11 == 1 && local_llm_quant_override == 5) {
@@ -519,9 +531,13 @@ static void ggml_vk_get_physical_device_features2(
         (swap_inputs || ggml_vk_src1_prec_allows_q8(dst));
     if (local_llm_mmvq_force_requested) {
         quantize_y = true;
+        if (src0->type == GGML_TYPE_Q4_K) {
+            local_llm_q4k_decode_reason = "explicit_mmvq_override";
+        }
     }
     // Check for mmq first
-    vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
+    vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;
+]=])
     string(REPLACE "${_q4k_base_dmmv_anchor}" "${_q4k_base_dmmv_replacement}" _vulkan_contents "${_vulkan_contents}")
     set(_q4_decode_anchor [=[
     if (dmmv == nullptr) {
@@ -537,22 +553,26 @@ static void ggml_vk_get_physical_device_features2(
     if (dmmv == nullptr) {
         // Fall back to f16 dequant mul mat
         dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
+        if (src0->type == GGML_TYPE_Q4_K && quantize_y) {
+            local_llm_q4k_decode_reason = "q8_1_pipeline_unavailable_fallback";
+        }
         quantize_y = false;
     }
     if (src0->type == GGML_TYPE_Q4_K) {
         const char * run_id = local_llm_vulkan_profile_run_id();
         const char * selected_path = quantize_y
-            ? "Q8_1_INTEGER_DOT_MMVQ" : "BASE_TYPE_MMV";
+            ? "MMVQ_INTEGER_DOT" : "BASE_TYPE_MMV";
         if (local_llm_should_log_q4k_path(run_id, false, quantize_y)) {
             GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - runId=%s,device=%s,intDot=%d,quantizeY=%d,selected=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
+                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - runId=%s,device=%s,intDot=%d,quantizeY=%d,selected=%s,reason=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
                 run_id,
                 ctx->device->name.c_str(),
                 ctx->device->integer_dot_product ? 1 : 0,
                 quantize_y ? 1 : 0,
                 selected_path,
+                local_llm_q4k_decode_reason,
                 ggml_type_name(src1->type),
-                ggml_type_name(y_kernel_type),
+                ggml_type_name(quantize_y ? GGML_TYPE_Q8_1 : y_kernel_type),
                 static_cast<unsigned long long>(ne11),
                 static_cast<unsigned long long>(ne10),
                 static_cast<unsigned long long>(ne01));
@@ -829,6 +849,9 @@ void vk_perf_logger::print_timings(bool force) {
     if(NOT _vulkan_contents MATCHES "LOCAL_LLM_ANDROID_VULKAN_COMPAT" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH" OR
+       NOT _vulkan_contents MATCHES "local_llm_q4k_integer_dot_batch1" OR
+       NOT _vulkan_contents MATCHES "selected=MMVQ_INTEGER_DOT" OR
+       NOT _vulkan_contents MATCHES "reason=%s" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_OP_TIMING" OR
        NOT _vulkan_contents MATCHES "local_llm_vulkan_dmmv_workgroup_override" OR

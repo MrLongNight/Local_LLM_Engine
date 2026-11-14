@@ -106,7 +106,7 @@ class EngineDiagnosticsTest {
                 "device=Mali-G57,intDot=1,coopMatInt=0,canQuantizeY=1,selected=Q8_1_MATMUL"
         val decodePath =
             "2026-11-10 16:00:03.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - " +
-                "device=Mali-G57,intDot=1,quantizeY=1,selected=Q8_1_INTEGER_DOT_MMVQ"
+                "device=Mali-G57,intDot=1,quantizeY=1,selected=MMVQ_INTEGER_DOT,reason=intDot_q4k_batch1,yKernelType=q8_1"
         val memoryBudget =
             "2026-11-10 16:00:04.000 [NATIVE] ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET - " +
                 "device=0,name=Mali-G57,integrated=1,extensionSupported=0,heapCount=1"
@@ -143,7 +143,7 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("int dot: 1"))
         assertTrue(report.contains("offloaded 37/37 layers to GPU"))
         assertTrue(report.contains("selected=Q8_1_MATMUL"))
-        assertTrue(report.contains("selected=Q8_1_INTEGER_DOT_MMVQ"))
+        assertTrue(report.contains("selected=MMVQ_INTEGER_DOT"))
         assertTrue(report.contains("extensionSupported=0"))
         assertTrue(report.contains("budgetKnown=0"))
         assertTrue(
@@ -212,10 +212,10 @@ class EngineDiagnosticsTest {
     fun compactReportRetainsQ4kDecodePathSweepAndNativePathTransitions() {
         val mmvqPath =
             "2026-11-11 17:00:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - " +
-                "device=Mali-G57,intDot=1,quantizeY=1,selected=Q8_1_INTEGER_DOT_MMVQ"
+                "device=Mali-G57,intDot=1,quantizeY=1,selected=MMVQ_INTEGER_DOT,reason=intDot_q4k_batch1,yKernelType=q8_1"
         val basePath =
             "2026-11-11 17:01:00.000 [NATIVE] ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - " +
-                "device=Mali-G57,intDot=1,quantizeY=0,selected=BASE_TYPE_MMV"
+                "device=Mali-G57,intDot=1,quantizeY=0,selected=BASE_TYPE_MMV,reason=explicit_base_override,yKernelType=f32"
         val sweepEvents = listOf(
             "2026-11-11 17:00:00.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_STARTED - profiles=MMVQ,BASE,BASE_REPEAT,MMVQ_REPEAT",
             "2026-11-11 17:00:01.000 [INFO] [benchmark] VULKAN_Q4K_PATH_SWEEP_PLAN - modelLayers=37,requestedGpuLayers=99",
@@ -229,7 +229,7 @@ class EngineDiagnosticsTest {
             listOf(mmvqPath, basePath) + sweepEvents
         )
 
-        assertTrue(report.contains("selected=Q8_1_INTEGER_DOT_MMVQ"))
+        assertTrue(report.contains("selected=MMVQ_INTEGER_DOT"))
         assertTrue(report.contains("selected=BASE_TYPE_MMV"))
         assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_STARTED"))
         assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_PLAN"))

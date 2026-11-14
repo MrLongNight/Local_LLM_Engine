@@ -445,7 +445,7 @@ abstract class VulkanDiagnosticsViewModel(
                     val observedKernelPaths = pathEvidence.mapNotNull { line ->
                         Regex("selected=([^,]+)").find(line)?.groupValues?.getOrNull(1)
                     }.toSet()
-                    val expectedKernelPath = if (baseDmmv) "BASE_TYPE_MMV" else "Q8_1_INTEGER_DOT_MMVQ"
+                    val expectedKernelPath = if (baseDmmv) "BASE_TYPE_MMV" else "MMVQ_INTEGER_DOT"
                     if (observedKernelPaths != setOf(expectedKernelPath)) {
                         throw IllegalStateException(
                             "Q4_K-Kernelpfad nicht bestätigt: erwartet=$expectedKernelPath, " +
