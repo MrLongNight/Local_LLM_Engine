@@ -54,7 +54,7 @@ All project documentation is organized by document type under [`docs/`](docs/REA
 
 - [Technical documentation](docs/technical/) — architecture, model compatibility, CI signing and change history.
 - [Mermaid architecture](docs/technical/ARCHITECTURE.md) — canonical module, process and inference-flow diagrams.
-- [Active todos](docs/active-todos/) — current refactoring status and model-aware cache work.
+- [Master TODO](docs/active-todos/MASTER_TODO.md) — the single prioritized list of current architecture, reliability, cleanup and integration measures.
 - [Planning](docs/planning/) — overall implementation plan and the downstream myDocAnizer-Mobile integration plan.
 - [Agent rules](docs/AGENTS.md) — repository invariants and documentation ownership.
 
