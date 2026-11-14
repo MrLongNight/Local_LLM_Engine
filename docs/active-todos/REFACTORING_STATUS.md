@@ -1,8 +1,8 @@
 # Refactoring status — Local_LLM_Engine
 
-**Live tracker:** InferenceServiceProcessTest split (Task 5).
-**Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `main`
-**Latest inspected code SHA:** `75c93b043ca74006c39066b57cacdd1c5223680d` (2026-11-14; test split remains at `b526616`).
+**Live tracker:** `:app` package-structure extraction (Task 6).
+**Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `refactor/split-large-files`
+**Latest inspected code SHA:** `73864d2091d4145c30e237efae83386907f9b80e` (2026-11-14; R6 source moves).
 
 ## Task 2 — EngineViewModel split
 
@@ -21,6 +21,8 @@ The `EngineViewModel` facade is reduced to navigation/shared state and delegates
 | Vulkan layer and Q4_K diagnostics | `VulkanDiagnosticsViewModel.kt` |
 | Configuration smoke test | `ConfigurationSmokeViewModel.kt` |
 | Startup, lifecycle, status and close | `EngineLifecycleViewModel.kt` |
+
+The current app sources contain no `download*()` method cluster in `EngineViewModel` or its extracted app ViewModels. SAF import stays in `ModelImportViewModel`; remote HTTPS model materialization is owned by the engine library's `ModelSourceResolver`. No empty or duplicate `ModelDownloadViewModel` was created.
 
 **Verified at code SHA `c48090423ae985226f92e1c7d805d308023504cc`:**
 
@@ -95,12 +97,33 @@ Final Unit Tests run `43572193823` on code SHA `b526616ab54c7fa75ac552eef04502c3
 
 Detailed method map, byte comparisons and class sizes: [InferenceServiceProcessTest split report](../REFACTORING_TESTS.md).
 
+## Task 6 — :app package structure
+
+<badge color="warning">Source moves committed; assembleDebug not run on this branch</badge>
+
+R6 source changes are committed on `refactor/split-large-files`:
+
+| Layer | Moves |
+|---|---|
+| `data` | `LastModelStore.kt`, `SafGgufFolderScanner.kt` |
+| `domain` | `BackendBenchmarkPlan.kt`, `CorrectnessGatePlan.kt`, `InferenceConfigSmokePlan.kt`, `VulkanLayerSweepPlan.kt` |
+| `ui` | `MainActivity.kt` moved under `com.example.ui`; manifest activity name and Robolectric test import updated |
+
+All affected ViewModel/test imports were adjusted. The source inventory is unchanged: **42 production Kotlin files and 6 app test Kotlin files before and after**. All seven old paths are absent and all seven destination paths are present.
+
+No existing source files belong in `util` or `di`: there are no standalone utility files and no dependency-injection framework/composition module. Those packages were not created as empty placeholders.
+
+Verification status: source-path and import checks passed. `./gradlew assembleDebug` was **not run locally** in this session, so this branch's R6 Android build is not claimed green. The baseline file records the same local execution limitation.
+
+Commits: data moves `bad84d95460f95642aa529941a94568709e6d215`; domain moves `4d8a111651ff8e1083b08b6515d3fa70f250cc55` and import fixes `f8f4806746d5a8164197843b1ed8876b243b3558`; UI move `73864d2091d4145c30e237efae83386907f9b80e`.
+
 ## Remaining refactoring work
 
 - ModelImportScreen sections have been extracted; Unit Tests run `43567003341` on code SHA `5c6caea4c508a073ff245dd118bd3b1844066575` completed successfully. Android APK Build run `43567003311` for that SHA is in progress at this update; artifact and emulator conclusions are not yet claimed.
 - APK / emulator verification for Task 4 was not completed: run `43567003311` was cancelled by a later push before artifact upload. It is not being used as a gate for the source refactor.
 - Keep physical-device smoke testing separate from CI: Model Import success, picker cancellation and error handling still require a target Android device.
-- The `InferenceServiceProcessTest` split is complete at code level; final Android APK/emulator verification is pending. `:app` package moves remain deferred.
-- Use-case/repository extraction remains optional; do not add abstractions without a concrete reuse/ownership reason.
+- R5 source split is complete; APK/emulator instrumentation for the final test-split SHA remains unverified because its workflow was cancelled before build artifact upload.
+- R6 package moves are complete at source level on `refactor/split-large-files`; `assembleDebug` remains unverified locally. Keep physical-device smoke testing separate.
+- R7 use-case/repository extraction remains optional; do not add abstractions without a concrete reuse/ownership reason.
 
 Update this document in place after each verified task/CI transition. It is the only live refactoring status tracker.
