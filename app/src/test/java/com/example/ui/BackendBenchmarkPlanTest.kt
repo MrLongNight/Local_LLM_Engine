@@ -108,15 +108,17 @@ class BackendBenchmarkPlanTest {
 
         assertEquals(
             listOf(
+                VulkanMatvecWorkgroup.AUTO,
                 VulkanMatvecWorkgroup.MMVQ_FORCE,
                 VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
                 VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
-                VulkanMatvecWorkgroup.MMVQ_FORCE
+                VulkanMatvecWorkgroup.MMVQ_FORCE,
+                VulkanMatvecWorkgroup.AUTO
             ),
             profiles.map { it.vulkanMatvecWorkgroup }
         )
-        assertEquals(7, profiles.first().vulkanMatvecWorkgroup.nativeId)
-        assertEquals(7, profiles.last().vulkanMatvecWorkgroup.nativeId)
+        assertEquals(0, profiles.first().vulkanMatvecWorkgroup.nativeId)
+        assertEquals(0, profiles.last().vulkanMatvecWorkgroup.nativeId)
         profiles.forEach { profile ->
             assertEquals(BackendPreference.VULKAN, profile.backendPreference)
             assertEquals(99, profile.gpuLayers)
@@ -137,6 +139,32 @@ class BackendBenchmarkPlanTest {
             VulkanMatvecWorkgroup.AUTO, VulkanMatvecWorkgroup.Q6K_BASE_DMMV),
             profiles.map { it.vulkanMatvecWorkgroup })
         assertTrue(profiles.all { it.backendPreference == BackendPreference.VULKAN && it.gpuLayers == 99 })
+    }
+
+    @Test
+    fun q4kDecodePathSweepBracketsForcedAbWithProductionAutoSelection() {
+        val profiles = BackendBenchmarkPlan.vulkanQ4kDecodeConfigurations(
+            EngineConfig(batchSize = 128, threads = 6, microBatchSize = 64)
+        )
+        assertEquals(6, profiles.size)
+        assertEquals(
+            listOf(
+                VulkanMatvecWorkgroup.AUTO,
+                VulkanMatvecWorkgroup.MMVQ_FORCE,
+                VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+                VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
+                VulkanMatvecWorkgroup.MMVQ_FORCE,
+                VulkanMatvecWorkgroup.AUTO
+            ),
+            profiles.map { it.vulkanMatvecWorkgroup }
+        )
+        assertTrue(profiles.all {
+            it.backendPreference == BackendPreference.VULKAN &&
+                it.gpuLayers == 99 &&
+                it.temperature == 0f &&
+                it.topP == 1f &&
+                it.microBatchSize == 64
+        })
     }
 
     @Test

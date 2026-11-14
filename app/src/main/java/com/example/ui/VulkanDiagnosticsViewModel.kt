@@ -331,7 +331,7 @@ abstract class VulkanDiagnosticsViewModel(
             EngineDiagnostics.info(
                 "benchmark",
                 "VULKAN_Q4K_PATH_SWEEP_STARTED",
-                "model=${model.name},modelBytes=${model.sizeBytes},profiles=MMVQ_INTEGER_DOT,BASE_DMMV,BASE_DMMV_REPEAT,MMVQ_INTEGER_DOT_REPEAT," +
+                "model=${model.name},modelBytes=${model.sizeBytes},profiles=AUTO,MMVQ_INTEGER_DOT,BASE_DMMV,BASE_DMMV_REPEAT,MMVQ_INTEGER_DOT_REPEAT,AUTO_REPEAT," +
                     "gpuLayersRequested=99,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
                     "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
                     "batch=${originalConfig.batchSize},threads=${originalConfig.threads}," +
@@ -346,7 +346,7 @@ abstract class VulkanDiagnosticsViewModel(
                 }
 
                 restoreRequired = true
-                _benchmarkReport.value = "Q4_K Integer-Dot-MMVQ: Lade Modell mit vollem Vulkan-Offload…"
+                _benchmarkReport.value = "Q4_K AUTO-Produktionspfad: Lade Modell mit vollem Vulkan-Offload…"
                 val firstLoadStarted = System.nanoTime()
                 val firstLoaded = engine.loadModel(source, profiles.first()).getOrElse { throw it }
                 val firstLoadMs = (System.nanoTime() - firstLoadStarted) / 1_000_000L
@@ -373,7 +373,7 @@ abstract class VulkanDiagnosticsViewModel(
                     "benchmark",
                     "VULKAN_Q4K_PATH_SWEEP_PLAN",
                     "modelLayers=$totalLayers,requestedGpuLayers=99,activeBackend=${firstLoaded.activeBackend}," +
-                        "pathOrder=MMVQ_INTEGER_DOT,BASE_DMMV,BASE_DMMV,MMVQ_INTEGER_DOT"
+                        "pathOrder=AUTO,MMVQ_INTEGER_DOT,BASE_DMMV,BASE_DMMV,MMVQ_INTEGER_DOT,AUTO"
                 )
 
                 for ((index, profileConfig) in profiles.withIndex()) {
@@ -388,11 +388,20 @@ abstract class VulkanDiagnosticsViewModel(
 
                     val workgroup = profileConfig.vulkanMatvecWorkgroup
                     val baseDmmv = workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV
-                    val pathName = if (baseDmmv) "BASE_DMMV" else "MMVQ_INTEGER_DOT"
-                    val displayName = when (index) {
-                        0 -> "MMVQ Integer-Dot"
-                        1 -> "Basis-DMMV"
-                        2 -> "Basis-DMMV (Wiederholung)"
+                    val autoPath = workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO
+                    val pathName = when {
+                        baseDmmv -> "BASE_DMMV"
+                        autoPath -> "AUTO"
+                        else -> "MMVQ_INTEGER_DOT"
+                    }
+                    val displayName = when {
+                        autoPath && index == 0 -> "AUTO (Produktionspfad)"
+                        autoPath -> "AUTO (Wiederholung)"
+                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV &&
+                            index == 2 -> "Basis-DMMV"
+                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV ->
+                            "Basis-DMMV (Wiederholung)"
+                        index == 1 -> "MMVQ Integer-Dot (erzwungen)"
                         else -> "MMVQ Integer-Dot (Wiederholung)"
                     }
                     _benchmarkReport.value = "Q4_K-Kerneltest ${index + 1}/${profiles.size}: $displayName…"
@@ -445,12 +454,68 @@ abstract class VulkanDiagnosticsViewModel(
                     val observedKernelPaths = pathEvidence.mapNotNull { line ->
                         Regex("selected=([^,]+)").find(line)?.groupValues?.getOrNull(1)
                     }.toSet()
-                    val expectedKernelPath = if (baseDmmv) "BASE_TYPE_MMV" else "MMVQ_INTEGER_DOT"
-                    if (observedKernelPaths != setOf(expectedKernelPath)) {
+                    val observedReasons = pathEvidence.mapNotNull { line ->
+                        Regex("reason=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    val observedQuantizeY = pathEvidence.mapNotNull { line ->
+                        Regex("quantizeY=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    val observedSourceTypes = pathEvidence.mapNotNull { line ->
+                        Regex("src1Type=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    val observedYKernelTypes = pathEvidence.mapNotNull { line ->
+                        Regex("yKernelType=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    if (observedKernelPaths.size != 1) {
                         throw IllegalStateException(
-                            "Q4_K-Kernelpfad nicht bestätigt: erwartet=$expectedKernelPath, " +
-                                "beobachtet=${observedKernelPaths.ifEmpty { setOf("keine native Pfadmeldung") }.joinToString()} " +
+                            "Q4_K-Kernelpfad nicht eindeutig: beobachtet=${observedKernelPaths.ifEmpty { setOf("keine native Pfadmeldung") }.joinToString()} " +
+                                "(nativeRunId=$nativeRunId)."
+                        )
+                    }
+                    val selectedKernelPath = observedKernelPaths.single()
+                    val expectedKernelPath = when {
+                        baseDmmv -> "BASE_TYPE_MMV"
+                        autoPath -> selectedKernelPath // AUTO is evidence-driven and may legitimately choose either path.
+                        else -> "MMVQ_INTEGER_DOT"
+                    }
+                    if (selectedKernelPath != expectedKernelPath) {
+                        throw IllegalStateException(
+                            "Q4_K-Kernelpfad nicht bestätigt: erwartet=$expectedKernelPath, beobachtet=$selectedKernelPath " +
                                 "(nativeRunId=$nativeRunId). Der Lauf wird nicht als gültiger A/B-Wert gewertet."
+                        )
+                    }
+                    if (observedReasons.size != 1 || observedQuantizeY.size != 1 ||
+                        observedSourceTypes.size != 1 || observedYKernelTypes.size != 1
+                    ) {
+                        throw IllegalStateException(
+                            "Q4_K-Dispatch-Metadaten fehlen oder sind mehrdeutig: reason=$observedReasons," +
+                                "quantizeY=$observedQuantizeY,src1Type=$observedSourceTypes,yKernelType=$observedYKernelTypes"
+                        )
+                    }
+                    val selectedReason = observedReasons.single()
+                    val expectedReason = when {
+                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE ->
+                            "explicit_mmvq_override"
+                        baseDmmv -> "explicit_base_override"
+                        selectedKernelPath == "MMVQ_INTEGER_DOT" -> "intDot_q4k_batch1"
+                        else -> null
+                    }
+                    if (expectedReason != null && selectedReason != expectedReason) {
+                        throw IllegalStateException(
+                            "Q4_K-Dispatchgrund weicht ab: erwartet=$expectedReason, beobachtet=$selectedReason"
+                        )
+                    }
+                    val expectedQuantizeY = if (selectedKernelPath == "MMVQ_INTEGER_DOT") "1" else "0"
+                    if (observedQuantizeY.single() != expectedQuantizeY) {
+                        throw IllegalStateException(
+                            "Q4_K quantizeY passt nicht zum Kernelpfad $selectedKernelPath: $observedQuantizeY"
+                        )
+                    }
+                    if (selectedKernelPath == "MMVQ_INTEGER_DOT" &&
+                        (observedSourceTypes.single() != "f32" || observedYKernelTypes.single() != "q8_1")
+                    ) {
+                        throw IllegalStateException(
+                            "MMVQ-Integer-Dot lief nicht über F32→Q8_1: src1Type=$observedSourceTypes,yKernelType=$observedYKernelTypes"
                         )
                     }
                     if (measured.measuredTokens < 8) {
@@ -462,10 +527,15 @@ abstract class VulkanDiagnosticsViewModel(
                     val measuredSpeed = measured.measuredTokensPerSecond
                     val reportLine = String.format(
                         java.util.Locale.US,
-                        "%s: gpuLayersRequested=%d, modelLayers=%d, load=%dms, promptTokens=%d, prefillMs=%s, " +
+                        "%s: selected=%s,reason=%s,quantizeY=%s,src1=%s,yKernel=%s, gpuLayersRequested=%d, modelLayers=%d, load=%dms, promptTokens=%d, prefillMs=%s, " +
                             "TTFT=%s ms, measuredTokens=%d, measuredWallMs=%s, decode=%.3f tok/s, " +
                             "native=%.3f tok/s, generationMs=%d, finish=%s",
                         displayName,
+                        selectedKernelPath,
+                        selectedReason,
+                        observedQuantizeY.single(),
+                        observedSourceTypes.single(),
+                        observedYKernelTypes.single(),
                         profileConfig.gpuLayers,
                         totalLayers,
                         loadMs,
@@ -496,6 +566,8 @@ abstract class VulkanDiagnosticsViewModel(
                             "finishReason=${measured.result.finishReason.name}," +
                             "nativeRunId=$nativeRunId,nativePathVerified=true," +
                             "observedKernelPaths=${observedKernelPaths.joinToString("|")}," +
+                            "observedReasons=${observedReasons.joinToString("|")},quantizeY=${observedQuantizeY.single()}," +
+                            "src1Type=${observedSourceTypes.single()},yKernelType=${observedYKernelTypes.single()}," +
                             "context=${profileConfig.contextSize},batch=${profileConfig.batchSize}," +
                             "threads=${profileConfig.threads},batchThreads=${profileConfig.effectiveBatchThreads}," +
                             "microBatch=${profileConfig.effectiveMicroBatchSize},backend=${loaded.activeBackend}"
