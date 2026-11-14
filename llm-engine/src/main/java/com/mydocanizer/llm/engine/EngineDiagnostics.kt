@@ -101,120 +101,6 @@ object EngineDiagnostics {
 
 
 
-    private data class NativeTokenStepMetric(
-        val pid: String,
-        val runId: String,
-        val backend: String,
-        val index: Int,
-        val sampleUs: Long,
-        val decodeUs: Long,
-        val decodeSubmitUs: Long,
-        val backendSyncWaitUs: Long,
-        val usedLegacyGpuSyncWaitLabel: Boolean,
-        val pieceUs: Long,
-        val totalUs: Long
-    )
-
-    private data class KotlinTokenStepMetric(
-        val pid: String,
-        val runId: String,
-        val backend: String,
-        val index: Int,
-        val jniWallUs: Long
-    )
-
-    private data class VulkanOperationSample(
-        val pid: String,
-        val runId: String,
-        val snapshot: String,
-        val operation: String,
-        val sampleCount: Int,
-        val averageUs: Double,
-        val totalUs: Double,
-        val gflops: Double?
-    )
-
-    /**
-     * Only metrics with an explicit runId are eligible for percentile aggregation.
-     * Older files did not carry a request identity and may contain several backends
-     * or inference runs; mixing those samples would produce misleading percentiles.
-     */
-    private fun nativeTokenStepMetric(line: String): NativeTokenStepMetric? {
-        if (!line.contains("TOKEN_STEP_METRIC")) return null
-        val currentSyncField = field(line, "backendSyncWaitUs")
-        val legacyGpuSyncField = if (currentSyncField == null) field(line, "gpuSyncWaitUs") else null
-        return NativeTokenStepMetric(
-            pid = field(line, "pid") ?: return null,
-            runId = field(line, "runId") ?: return null,
-            backend = field(line, "backend") ?: return null,
-            index = field(line, "index")?.toIntOrNull() ?: return null,
-            sampleUs = field(line, "sampleUs")?.toLongOrNull() ?: return null,
-            decodeUs = field(line, "decodeUs")?.toLongOrNull() ?: return null,
-            decodeSubmitUs = field(line, "decodeSubmitUs")?.toLongOrNull() ?: return null,
-            backendSyncWaitUs = (currentSyncField ?: legacyGpuSyncField)?.toLongOrNull() ?: return null,
-            usedLegacyGpuSyncWaitLabel = currentSyncField == null && legacyGpuSyncField != null,
-            pieceUs = field(line, "pieceUs")?.toLongOrNull() ?: return null,
-            totalUs = field(line, "totalUs")?.toLongOrNull() ?: return null
-        )
-    }
-
-    private fun kotlinTokenStepMetric(line: String): KotlinTokenStepMetric? {
-        if (!line.contains("TOKEN_STEP_METRIC") || line.contains("[NATIVE]")) return null
-        return KotlinTokenStepMetric(
-            pid = field(line, "pid") ?: return null,
-            runId = field(line, "runId") ?: return null,
-            backend = field(line, "backend") ?: return null,
-            index = field(line, "nativeStep")?.toIntOrNull() ?: return null,
-            jniWallUs = field(line, "jniWallUs")?.toLongOrNull() ?: return null
-        )
-    }
-
-    private fun vulkanOperationSample(line: String): VulkanOperationSample? {
-        if (!line.contains("LOCAL_LLM_VULKAN_OP_TIMING - ")) return null
-        return VulkanOperationSample(
-            pid = field(line, "pid") ?: return null,
-            runId = field(line, "runId") ?: return null,
-            snapshot = field(line, "snapshot") ?: return null,
-            operation = field(line, "op") ?: return null,
-            sampleCount = field(line, "samples")?.toIntOrNull()?.takeIf { it > 0 } ?: return null,
-            averageUs = field(line, "avgUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
-            totalUs = field(line, "totalUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
-            gflops = field(line, "gflops")?.toDoubleOrNull()?.takeIf { it >= 0.0 }
-        )
-    }
-
-    private fun doubleTimingSummary(name: String, values: List<Double>): String {
-        if (values.isEmpty()) return "$name=n/a"
-        val sorted = values.sorted()
-        return "$name p50=${String.format(Locale.US, "%.3f", percentileDouble(sorted, 0.50))}us " +
-            "p90=${String.format(Locale.US, "%.3f", percentileDouble(sorted, 0.90))}us " +
-            "max=${String.format(Locale.US, "%.3f", sorted.last())}us"
-    }
-
-    private fun percentile(values: List<Long>, fraction: Double): Long? {
-        if (values.isEmpty()) return null
-        val sorted = values.sorted()
-        val boundedFraction = fraction.coerceIn(0.0, 1.0)
-        val rank = sorted.lastIndex * boundedFraction
-        val index = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
-        return sorted[index]
-    }
-
-    private fun timingSummary(name: String, values: List<Long>): String {
-        if (values.isEmpty()) return "${name}=n/a"
-        return "${name} p50=${percentile(values, 0.50)}us p90=${percentile(values, 0.90)}us max=${values.maxOrNull()}us"
-    }
-
-    private fun percentileDouble(values: List<Double>, fraction: Double): Double {
-        if (values.isEmpty()) return 0.0
-        val sorted = values.sorted()
-        val rank = sorted.lastIndex * fraction.coerceIn(0.0, 1.0)
-        val lowerIndex = kotlin.math.floor(rank).toInt().coerceIn(0, sorted.lastIndex)
-        val upperIndex = kotlin.math.ceil(rank).toInt().coerceIn(0, sorted.lastIndex)
-        val fractionBetween = rank - lowerIndex
-        return sorted[lowerIndex] + (sorted[upperIndex] - sorted[lowerIndex]) * fractionBetween
-    }
-
     private data class ResourceSample(
         val line: String,
         val timestamp: String,
@@ -236,7 +122,7 @@ object EngineDiagnostics {
     private const val MAX_MEMORY_TIMELINE_LINES = 16
     private const val MAX_VULKAN_PROFILE_SNAPSHOTS = 12
 
-    private fun field(line: String, key: String): String? {
+    internal fun field(line: String, key: String): String? {
         val marker = "$key="
         val start = line.indexOf(marker)
         if (start < 0) return null
@@ -463,9 +349,9 @@ object EngineDiagnostics {
             nativeKeywords.any(upper::contains)
         }
         val nativeTokenMetricLines = nativeLines.filter { it.contains("TOKEN_STEP_METRIC") }
-        val nativeTokenMetrics = nativeTokenMetricLines.mapNotNull(::nativeTokenStepMetric)
+        val nativeTokenMetrics = nativeTokenMetricLines.mapNotNull { EngineDiagnosticsMetrics.nativeTokenStepMetric(it) }
         val legacyNativeMetricCount = nativeTokenMetricLines.size - nativeTokenMetrics.size
-        val kotlinTokenMetrics = kotlinLines.mapNotNull(::kotlinTokenStepMetric)
+        val kotlinTokenMetrics = kotlinLines.mapNotNull { EngineDiagnosticsMetrics.kotlinTokenStepMetric(it) }
         // These two runtime facts are acceptance-critical and must never be lost
         // behind the verbose token/RAM sections in the 16 KiB compact export:
         //  - ggml_vulkan's live driver capability (especially "int dot")
@@ -528,7 +414,7 @@ object EngineDiagnostics {
         // The upstream Vulkan profiler emits one timestamp-query row per operator.
         // Keep only the newest snapshots, then report per-op p50/p90 instead of
         // dumping hundreds of raw lines into the compact export.
-        val allVulkanOperationSamples = nativeLines.mapNotNull(::vulkanOperationSample)
+        val allVulkanOperationSamples = nativeLines.mapNotNull { EngineDiagnosticsMetrics.vulkanOperationSample(it) }
         // Retain the newest snapshots independently for each process/run pair.
         // Otherwise one later benchmark run would evict the earlier run before
         // the per-run grouping below has a chance to compare them.
@@ -567,7 +453,7 @@ object EngineDiagnostics {
                             " gpuPerGraphUs=${String.format(Locale.US, "%.3f", perGraphTotalUs)}" +
                             " gpuSumUs=${String.format(Locale.US, "%.3f", summedUs)}" +
                             (if (gflops.isNotEmpty()) {
-                                " gflops_p50=${String.format(Locale.US, "%.3f", percentileDouble(gflops, 0.50))}"
+                                " gflops_p50=${String.format(Locale.US, "%.3f", EngineDiagnosticsMetrics.percentileDouble(gflops, 0.50))}"
                             } else "")
                     )
                 }
@@ -589,12 +475,12 @@ object EngineDiagnostics {
                     .forEach { (_, metrics) ->
                         val first = metrics.first()
                         appendLine("pid=${first.pid} backend=${first.backend} runId=${first.runId} samples=${metrics.size}")
-                        appendLine(timingSummary("sample", metrics.map { it.sampleUs }))
-                        appendLine(timingSummary("decode", metrics.map { it.decodeUs }))
-                        appendLine(timingSummary("decodeSubmit", metrics.map { it.decodeSubmitUs }))
-                        appendLine(timingSummary("backendSyncWait", metrics.map { it.backendSyncWaitUs }))
-                        appendLine(timingSummary("tokenPiece", metrics.map { it.pieceUs }))
-                        appendLine(timingSummary("nativeStep", metrics.map { it.totalUs }))
+                        appendLine(EngineDiagnosticsMetrics.timingSummary("sample", metrics.map { it.sampleUs }))
+                        appendLine(EngineDiagnosticsMetrics.timingSummary("decode", metrics.map { it.decodeUs }))
+                        appendLine(EngineDiagnosticsMetrics.timingSummary("decodeSubmit", metrics.map { it.decodeSubmitUs }))
+                        appendLine(EngineDiagnosticsMetrics.timingSummary("backendSyncWait", metrics.map { it.backendSyncWaitUs }))
+                        appendLine(EngineDiagnosticsMetrics.timingSummary("tokenPiece", metrics.map { it.pieceUs }))
+                        appendLine(EngineDiagnosticsMetrics.timingSummary("nativeStep", metrics.map { it.totalUs }))
                         appendLine("Token-Schritte (index/sampleUs/decodeUs/submitUs/backendSyncWaitUs/pieceUs/totalUs):")
                         val orderedMetrics = metrics.sortedBy { it.index }
                         val representativeMetrics = if (orderedMetrics.size <= 8) {
@@ -628,7 +514,7 @@ object EngineDiagnostics {
                     .forEach { (_, metrics) ->
                         val first = metrics.first()
                         appendLine("pid=${first.pid} backend=${first.backend} runId=${first.runId} samples=${metrics.size}")
-                        appendLine(timingSummary("jniWall", metrics.map { it.jniWallUs }))
+                        appendLine(EngineDiagnosticsMetrics.timingSummary("jniWall", metrics.map { it.jniWallUs }))
                         val orderedMetrics = metrics.sortedBy { it.index }
                         val representativeMetrics = if (orderedMetrics.size <= 8) {
                             orderedMetrics
