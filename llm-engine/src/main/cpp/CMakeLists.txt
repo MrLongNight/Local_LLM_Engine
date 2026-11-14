@@ -995,6 +995,48 @@ void vk_perf_logger::print_timings(bool force) {
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
+    # Guard the Q4_K batch-1 selection in the exact upstream decode function.
+    # A mere presence check is insufficient: a future upstream change could move
+    # the selector outside this function, after pipeline lookup, or after fallback.
+    set(_q4k_decode_function_start_anchor "static void ggml_vk_mul_mat_vec_q_f16(")
+    set(_q4k_decode_function_end_anchor "static void ggml_vk_mul_mat_vec_id_q_f16(")
+    string(FIND "${_vulkan_contents}" "${_q4k_decode_function_start_anchor}" _q4k_decode_function_start)
+    string(FIND "${_vulkan_contents}" "${_q4k_decode_function_end_anchor}" _q4k_decode_function_end)
+    if(_q4k_decode_function_start LESS 0 OR
+       _q4k_decode_function_end LESS 0 OR
+       _q4k_decode_function_end LESS_EQUAL _q4k_decode_function_start)
+        message(FATAL_ERROR "LocalLLM: Q4_K decode function boundary changed; review the batch-1 overlay.")
+    endif()
+    math(EXPR _q4k_decode_function_length "${_q4k_decode_function_end} - ${_q4k_decode_function_start}")
+    string(SUBSTRING "${_vulkan_contents}" ${_q4k_decode_function_start} ${_q4k_decode_function_length} _q4k_decode_function_contents)
+
+    string(FIND "${_q4k_decode_function_contents}" "local_llm_q4k_integer_dot_batch1" _q4k_selector_position)
+    string(FIND "${_q4k_decode_function_contents}"
+        "vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;"
+        _q4k_q8_pipeline_position)
+    string(FIND "${_q4k_decode_function_contents}"
+        "local_llm_q4k_decode_reason = \"q8_1_pipeline_unavailable_fallback\";"
+        _q4k_fallback_reason_position)
+    string(FIND "${_q4k_decode_function_contents}" "selected_path = quantize_y" _q4k_selected_log_position)
+    if(_q4k_selector_position LESS 0 OR
+       _q4k_q8_pipeline_position LESS 0 OR
+       _q4k_fallback_reason_position LESS 0 OR
+       _q4k_selected_log_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: Q4_K selector, Q8_1 pipeline, fallback or runtime evidence left ggml_vk_mul_mat_vec_q_f16.")
+    endif()
+    if(_q4k_selector_position GREATER_EQUAL _q4k_q8_pipeline_position OR
+       _q4k_q8_pipeline_position GREATER_EQUAL _q4k_fallback_reason_position OR
+       _q4k_fallback_reason_position GREATER_EQUAL _q4k_selected_log_position)
+        message(FATAL_ERROR "LocalLLM: Q4_K selector/pipeline/fallback/runtime-log order changed; refusing an unverified Vulkan overlay.")
+    endif()
+    math(EXPR _q4k_after_fallback_position "${_q4k_fallback_reason_position} + 1")
+    string(SUBSTRING "${_q4k_decode_function_contents}" ${_q4k_after_fallback_position} -1 _q4k_fallback_tail)
+    string(FIND "${_q4k_fallback_tail}" "quantize_y = false;" _q4k_fallback_disable_position)
+    if(_q4k_fallback_disable_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: Q4_K missing-pipeline fallback no longer disables Q8_1 quantization.")
+    endif()
+    message(STATUS "LocalLLM: verified Q4_K decode selector -> Q8_1 pipeline -> explicit fallback -> runtime path evidence")
+
     set(LOCAL_LLM_PATCHED_VULKAN_CPP "${_patched_cpp}" PARENT_SCOPE)
 
     # Current upstream only uses this package lookup as a header-package
