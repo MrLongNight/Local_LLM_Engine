@@ -46,6 +46,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [ ] Trace the pinned upstream Vulkan decode selection and the generated overlay end to end. Confirm the condition is evaluated at the correct point and cannot be undone by later upstream logic.
 - [ ] On integer-dot-capable Q4_K batch-1 decode, require runtime evidence `selected=MMVQ_INTEGER_DOT`, `reason=intDot_q4k_batch1`, `quantizeY=1`, `yKernelType=q8_1`.
 - [x] Validate Q4_K×Q8_1 pipeline-unavailable fallback evidence in the Vulkan A/B runner: accept only an explicitly reported BASE execution with integer-dot/Q8_1 eligibility, `quantizeY=0` and a non-Q8_1 fallback kernel; reject contradictory or falsely labeled MMVQ evidence. Runtime/device proof that the pinned driver actually exercises this fallback remains open.
+- [x] Extract the fallback evidence predicate into `Q4kPipelineFallbackPolicy` and add JVM regression cases for valid fallback, missing integer-dot/Q8_1 eligibility, contradictory quantization/kernel evidence, wrong selected path and normal non-fallback dispatch.
 - [ ] Confirm Q4_K prefill, batch>1, Q5_K/Q6_K, CPU and the explicit A/B base override retain their intended paths.
 - [ ] Add/strengthen deterministic source-overlay and runtime-path tests for selection, fallback and override. Keep upstream llama.cpp untouched.
 - [ ] Verify actual dispatch and output correctness on nubia Z2462N / Mali-G57; correlate native run ID with the benchmark sample.
