@@ -79,7 +79,12 @@ jobs:
             llm-engine/src/test/cpp/utf8_conversion_utils_test.cpp \
             -o "$RUNNER_TEMP/utf8-conversion-utils-test"
           "$RUNNER_TEMP/utf8-conversion-utils-test"
-          echo "Host prompt-cache, truncation and UTF-16 conversion tests passed (also run after JVM test failures)."
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/gdn_fusion_policy_test.cpp \
+            -o "$RUNNER_TEMP/gdn-fusion-policy-test"
+          "$RUNNER_TEMP/gdn-fusion-policy-test"
+          echo "Host prompt-cache, UTF-16 conversion and Qwen3.5 GDN policy tests passed (also run after JVM test failures)."
 
       - name: Print failed JUnit assertions
         if: always()

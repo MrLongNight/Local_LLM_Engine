@@ -30,6 +30,7 @@
 #include "sampling.h"
 #include "prompt_cache_utils.h"
 #include "utf8_conversion_utils.h"
+#include "gdn_fusion_policy.h"
 
 // Internal llama.cpp scheduler metric bridge compiled into the pinned llama target.
 extern "C" int local_llm_get_graph_splits(struct llama_context* context);
@@ -105,15 +106,9 @@ static std::atomic<int> g_gdn_policy_override{0};
 // 3=AR fused/CH unfused, 4=AR unfused/CH fused.
 // Return bit 0 = fused AR, bit 1 = fused CH.
 extern "C" int local_llm_gdn_policy_for_arch(int is_qwen35_arch) {
-    const int policy = g_gdn_policy_override.load(std::memory_order_relaxed);
-    switch (policy) {
-        case 1: return 3;
-        case 2: return 0;
-        case 3: return 1;
-        case 4: return 2;
-        case 0:
-        default: return is_qwen35_arch ? 0 : 3;
-    }
+    return local_llm::gdn_fusion_flags_for_arch(
+        g_gdn_policy_override.load(std::memory_order_relaxed),
+        is_qwen35_arch != 0);
 }
 
 static void configure_local_sampling(
