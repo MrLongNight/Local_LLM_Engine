@@ -1,6 +1,6 @@
 # EngineViewModel – Struktur-Analyse vor Refactoring
 
-**Status:** SCHRITT 1 abgeschlossen – Analyse-only; Freigabe für Extraktion ausstehend  
+**Status:** Refactoring läuft – Chat-Extraktion umgesetzt; Model-Management-Extraktion auf main; aktuelle CI für HEAD a6bcd532 läuft  
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
 **Analyse-Commit:** `8947f76bf48e6553e8d62a3d8f93d19d8fb49645`  
@@ -162,10 +162,52 @@ Die folgende Zuordnung ist ein Vorschlag für die spätere Extraktion. Sie ände
 - Echte Geräte-Funktionstests werden **nicht** durch diesen Arbeitsablauf ausgeführt. Die manuellen Geräte-/Funktionsprüfungen erfolgen durch den Nutzer; der abschließende Smoke-Test-Plan benennt die Screens und Abläufe.
 - Vorher-/Nachher-LOC, verschobene Zeilen, Build/Test-Ergebnisse und manuelle Smoke-Test-Checkliste in dieser Datei ergänzen.
 
-## 6. Freigabepunkt
 
-**SCHRITT 1 – ANALYSE ABGESCHLOSSEN.**
+## 6. Laufendes Refactoring – Status 2026-11-14
 
-Es wurden keine Codeänderungen vorgenommen. Die Datei dokumentiert die vollständige Funktions-/Property-Zuordnung und die erkannten Kopplungen.
+**Freigabe:** Der Nutzer hat die Cluster-Extraktion mit „Let's go“ freigegeben. Echte Geräte-Funktionstests führt ausschließlich der Nutzer selbst aus.
 
-**STOPP:** Keine neuen ViewModels anlegen, keine Blöcke verschieben und keine UI-Bindings anpassen, bis der Nutzer die Cluster-Zuordnung und den ersten Extraktionsschritt ausdrücklich freigegeben hat.
+### 6.1 Aktueller main-Stand
+
+- Aktueller HEAD bei dieser Aktualisierung: a6bcd532be45bc7d08381ed802c388dd6219cf4e.
+- EngineViewModel.kt: 1.750 Zeilen, 94.792 Bytes (vorher 2.156 Zeilen, 113.109 Bytes).
+- ChatViewModel.kt: neu, 201 Zeilen, 8.862 Bytes.
+- ModelManagementViewModel.kt: neu, 276 Zeilen, 11.943 Bytes.
+- Gegenüber dem Analyse-Stand wurden ausschließlich diese drei Kotlin-Dateien geändert: ChatViewModel hinzugefügt, ModelManagementViewModel hinzugefügt, EngineViewModel angepasst.
+- Noch nicht extrahiert: Model Import, Settings / Preferences und Benchmark / Diagnostics.
+
+### 6.2 Chat / Conversation – Code- und CI-Status
+
+Commits auf main:
+- b0d96c380914445d36f790b7da3dc420f6caacbe – Chat-Block extrahiert.
+- 65a3efaae6fb56b15ad90bd78bef22f05efe7912 – EngineViewModel an ChatViewModel-Basis verdrahtet.
+- 7e6a78b6509355062ee2aeeb0a847fca7399c222 – fehlende geschützte State-Abhängigkeiten ergänzt.
+- 4d5badc16206b7e65b81a4bd23f17838f43a7aee – bestehende Engine-States mit ChatViewModel verdrahtet.
+
+Verifikation:
+- Exakt verschobene Chat-Blöcke wurden bytegenau im neuen ChatViewModel wiedergefunden; keine Duplikate der verschobenen Methoden/Properties in EngineViewModel.
+- Unit-Tests für Commit 4d5badc: GitHub Actions Run 43556039525 erfolgreich; :llm-engine:testDebugUnitTest, :app:testDebugUnitTest und nativer Host-Prompt-Cache-/Truncation-Test erfolgreich.
+- APK-Workflow Run 43556039527: Gradle-Schritt „Build APK and process-isolation test APK“ erfolgreich; APK-Existenz, Instrumentation-Test-APK, Manifest und Native-Debug-Flags erfolgreich geprüft; beide APK-Artefakte hochgeladen. Der nachfolgende Android-Emulator-Prozessisolationstest wurde abgebrochen, daher ist der Gesamt-Workflow als cancelled markiert. APK-Build selbst war erfolgreich; Emulator-Instrumentation ist nicht als bestanden belegt.
+- Die erste CI-Runde hatte Compilerfehler wegen nicht sichtbarer State-Abhängigkeiten. Diese wurden mit den oben genannten Wiring-Commits behoben; die nachfolgende JVM-Testausführung war grün.
+
+### 6.3 Model Management – Code- und CI-Status
+
+Commits auf main:
+- f6e8666eff86c5c2916cc95814b12f3aa4c315ec – ModelManagementViewModel angelegt und Model-Management-Code verschoben.
+- edf252984b99381c70632ee581d788168b99f64f – EngineViewModel an ModelManagementViewModel delegiert.
+- a6bcd532be45bc7d08381ed802c388dd6219cf4e – Engine-Config-Abhängigkeit verdrahtet.
+
+Aktuelle CI für HEAD a6bcd532:
+- Unit Tests: Run 43556762677, Status in_progress bei letzter Abfrage.
+- Android APK Build: Run 43556762673, Status in_progress bei letzter Abfrage.
+- Daher sind die Model-Management-Änderungen noch nicht CI-verifiziert. Abgebrochene ältere Läufe auf Zwischen-Commits gelten nicht als Fehlernachweis und nicht als erfolgreiche Verifikation.
+
+### 6.4 Nächste Schritte und Verifikationsregeln
+
+1. Zuerst die beiden laufenden CI-Runs für HEAD a6bcd532 abschließen und dokumentieren. Bei Fehlern nur den konkret belegten Fehler beheben und neue CI abwarten.
+2. Erst nach erfolgreicher JVM-Test- und APK-Build-Verifikation mit dem nächsten Cluster beginnen.
+3. Nach jedem Cluster die verschobenen Blöcke, Engine-/ViewModel-Wiring, Dateigrößen, Commit-SHAs und GitHub-Actions-Ergebnisse hier aktualisieren.
+4. Emulator-/CI-Instrumentation separat von echten Geräte-Funktionstests ausweisen. Echte Geräte-Funktionstests werden vom Nutzer durchgeführt und nicht durch diesen Arbeitsablauf behauptet.
+5. Abschlussprüfung nach allen Clustern: assembleDebug und test in CI; finaler Diff muss aus reinen Verschiebungen plus dokumentierter minimaler Verdrahtung bestehen. Keine neuen Tests oder Dependencies.
+
+**Wichtig:** Statusangaben in dieser Datei sind ein fortlaufendes Protokoll und müssen nach jedem Cluster sowie bei jedem wesentlichen CI-Ergebnis aktualisiert werden.
