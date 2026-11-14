@@ -777,6 +777,54 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun eagerReconnectReloadsSameModelAndAllowsFollowUpInference() = runBlocking {
+        val fakeService = FakeInferenceService()
+        val modelFile = File.createTempFile("reconnect_same_model", ".gguf").apply {
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46) + ByteArray(96))
+            deleteOnExit()
+        }
+        val config = EngineConfig(reloadAfterAbort = ReloadAfterAbort.EAGER)
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService
+        )
+
+        try {
+            val initialLoad = client.loadModel(ModelSource.FilePath(modelFile.absolutePath), config)
+            assertTrue("Initial model load must succeed", initialLoad.isSuccess)
+            assertEquals(1, fakeService.modelLoadCalls.get())
+
+            // Simulate the old isolated process dying and Binder reconnecting to a
+            // replacement process. EAGER recovery must reload the remembered source.
+            fakeService.isKilled.set(true)
+            assertEquals(0, fakeService.processId)
+            fakeService.currentProcessId.set(22222)
+            fakeService.isKilled.set(false)
+
+            val recovered = client.restoreLastModelAfterReconnect(fakeService)
+            assertNotNull("The remembered model must be restored after reconnect", recovered)
+            assertTrue("Same-model reconnect reload must succeed", recovered!!.isSuccess)
+            assertEquals(2, fakeService.modelLoadCalls.get())
+            assertEquals(modelFile.absolutePath, fakeService.loadedModel.get())
+            assertEquals(modelFile.name, client.currentModel.value?.name)
+
+            val followUpEvents = withTimeout(1_000L) {
+                client.streamChat(InferenceRequest.single("after reconnect")).toList()
+            }
+            assertTrue(
+                "A follow-up inference must complete after same-model recovery",
+                followUpEvents.any { it is InferenceEvent.Completed }
+            )
+            assertTrue(
+                "Recovery must leave the engine out of the inferring state",
+                client.state.value !is com.mydocanizer.llm.engine.EngineState.Inferring
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun testMockIpcClientModelLoadingAndChat() = runBlocking {
         val fakeService = FakeInferenceService()
         val tempFile = File.createTempFile("test_model", ".gguf").apply {
