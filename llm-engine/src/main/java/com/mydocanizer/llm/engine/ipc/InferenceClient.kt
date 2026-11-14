@@ -563,25 +563,42 @@ internal class InferenceClient(
             // if any operation between opening and the handoff fails.
             val openedDescriptor: ParcelFileDescriptor = when (source) {
                 is ModelSource.ContentUri -> {
-                    // SAF/FUSE is used only during import. Native inference receives a
-                    // regular file in filesDir/models, never the provider-backed descriptor.
-                    val file = ModelSourceResolver.resolveToFile(context, source) { importPercent ->
-                        val scaled = (importPercent.coerceIn(0, 100) * 20) / 100
-                        _modelLoadProgress.value = scaled
-                        _modelLoadProgressEvents.tryEmit(scaled)
+                    // Loading a selected model is not an import operation. Open the
+                    // provider descriptor in the client and transfer it through Binder;
+                    // the service validates seekability/mmap support before native load.
+                    val uri = Uri.parse(source.uriString)
+                    require(uri.scheme == "content") {
+                        "SAF model source must use a content:// URI"
                     }
-                    modelPath = file.absolutePath
-                    displayName = source.displayName
-                        ?: file.name.substringAfter('-', missingDelimiterValue = file.name)
-                            .takeIf { file.name.indexOf('-') == 64 }
-                        ?: file.name
-                    recoverySource = ModelSource.FilePath(file.absolutePath)
+                    val queriedDisplayName = runCatching {
+                        context.contentResolver.query(
+                            uri,
+                            arrayOf(OpenableColumns.DISPLAY_NAME),
+                            null,
+                            null,
+                            null
+                        )?.use { cursor ->
+                            val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (cursor.moveToFirst() && column >= 0) cursor.getString(column) else null
+                        }
+                    }.getOrNull()
+                    displayName = source.displayName?.takeIf { it.isNotBlank() }
+                        ?: queriedDisplayName?.takeIf { it.isNotBlank() }
+                        ?: Uri.decode(uri.lastPathSegment?.substringAfterLast('/') ?: "")
+                            .takeIf { it.isNotBlank() }
+                        ?: "selected-model.gguf"
+                    modelPath = "saf-direct:$displayName"
+                    recoverySource = source
+                    val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
+                        ?: throw IllegalArgumentException(
+                            "Der Dokumentanbieter konnte keinen lesbaren Dateideskriptor für das ausgewählte GGUF öffnen."
+                        )
                     EngineDiagnostics.info(
                         "ipc_client",
-                        "MODEL_SOURCE_IMPORTED_TO_PRIVATE_STORAGE",
-                        "source=SAF,displayName=$displayName,privatePath=${file.name},sizeBytes=${file.length()}"
+                        "MODEL_SOURCE_DIRECT_DESCRIPTOR",
+                        "source=SAF,displayName=$displayName,sizeBytes=${descriptor.statSize},copy=false"
                     )
-                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                    descriptor
                 }
                 else -> {
                     val file: File = ModelSourceResolver.resolveToFile(context, source)
@@ -611,7 +628,9 @@ internal class InferenceClient(
                         _modelLoadProgress.value = 100
                         _modelLoadProgressEvents.tryEmit(100)
                         val publicInfo = if (source is ModelSource.ContentUri) {
-                            modelInfo.copy(name = displayName, path = modelPath)
+                            // Keep the provider URI as the model identity for later
+                            // reloads/benchmarks; never expose the service-local fd path.
+                            modelInfo.copy(name = displayName, path = source.uriString)
                         } else {
                             modelInfo
                         }
@@ -638,9 +657,7 @@ internal class InferenceClient(
                 override fun onModelLoadProgress(progressPercent: Int) {
                     if (pendingModelLoad.get() !== pending) return
                     val nativePercent = progressPercent.coerceIn(0, 99)
-                    val percent = if (source is ModelSource.ContentUri) {
-                        20 + (nativePercent * 79 / 99)
-                    } else nativePercent
+                    val percent = nativePercent
                     _modelLoadProgress.value = percent
                     _modelLoadProgressEvents.tryEmit(percent)
                 }
