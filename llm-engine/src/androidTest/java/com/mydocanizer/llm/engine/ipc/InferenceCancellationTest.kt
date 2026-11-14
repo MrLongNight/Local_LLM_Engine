@@ -122,6 +122,21 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                 abortConfirmedLine != null
             )
 
+            val persistedLines = appDiagnosticsFile.readLines(Charsets.UTF_8)
+            val cooperativeCancelIndex = persistedLines.indexOfFirst { line ->
+                line.contains("[ipc_client] TIMEOUT_COOPERATIVE_CANCEL_SENT") &&
+                    line.contains("remotePid=$originalPid")
+            }
+            val hardAbortIndex = persistedLines.indexOfFirst { line ->
+                line.contains("[ipc_client] TIMEOUT_COOPERATIVE_CANCEL_ESCALATED") &&
+                    line.contains("killing original PID=$originalPid")
+            }
+            assertTrue(
+                "Cooperative cancellation must be sent to the original service before hard-abort escalation; " +
+                    "cooperativeIndex=$cooperativeCancelIndex, hardAbortIndex=$hardAbortIndex",
+                cooperativeCancelIndex >= 0 && hardAbortIndex > cooperativeCancelIndex
+            )
+
             val recoveryDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
             var recoveredPid = 0
             while (SystemClock.elapsedRealtime() < recoveryDeadline) {
