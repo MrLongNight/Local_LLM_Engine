@@ -35,47 +35,61 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [ ] Compare CPU and Vulkan outputs using the same GGUF, messages, template, context, sampler and generation limits. Separate backend numerical variation from malformed templates, invalid token IDs, premature EOS and state corruption.
 - [ ] Assert expected structure/markers, valid UTF-8, non-empty meaningful output, correct finish reason and no unexpected control/special-token leakage. Include multi-turn and repeated-turn cases.
 - [ ] Run correctness gates before changing performance defaults. Do not accept a speed improvement that fails output parity/correctness.
+- [ ] Investigate the 2026-11-14 compact acceptance result for LFM3 1.7B Q4_K_M: both the CPU reference and Vulkan candidate failed the synthetic expected-continuation check with `EXPECTED_OUTPUT_MISMATCH`. Because the CPU reference also failed, this run does not establish a Vulkan-only regression and its 5.51 vs 3.37 tok/s figures must not be treated as an accepted performance comparison. Determine whether the prompt/output expectation or model output is wrong without exposing response text in persistent diagnostics.
 
 **Acceptance:** Every intended model family passes repeatable output-correctness tests on CPU; Vulkan passes the same correctness contract on supported devices. Root causes and remaining unsupported combinations are explicit.
 
 ### P0-02 — Verify and correct the Mali-G57 Q4_K decode kernel path
 
-**Current source finding:** The Android Vulkan overlay selects the Q4_K batch-1 integer-dot path only when the pinned upstream Q8_1 input/layout/alignment/precision prerequisites are satisfied. It intentionally bypasses only `ggml_vk_should_use_mmvq()`'s shape heuristic; explicit base-DMMV override remains separate. This source-level correction is not yet proof that the target device actually dispatches the intended pipeline.
+**Current source finding:** The Android Vulkan overlay selects the Q4_K batch-1 integer-dot path only when the pinned upstream Q8_1 input/layout/alignment/precision prerequisites are satisfied. It intentionally bypasses only `ggml_vk_should_use_mmvq()`'s shape heuristic; explicit base-DMMV override remains separate. The latest device report now confirms that the target Mali-G57 actually dispatches this path.
+
+**Device evidence (2026-11-14):**
+- Mali-G57 reports `int dot=1`, `fp16=1`, `bf16=0`, warp size 16, shared memory 32 KiB and no matrix cores.
+- Runtime Q4_K decode log records `selected=MMVQ_INTEGER_DOT`, `reason=intDot_q4k_batch1`, `q8_1Eligible=1`, `quantizeY=1` and `yKernelType=q8_1`; prefill records `Q8_1_MATMUL`.
+- A six-run Q4_K path sweep on LFM3 1.7B Q4_K_M (20 measured tokens/run, context 2048, batch 128, 2 threads) recorded BASE_DMMV at 4.14 and 3.92 tok/s, MMVQ_INTEGER_DOT at 2.71 and 2.80 tok/s, and AUTO repeat at 3.65 tok/s. The runtime path was marked verified. In these runs MMVQ was about 40–48% slower than BASE_DMMV. This is a strong model/device-specific performance result, not yet output-correctness acceptance for all Q4_K models.
+- The LFM3 runtime load reported 25/25 model layers offloaded to Vulkan. Vulkan memory-budget extension support was unavailable, so the 7.78 GB heap value is a heap-size/free estimate, not a reliable driver-reported free budget.
 
 - [x] Compare the selector against pinned llama.cpp `a4d4f2f`; preserve Q8_1 input/layout/alignment/precision eligibility while bypassing only the upstream shape heuristic (`a0f1cee`). CMake now fails configuration if these guards disappear.
-- [ ] Trace the pinned upstream Vulkan decode selection and the generated overlay end to end. Confirm the condition is evaluated at the correct point and cannot be undone by later upstream logic.
-- [ ] On integer-dot-capable Q4_K batch-1 decode, require runtime evidence `selected=MMVQ_INTEGER_DOT`, `reason=intDot_q4k_batch1`, `quantizeY=1`, `yKernelType=q8_1`.
+- [x] On the target integer-dot-capable Mali-G57, capture runtime proof for Q4_K batch-1 `MMVQ_INTEGER_DOT` with `reason=intDot_q4k_batch1`, `quantizeY=1` and `yKernelType=q8_1`.
+- [x] Perform repeated, run-correlated Q4_K MMVQ-vs-BASE_DMMV throughput comparisons with actual dispatch verification; MMVQ is slower in the current LFM3 1.7B sweep. Keep the production default unchanged until correctness/output parity is proven.
 - [x] Validate Q4_K×Q8_1 pipeline-unavailable fallback evidence in the Vulkan A/B runner: accept only an explicitly reported BASE execution with integer-dot/Q8_1 eligibility, `quantizeY=0` and a non-Q8_1 fallback kernel; reject contradictory or falsely labeled MMVQ evidence. Runtime/device proof that the pinned driver actually exercises this fallback remains open.
 - [x] Extract the fallback evidence predicate into `Q4kPipelineFallbackPolicy` and add JVM regression cases for valid fallback, missing integer-dot/Q8_1 eligibility, contradictory quantization/kernel evidence, wrong selected path and normal non-fallback dispatch.
 - [x] Extend the generated Vulkan-overlay configure gate to require the explicit `q8_1_pipeline_unavailable_fallback` marker and verify that it is recorded before `quantize_y` is cleared; upstream `llama.cpp` remains untouched.
+- [ ] Trace the pinned upstream Vulkan decode selection and generated overlay end to end for later dispatches, confirming that no subsequent upstream logic changes the selected path.
 - [ ] Confirm Q4_K prefill, batch>1, Q5_K/Q6_K, CPU and the explicit A/B base override retain their intended paths.
 - [ ] Add/strengthen deterministic source-overlay and runtime-path tests for selection, fallback and override. Keep upstream llama.cpp untouched.
-- [ ] Verify actual dispatch and output correctness on nubia Z2462N / Mali-G57; correlate native run ID with the benchmark sample.
+- [ ] Repeat the kernel A/B on Qwen3-4B Q4_K_M and at least one additional Q4_K model with output-correctness evidence; determine whether the MMVQ regression is general or architecture/model-specific.
 
 **Acceptance:** The intended path is proven by actual runtime selection and correctness evidence, or the selector is corrected based on a reproducible failing case. Requested configuration or source-string matches alone do not count.
 
 ### P0-03 — Root-cause the Vulkan throughput and synchronization regression
 
-**Problem:** Current Mali-G57 measurements show Vulkan decode/prefill is not delivering the expected benefit and can be close to or slower than CPU. The source already contains more diagnosis and one Mali-specific wait-strategy change than the earlier checklist reflected. These are implementation facts, not proof that the change improves this device.
+**Problem:** Current Mali-G57 measurements show Vulkan decode/prefill is not delivering the expected benefit and can be close to or slower than CPU. The source already contains substantial diagnosis; the latest uploaded device report now supplies a strong synchronization bottleneck signal and a repeatable Q4_K kernel-path performance difference.
 
-**Implemented in source (not yet device-accepted):**
+**Measured device evidence (2026-11-14):**
+- Native samples for PID 10321 show CPU decode p50 around 181–185 ms with `backendSyncWait` p50 1 µs; Vulkan decode p50 around 354–361 ms with `backendSyncWait` p50 around 339–345 ms. Thus roughly 95–96% of the measured Vulkan decode envelope is inside `llama_synchronize()`, while the CPU synchronization wait is negligible.
+- Vulkan `decodeSubmit` p50 is around 15–16 ms in those samples; it does not account for the 339–345 ms synchronization envelope. This narrows the issue substantially, but `llama_synchronize()` still includes more than a pure fence wait: submission completion, fence waiting/polling and deferred copies can contribute.
+- The report confirms the Mali-G57 device feature line and 25/25 layer offload for the LFM3 1.7B run. One older graph snapshot records 72 Vulkan nodes, 0 CPU nodes and 2 unassigned nodes out of 74; this graph snapshot is not yet correlated to the newest Q4_K sweep run.
+- The Q4_K sweep provides measured evidence that MMVQ Integer-Dot is slower than BASE_DMMV in LFM3 1.7B. See P0-02 for the exact repeated throughput values.
+- The latest 23:03 CPU/Vulkan acceptance gate failed its expected-output check on both backends. Its 5.51 vs 3.37 tok/s figures are therefore not accepted as a controlled performance baseline.
+- The Vulkan GPU operation profiler was disabled in the reported Release runs; no per-operation GPU timestamps were present. The Vulkan memory-budget extension was not supported, so heap values are estimates.
+
+**Implemented in source (not yet fully device-accepted):**
 - [x] Add run-correlated scheduler graph-node accounting for CPU/Vulkan/other/unassigned backends, including GDN/SSM op classes. The generated `llama-context.cpp` overlay records distinct graph layouts.
 - [x] Preserve compact Vulkan capability output (FP16, integer-dot, subgroup and related device features) and query Vulkan memory heap/budget information.
 - [x] Add run-correlated Q4_K prefill/decode path evidence, including Q8_1 eligibility, `quantizeY`, selected kernel family and explicit pipeline-unavailable fallback reason.
 - [x] Separate prompt template/tokenization/prefill metrics from per-token sampling, decode-submit and `llama_synchronize()` envelope metrics. The sync envelope is explicitly not labeled as pure GPU execution.
 - [x] Add decode logits-readback map/copy/sync timing and opt-in per-operation GPU timestamp profiling. The GPU profiler is build/runtime opt-in and must remain separate from profiler-free throughput.
-- [x] Replace the upstream Mali vendor-ID fence busy-poll loop with blocking `waitForFences` in the generated Android overlay; retain upstream polling for non-Mali devices. This is a candidate fix only; no speedup or correctness acceptance is claimed until device A/B.
+- [x] Replace the upstream Mali vendor-ID fence busy-poll loop with blocking `waitForFences` in the generated Android overlay; retain upstream polling for non-Mali devices. This is a candidate fix only; the uploaded report does not isolate its own before/after effect.
+- [x] Add run-correlated Vulkan queue-submit and fence-wait timing callbacks to the generated overlay and native token-step metrics, covering both the normal Mali fence path and serialized submission wait path (`5c578fb`, `b2c339a`). New fields are `vkQueueSubmitUs` and `vkFenceWaitUs`; physical-device validation is still open.
 
 **Still open — evidence and remaining instrumentation:**
-- [ ] Establish a reproducible on-device baseline for the current pinned build and Qwen3-4B-Instruct Q4_K_M at fixed context/batch/microbatch/generation settings. Record CPU and Vulkan separately, profiler disabled, with warmup and thermal state recorded.
-- [ ] Split the existing `llama_synchronize()` envelope into queue-submit time, fence-wait time (including whether the Mali blocking path was taken), deferred host-copy time and other synchronization overhead. Correlate every sample to the inference run ID and token index.
-- [ ] Measure prompt prefill, first-token latency, steady-state decode and client/JNI wall time in the same controlled run; report distributions rather than one best sample.
-- [ ] Verify the logged Mali-G57 capabilities and memory budget on the target device, including integer-dot, fp16, subgroup features and extension support. Do not infer capability from a device label.
-- [ ] Verify Q4_K batch-1 MMVQ versus base DMMV using actual selected-path logs and identical output correctness. Determine whether the integer-dot path is slower, unavailable or incorrectly dispatched.
+- [ ] Establish a reproducible on-device CPU/Vulkan baseline for the current pinned build and Qwen3-4B-Instruct Q4_K_M at fixed context/batch/microbatch/generation settings. Require a passing correctness gate; record warmup and thermal state.
+- [ ] Run the new build on Mali-G57 and capture `vkQueueSubmitUs`, `vkFenceWaitUs`, `backendSyncWaitUs`, readback phases and token index for the same run. Decide whether fence wait explains the synchronization envelope or whether deferred copies/other synchronization dominate.
 - [ ] Validate the Mali blocking-fence change against the prior wait strategy on-device. Check CPU utilization, decode latency, thermal behavior, cancellation and repeated-run stability; revert or revise if it does not improve the controlled result.
-- [ ] Verify actual CPU/Vulkan graph node assignment and offloaded layers from the same benchmark run, then measure graphics/native memory before and after inference.
-- [ ] Inspect all synchronization paths in the pinned upstream revision, including serialized submissions and logits readback; ensure the instrumentation covers the path actually used by the target device.
-- [ ] Keep profiler-enabled diagnosis separate from profiler-free throughput. Do not change production defaults beyond a candidate explicitly scoped to Mali until controlled A/B results demonstrate both correctness and repeatable improvement.
+- [ ] Measure prompt prefill, first-token latency, steady-state decode and client/JNI wall time in the same controlled run; report distributions rather than one best sample.
+- [ ] Verify graph node assignment and actual offloaded layers with the same benchmark run ID, then measure graphics/native memory before and after inference.
+- [ ] Keep profiler-enabled diagnosis separate from profiler-free throughput. Do not change production defaults until controlled A/B results demonstrate both correctness and repeatable improvement.
 
 **Acceptance:** A measured root cause explains the regression. Any fix is backed by repeatable profiler-free on-device CPU/Vulkan measurements and unchanged output correctness; otherwise retain the safe behavior and document the unresolved driver/backend limit.
 
