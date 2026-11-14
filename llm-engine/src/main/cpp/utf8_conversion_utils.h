@@ -131,4 +131,12 @@ inline std::string normalize_utf8_incremental(
     return output;
 }
 
+// Finish a stream that cannot receive more token bytes. A retained suffix is a
+// valid but incomplete UTF-8 prefix, so represent it with one U+FFFD and clear it.
+inline std::string finalize_utf8_incremental(std::string& pending) {
+    if (pending.empty()) return {};
+    pending.clear();
+    return std::string("\\xEF\\xBF\\xBD", 3);
+}
+
 } // namespace local_llm
