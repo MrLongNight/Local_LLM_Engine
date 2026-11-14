@@ -15,8 +15,7 @@ Located in [`technical/`](technical/):
 
 Located in [`active-todos/`](active-todos/):
 
-- [`REFACTORING_STATUS.md`](active-todos/REFACTORING_STATUS.md) — the live status of the current UI/ViewModel refactoring, including exact code SHA and CI evidence.
-- [`TODO_CACHE_STRATEGY.md`](active-todos/TODO_CACHE_STRATEGY.md) — open investigation and implementation work for safe model-aware prompt/state caching.
+- [`MASTER_TODO.md`](active-todos/MASTER_TODO.md) — the only active, priority-sorted implementation queue for architecture, security, correctness, cleanup and downstream integration.
 
 ## Planning
 
@@ -24,6 +23,10 @@ Located in [`planning/`](planning/):
 
 - [`IMPLEMENTATION_PLAN.md`](planning/IMPLEMENTATION_PLAN.md) — overall engine implementation plan, technical decisions and dated historical CI/device snapshots.
 - [`INTEGRATION_MYDOCANIZER.md`](planning/INTEGRATION_MYDOCANIZER.md) — downstream integration plan for embedding `:llm-engine` in myDocAnizer-Mobile. This is a key planned consumer integration, not a statement that this repository is myDocAnizer-Mobile.
+
+## Completed implementation history
+
+- [`REFACTORING_COMPLETED.md`](history/REFACTORING_COMPLETED.md) — historical evidence for completed UI, Model Import and instrumentation test refactors.
 
 ## Refactoring analyses
 
