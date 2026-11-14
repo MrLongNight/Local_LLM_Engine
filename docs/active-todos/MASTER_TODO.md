@@ -74,11 +74,13 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 ### P0-05 — Correct selected-model loading and descriptor ownership
 
-- [ ] Trace normal single-model selection from Android picker through URI/descriptor acquisition, Binder transfer, service process and native GGUF open.
-- [ ] Prefer the original selected file and its original display name when a regular seekable descriptor can be safely mmap-loaded. Do not silently copy, rename or relocate a selected model.
-- [ ] Define exact descriptor ownership and close-once behavior for success, failure, cancellation, timeout and service death.
-- [ ] Keep managed private-storage copy/import as a separate explicit operation. If a provider cannot supply a suitable descriptor, explain why and require an explicit copy/import action.
-- [ ] Cover local storage and representative document/cloud providers with instrumentation, including unload/reload and follow-up inference.
+**Source audit:** The service already accepts and retains a Binder-transferred descriptor, validates regular-file/seek/mmap capability in `ModelSourceResolver`, and passes the service-local `/proc/self/fd/N` to JNI. The defect was in `InferenceClient.loadModelInternal()`: the `ContentUri` branch copied the document into private storage before Binder handoff, so ordinary single-file loading never reached the descriptor route.
+
+- [x] Replace the normal `ContentUri` load branch with `ContentResolver.openFileDescriptor(uri, "r")` and transfer that original descriptor through the existing Binder method.
+- [x] Keep the provider URI as the in-memory model identity/recovery source and use the provider display name; explicit bulk/model-library import remains a separate copy operation.
+- [x] Reject descriptors without a known size before the memory guard; show an explicit provider/mmap limitation and do not silently copy.
+- [ ] Verify descriptor ownership end to end on Android: client copy closes only after Binder handoff, service copy survives while native mmap is active, and service closes exactly once on unload/failure/timeout/process death.
+- [ ] Test local document provider and representative cloud/document providers, including unload/reload and follow-up inference.
 
 **Acceptance:** Original-source loading works end to end where supported; unsupported descriptors fail visibly and deterministically; no leaked descriptors or hidden copies.
 
@@ -102,11 +104,11 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 **Evidence:** The current Debug Gradle configuration sets `TEXT_DIAGNOSTICS_ENABLED=true` and passes `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=ON`. `EngineDiagnostics.testText()` persists through the normal log path; callers include benchmark/configuration output and token-selection traces. The compact export omits the dedicated test-text section, but the persisted process logs still contain it.
 
-- [ ] Make all standard Debug and Release builds content-safe by default. Text tracing must require an explicit synthetic-test-only opt-in that is not enabled by normal build configuration.
-- [ ] Remove prompt, OCR/document text, rendered template, generated response and token-piece text from persistent logs and exports.
-- [ ] Review token IDs/logits and traces for content leakage. Keep bounded structured run IDs, token counts, timings, backend/kernel selection, graph assignment and categorized errors.
-- [ ] Make synthetic fixture tracing disposable and ensure normal UI/model inference cannot write user content even when diagnostics are enabled.
-- [ ] Add sentinel tests proving unique fake prompt/response strings do not occur in process logs, in-memory log queues, compact reports or exported diagnostics.
+- [x] Make standard Debug and Release builds content-safe by default. Normal Debug disables token diagnostics; the opt-in Gradle property is `localLlmSyntheticTokenDiagnostics` and defaults to false.
+- [x] Remove native rendered-prompt, chat-template-source, detokenized-prompt and token-piece logging. The legacy Kotlin `testText()` method remains source-compatible but intentionally discards its payload.
+- [x] Restrict the optional native correctness trace to numeric token IDs/logits; record it through a separately gated method and never include token-piece strings.
+- [ ] Verify the opt-in cannot be used accidentally with real user conversations; currently it is an explicit build property and must be used only for synthetic correctness prompts.
+- [x] Add a Kotlin sentinel test proving caller-supplied raw text is not persisted; add/retain compact-export sentinels. Native runtime/build verification remains open.
 
 **Acceptance:** No supported normal build persists user/document prompt or response content. Engineering diagnostics remain structured, bounded and run-correlated.
 
@@ -122,9 +124,9 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 ### P1-03 — Fix model-import cancellation propagation
 
-**Evidence:** `ModelImportViewModel.importModelsFromSaf()` catches `Exception` per file without rethrowing `CancellationException`, unlike the folder-import loop.
+**Evidence:** `ModelImportViewModel.importModelsFromSaf()` previously caught `Exception` per file without rethrowing `CancellationException`; the explicit rethrow is now implemented, but lifecycle/cleanup tests remain open.
 
-- [ ] Rethrow `CancellationException` before handling recoverable per-file failures.
+- [x] Rethrow `CancellationException` before handling recoverable per-file failures in the bulk SAF loop.
 - [ ] Ensure cancellation stops subsequent files, retains completed imports, removes incomplete temporary files and resets UI state once.
 - [ ] Add tests for cancellation during permission/metadata lookup, copy, verification and between files.
 
