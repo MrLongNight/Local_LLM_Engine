@@ -1462,9 +1462,9 @@ class EngineViewModel(
     }
 
     /**
-     * Controlled Vulkan dequantize-matvec workgroup comparison.
-     * Every profile reloads the same GGUF with full Vulkan offload and runs the
-     * same deterministic one-prefill benchmark: AUTO, SUBGROUP, LARGE, AUTO repeat.
+     * Controlled Q4_K decode-path A/B comparison.
+     * MMVQ_FORCE explicitly bypasses the Mali-specific AUTO base-DMMV policy;
+     * native run-scoped path evidence must confirm every measured kernel selection.
      */
     fun runVulkanQ4kDecodePathSweep() {
         if (_isBenchmarking.value) return
