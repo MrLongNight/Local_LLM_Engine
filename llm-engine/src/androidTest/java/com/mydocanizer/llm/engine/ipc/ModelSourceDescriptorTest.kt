@@ -33,7 +33,7 @@ class ModelSourceDescriptorTest {
         val testContext = InstrumentationRegistry.getInstrumentation().context
         assertInferenceServiceManifest(appContext)
 
-        val modelFile = File(testContext.cacheDir, "provider-\${System.nanoTime()}.gguf")
+        val modelFile = File(testContext.cacheDir, "provider-${System.nanoTime()}.gguf")
         testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
             modelFile.outputStream().use { output -> input.copyTo(output) }
         }
@@ -41,7 +41,7 @@ class ModelSourceDescriptorTest {
             modelFile.isFile && modelFile.length() > 0L)
 
         val modelUri = Uri.parse(
-            "content://com.mydocanizer.llm.engine.test-model-provider/\${modelFile.name}"
+            "content://com.mydocanizer.llm.engine.test-model-provider/${modelFile.name}"
         )
         val resolverContext = object : ContextWrapper(appContext) {
             override fun getContentResolver(): ContentResolver = testContext.contentResolver
@@ -77,7 +77,7 @@ class ModelSourceDescriptorTest {
                 ModelSource.ContentUri(modelUri.toString(), modelFile.name),
                 config
             )
-            assertTrue("A provider-backed GGUF must load via the transferred PFD: \${loaded.exceptionOrNull()}",
+            assertTrue("A provider-backed GGUF must load via the transferred PFD: ${loaded.exceptionOrNull()}",
                 loaded.isSuccess)
             val model = loaded.getOrThrow()
             assertEquals("Provider display name must remain the model name", modelFile.name, model.name)
@@ -91,7 +91,7 @@ class ModelSourceDescriptorTest {
                 EngineDiagnostics.getLogs().any { line ->
                     line.contains("MODEL_SOURCE_DIRECT_DESCRIPTOR") &&
                         line.contains("copy=false") &&
-                        line.contains("displayName=\${modelFile.name}")
+                        line.contains("displayName=${modelFile.name}")
                 }
             )
 
@@ -115,13 +115,13 @@ class ModelSourceDescriptorTest {
                     maxPredictTokens = 12
                 ).copy(timeoutConfig = timeoutConfig)
             )
-            assertTrue("Inference must still work while the remote mmap descriptor is retained: \${followup.exceptionOrNull()}",
+            assertTrue("Inference must still work while the remote mmap descriptor is retained: ${followup.exceptionOrNull()}",
                 followup.isSuccess)
             assertTrue("Provider-backed GGUF must generate at least one token",
                 followup.getOrThrow().tokensGenerated > 0)
 
             val unloaded = client.unloadModel()
-            assertTrue("Unloading must release the service-owned descriptor: \${unloaded.exceptionOrNull()}",
+            assertTrue("Unloading must release the service-owned descriptor: ${unloaded.exceptionOrNull()}",
                 unloaded.isSuccess)
             assertEquals(null, client.currentModel.value)
             assertEquals("READY", directBinding.service.status)
@@ -130,7 +130,7 @@ class ModelSourceDescriptorTest {
                 ModelSource.ContentUri(modelUri.toString(), modelFile.name),
                 config
             )
-            assertTrue("The original provider URI must be reopenable after unload: \${reloaded.exceptionOrNull()}",
+            assertTrue("The original provider URI must be reopenable after unload: ${reloaded.exceptionOrNull()}",
                 reloaded.isSuccess)
             assertEquals(modelUri.toString(), client.currentModel.value?.path)
         } finally {
