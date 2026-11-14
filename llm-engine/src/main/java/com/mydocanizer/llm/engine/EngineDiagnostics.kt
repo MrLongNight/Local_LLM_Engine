@@ -2,13 +2,8 @@ package com.mydocanizer.llm.engine
 
 import android.content.Context
 import android.net.Uri
-import android.os.Process
 import android.util.Log
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * Diagnostic logger for Local LLM Engine lifecycle and inference metrics.
@@ -16,40 +11,17 @@ import java.util.concurrent.ConcurrentLinkedQueue
  */
 object EngineDiagnostics {
     private const val TAG = "EngineDiagnostics"
-    private const val MAX_LOG_ENTRIES = 500
-    private const val MAX_LOG_FILE_BYTES = 2L * 1024L * 1024L
-
-    private val logQueue = ConcurrentLinkedQueue<String>()
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
-    private val persistLock = Any()
     private val timestampPrefix = Regex("""^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}""")
-
-    @Volatile
-    private var processLogFile: File? = null
 
     /**
      * Each process writes a separate file in shared app-private storage. This makes
      * :inference events exportable from the main process even after a service crash.
      * Prompt and response text are not stored.
      */
-    fun initialize(context: Context) {
-        val directory = File(context.applicationContext.filesDir, "diagnostics")
-        if (!directory.exists() && !directory.mkdirs()) {
-            Log.w(TAG, "Could not create diagnostics directory: ${directory.absolutePath}")
-            return
-        }
-        processLogFile = File(directory, "engine-${Process.myPid()}.log")
-    }
+    fun initialize(context: Context) = EngineDiagnosticsStorage.initialize(context)
 
-    fun info(tag: String, event: String, details: String = "") {
-        val entry = formatLog("INFO", tag, event, details)
-        logQueue.add(entry)
-        while (logQueue.size > MAX_LOG_ENTRIES) {
-            logQueue.poll()
-        }
-        persist(entry)
-        Log.i(TAG, "[$tag] $event: $details")
-    }
+    fun info(tag: String, event: String, details: String = "") =
+        EngineDiagnosticsStorage.info(tag, event, details)
 
     /**
      * Compatibility shim for legacy demo/test callers.
@@ -92,33 +64,12 @@ object EngineDiagnostics {
         )
     }
 
-    fun error(tag: String, event: String, throwable: Throwable? = null) {
-        val details = throwable?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: ""
-        val entry = formatLog("ERROR", tag, event, details)
-        logQueue.add(entry)
-        while (logQueue.size > MAX_LOG_ENTRIES) {
-            logQueue.poll()
-        }
-        persist(entry)
-        Log.e(TAG, "[$tag] $event: $details", throwable)
-    }
+    fun error(tag: String, event: String, throwable: Throwable? = null) =
+        EngineDiagnosticsStorage.error(tag, event, throwable)
 
-    private fun formatLog(level: String, tag: String, event: String, details: String): String {
-        val timestamp = synchronized(dateFormat) { dateFormat.format(Date()) }
-        // Throwable messages may contain embedded stack/callbackFlow newlines. Keep each
-        // persisted diagnostic row atomic so it cannot corrupt parsing of later headers.
-        val oneLineDetails = details
-            .replace("\r\n", "\\n")
-            .replace('\r', ' ')
-            .replace("\n", "\\n")
-        return if (oneLineDetails.isNotBlank()) {
-            "$timestamp [$level] [$tag] $event - $oneLineDetails"
-        } else {
-            "$timestamp [$level] [$tag] $event"
-        }
-    }
 
-    fun getLogs(): List<String> = logQueue.toList()
+
+    fun getLogs(): List<String> = EngineDiagnosticsStorage.getLogs()
 
     /**
      * Reads only the structured, debug-gated token-ID/logit rows for one native inference run.
@@ -128,7 +79,7 @@ object EngineDiagnostics {
     fun tokenSelectionTraceLines(context: Context, nativeRunId: String): List<String> {
         if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED || nativeRunId.isBlank()) return emptyList()
         val marker = "TOKEN_SELECTION_TRACE - "
-        return readAllProcessLogs(context).filter { line ->
+        return EngineDiagnosticsStorage.readAllProcessLogs(context).filter { line ->
             if (!line.contains(marker)) return@filter false
             line.substringAfter(marker).startsWith("runId=$nativeRunId,")
         }
@@ -142,96 +93,13 @@ object EngineDiagnostics {
     fun vulkanQ4kDecodePathLines(context: Context, nativeRunId: String): List<String> {
         if (nativeRunId.isBlank()) return emptyList()
         val marker = "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - "
-        return readAllProcessLogs(context).filter { line ->
+        return EngineDiagnosticsStorage.readAllProcessLogs(context).filter { line ->
             if (!line.contains(marker)) return@filter false
             line.substringAfter(marker).startsWith("runId=$nativeRunId,")
         }
     }
 
-    private fun persist(entry: String) {
-        val file = processLogFile ?: return
-        synchronized(persistLock) {
-            runCatching {
-                file.parentFile?.let { if (!it.exists()) it.mkdirs() }
-                file.appendText(entry + "\n", Charsets.UTF_8)
-                if (file.length() > MAX_LOG_FILE_BYTES) {
-                    val recent = file.readLines(Charsets.UTF_8).takeLast(MAX_LOG_ENTRIES * 4)
-                    file.writeText(recent.joinToString(separator = "\n", postfix = "\n"), Charsets.UTF_8)
-                }
-            }.onFailure { Log.w(TAG, "Could not persist diagnostic entry", it) }
-        }
-    }
 
-    private fun diagnosticsDirectory(context: Context): File =
-        File(context.applicationContext.filesDir, "diagnostics")
-
-    private fun processLogFiles(context: Context): List<File> {
-        val directory = diagnosticsDirectory(context)
-        if (!directory.exists()) return emptyList()
-        val files = directory.listFiles { file ->
-            file.isFile && file.name.startsWith("engine-") && file.name.endsWith(".log")
-        }
-        if (files == null) {
-            Log.e(TAG, "Could not enumerate diagnostic source directory: ${directory.absolutePath}")
-            return emptyList()
-        }
-        return files.sortedBy { it.name }
-    }
-
-    private fun readAllProcessLogs(context: Context): List<String> {
-        val persisted = processLogFiles(context).flatMap { file ->
-            runCatching { file.readLines(Charsets.UTF_8) }
-                .onFailure { Log.e(TAG, "Could not read diagnostic source file: ${file.name}", it) }
-                .getOrDefault(emptyList())
-        }
-        val persistedEntries = persisted.toHashSet()
-        val inMemoryOnly = getLogs().filterNot { it in persistedEntries }
-        return (persisted + inMemoryOnly).asSequence()
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
-            .toList()
-    }
-
-    /**
-     * Writes with explicit truncate semantics and reads the provider URI back.
-     * A successful export must never be reported for a zero-byte or partial file.
-     */
-    private fun writeAndVerifyExport(context: Context, destination: Uri, bytes: ByteArray) {
-        require(bytes.isNotEmpty()) { "Es wurden keine Diagnosebytes zum Export übergeben." }
-        val resolver = context.contentResolver
-        val descriptor = runCatching {
-            resolver.openFileDescriptor(destination, "rwt")
-        }.getOrNull()
-
-        if (descriptor != null) {
-            android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { stream ->
-                stream.write(bytes)
-                stream.flush()
-            }
-        } else {
-            val outputStream = resolver.openOutputStream(destination, "wt")
-                ?: throw IllegalStateException(
-                    "Der Android-Dokumentanbieter hat keinen Schreibstream für das ausgewählte Ziel geöffnet."
-                )
-            outputStream.use { stream ->
-                stream.write(bytes)
-                stream.flush()
-            }
-        }
-
-        val writtenBytes = resolver.openInputStream(destination)?.use { it.readBytes() }
-            ?: throw IllegalStateException(
-                "Der Android-Dokumentanbieter konnte die exportierte Datei nicht zur Prüfung zurücklesen."
-            )
-        check(writtenBytes.isNotEmpty()) {
-            "Der Android-Dokumentanbieter hat eine leere Exportdatei zurückgegeben."
-        }
-        check(writtenBytes.contentEquals(bytes)) {
-            "Die Exportdatei ist unvollständig oder wurde vom Dokumentanbieter verändert " +
-                "(erwartet=${bytes.size} Bytes, gelesen=${writtenBytes.size} Bytes)."
-        }
-    }
 
     private data class NativeTokenStepMetric(
         val pid: String,
@@ -958,21 +826,21 @@ object EngineDiagnostics {
                 "EXPORT_REQUESTED",
                 "destinationScheme=${destination.scheme ?: "unknown"}"
             )
-            val sourceFiles = processLogFiles(context)
+            val sourceFiles = EngineDiagnosticsStorage.processLogFiles(context)
             val sourceInventory = sourceFiles.joinToString(";") { file ->
                 "${file.name}:${file.length()}B"
             }.ifBlank { "none" }
             info(
                 "diagnostics",
                 "EXPORT_SOURCE_SCAN",
-                "directoryExists=${diagnosticsDirectory(context).isDirectory},files=$sourceInventory"
+                "directoryExists=${EngineDiagnosticsStorage.diagnosticsDirectory(context).isDirectory},files=$sourceInventory"
             )
-            val sourceLines = readAllProcessLogs(context)
+            val sourceLines = EngineDiagnosticsStorage.readAllProcessLogs(context)
             val content = buildCompactReport(sourceLines)
             val bytes = content.toByteArray(Charsets.UTF_8)
             check(bytes.isNotEmpty()) { "Der Diagnosebericht ist leer; es wurden keine Exportdaten erzeugt." }
 
-            writeAndVerifyExport(context, destination, bytes)
+            EngineDiagnosticsStorage.writeAndVerifyExport(context, destination, bytes)
 
             info(
                 "diagnostics",
