@@ -991,6 +991,39 @@ static void ggml_vk_get_physical_device_features2(
     }
 ]=])
     string(REPLACE "${_mali_fence_wait_anchor}" "${_mali_fence_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    # Measure the serialized-submission fence wait too; this path bypasses
+    # ggml_vk_wait_for_fence() and otherwise appears as unexplained sync time.
+    set(_serialized_fence_wait_anchor [=[
+            ggml_vk_submit(compute_ctx, ctx->fence);
+            VK_CHECK(ctx->device->device.waitForFences({ ctx->fence }, true, UINT64_MAX), "synchronize waitForFences", ctx->device);
+            ctx->device->device.resetFences({ ctx->fence });]=])
+    string(FIND "${_vulkan_contents}" "${_serialized_fence_wait_anchor}" _serialized_fence_wait_position)
+    if(_serialized_fence_wait_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream serialized Vulkan fence-wait anchor changed.")
+    endif()
+    set(_serialized_fence_wait_replacement [=[
+            ggml_vk_submit(compute_ctx, ctx->fence);
+            const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+            const auto local_llm_fence_wait_start = local_llm_sync_timing
+                ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            VK_CHECK(ctx->device->device.waitForFences({ ctx->fence }, true, UINT64_MAX), "synchronize waitForFences", ctx->device);
+            if (local_llm_sync_timing) {
+                local_llm_vulkan_sync_phase_record(1, static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - local_llm_fence_wait_start).count()));
+            }
+            ctx->device->device.resetFences({ ctx->fence });]=])
+    string(REPLACE "${_serialized_fence_wait_anchor}" "${_serialized_fence_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    # Fail configuration if either timing callback disappeared from the generated source.
+    foreach(_required_sync_marker IN ITEMS "local_llm_vulkan_sync_phase_record(0" "local_llm_vulkan_sync_phase_record(1")
+        string(FIND "${_vulkan_contents}" "${_required_sync_marker}" _sync_marker_position)
+        if(_sync_marker_position LESS 0)
+            message(FATAL_ERROR "LocalLLM: Vulkan queue-submit/fence-wait timing bridge is incomplete.")
+        endif()
+    endforeach()
+
     # Upstream writes GGML_VK_PERF_LOGGER output to std::cerr, which is not
     # persisted by the engine's llama/ggml log callback. Replace only this
     # function in the generated Android source so each GPU timestamp sample
