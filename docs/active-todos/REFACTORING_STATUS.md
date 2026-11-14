@@ -56,7 +56,7 @@ At `af594b8`, the existing `SettingsScreen.kt` UI sections have been mechanicall
 
 ## Task 4 — ModelImportScreen sections
 
-<badge color="warning">Code extraction complete; APK workflow cancelled before Android instrumentation</badge>
+<badge color="success">Extraction and Android verification complete</badge>
 
 The public `ModelImportScreen(viewModel, modifier)` signature, six StateFlow collections, three SAF launchers and LazyColumn remain in the main file. The new files under `ui/modelimport/` are:
 
@@ -66,13 +66,13 @@ The public `ModelImportScreen(viewModel, modifier)` signature, six StateFlow col
 
 Sizes: main screen 3,957 bytes; every new section below 4.4 KB. No `@Preview` existed in the original screen. Existing shared `ModelLoadProgressIndicator` and `ImportedModelEntry` remain in place.
 
-Code commits: extraction `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`; import correction `5c6caea4c508a073ff245dd118bd3b1844066575`. Unit Tests run `43567003341` on `5c6caea`: completed / success, including host-only native tests. Android APK Build run `43567003311` for `5c6caea` was cancelled by a later push before artifact upload / emulator instrumentation.
+Code commits: extraction `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`; import correction `5c6caea4c508a073ff245dd118bd3b1844066575`. Unit Tests run `43567003341` on `5c6caea`: completed / success. The earlier Android run for `5c6caea` was cancelled before artifact upload; the later integrated Android run `43572476045` on `75c93b0` built and uploaded both APKs and completed `:llm-engine:connectedDebugAndroidTest` successfully.
 
 Detailed mapping and file sizes: [ModelImportScreen extraction report](../REFACTORING_MODEL_IMPORT.md).
 
 ## Task 5 — InferenceServiceProcessTest split
 
-<badge color="warning">Code split complete; unit CI green; Android build cancelled before instrumentation</badge>
+<badge color="success">Code split, unit CI, APK build and emulator instrumentation complete</badge>
 
 The 30,405-byte, 629-line `InferenceServiceProcessTest.kt` has been split into five concrete instrumentation test classes:
 
@@ -87,20 +87,18 @@ The 30,405-byte, 629-line `InferenceServiceProcessTest.kt` has been split into f
 
 All eight original method names and complete test blocks are byte-identical to the baseline. Count before/after: **8 = 8**. There were no JUnit `@Before`/`@After` lifecycle hooks. The base class only shares the original binding type, four process helpers and four timeout constants; helper visibility changed from private to protected, constant names/values stayed identical.
 
-The one >10 KB class is unavoidable under the 1:1 rule: the complete GGUF recovery method alone is 10,034 bytes. It was not split or modified.
+The one >10 KB class is unavoidable under the 1:1 rule: the complete GGUF recovery method alone is 10,030 UTF-8 bytes. It was not split or modified.
 
 Commits: `319ff84`, `3988702`, `f2d3947`, `2b6b5d2`, `b526616`.
 
-Final Unit Tests run `43572193823` on code SHA `b526616ab54c7fa75ac552eef04502c3404650e8`: completed / success, including host-only native tests. Android APK Build run `43572193817` on the same SHA was cancelled by the later code commit `75c93b043ca74006c39066b57cacdd1c5223680d` while step `Build APK and process-isolation test APK` was running. Artifact upload and emulator instrumentation were skipped; there is no APK/instrumentation build claim.
+Final Unit Tests run `43572193823` on code SHA `b526616ab54c7fa75ac552eef04502c3404650e8`: completed / success, including host-only native tests. The first Android run `43572193817` for that SHA was cancelled by the next push. The same split was then verified in integrated run `43572476045` on `75c93b043ca74006c39066b57cacdd1c5223680d`: APK and instrumentation APK built, both artifacts uploaded (IDs `14104649692` and `14105172838`), and `:llm-engine:connectedDebugAndroidTest` completed successfully. Compare `b526616...75c93b0`: no split test files changed.
 
 Detailed method map, byte comparisons and class sizes: [InferenceServiceProcessTest split report](../REFACTORING_TESTS.md).
 
 ## Remaining refactoring work
 
-- ModelImportScreen sections have been extracted; Unit Tests run `43567003341` on code SHA `5c6caea4c508a073ff245dd118bd3b1844066575` completed successfully. Android APK Build run `43567003311` for that SHA is in progress at this update; artifact and emulator conclusions are not yet claimed.
-- APK / emulator verification for Task 4 was not completed: run `43567003311` was cancelled by a later push before artifact upload. It is not being used as a gate for the source refactor.
-- Keep physical-device smoke testing separate from CI: Model Import success, picker cancellation and error handling still require a target Android device.
-- The `InferenceServiceProcessTest` split is complete at code level; final Android APK/emulator verification is pending. `:app` package moves remain deferred.
-- Use-case/repository extraction remains optional; do not add abstractions without a concrete reuse/ownership reason.
+- Die strukturellen Refactorings Tasks 2–5 sind abgeschlossen; für die hier dokumentierten Extraktionen ist kein weiterer Quellcode-Split offen.
+- Physische Geräte-Smoke-Tests bleiben von der Emulator-CI getrennt: Model-Import-Erfolg, Picker-Abbruch und Fehlerbehandlung sind zusätzlich auf dem Zielgerät zu prüfen.
+- `:app`-Package-Verschiebungen sowie Use-Case-/Repository-Extraktionen bleiben bewusst optional. Keine Abstraktionen ohne konkreten Wiederverwendungs- oder Ownership-Grund hinzufügen.
 
 Update this document in place after each verified task/CI transition. It is the only live refactoring status tracker.
