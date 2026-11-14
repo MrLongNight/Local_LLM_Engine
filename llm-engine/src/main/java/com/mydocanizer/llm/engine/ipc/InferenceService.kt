@@ -275,9 +275,16 @@ class InferenceService : Service() {
                         ?: throw IllegalStateException("Android ActivityManager is unavailable; cannot safely estimate model-load memory")
                     val memoryInfo = ActivityManager.MemoryInfo()
                     memoryManager.getMemoryInfo(memoryInfo)
-                    val modelBytes = modelDescriptor.statSize.takeIf { it > 0L }
-                        ?: File(modelPath).length().takeIf { it > 0L }
-                        ?: throw IllegalArgumentException("Could not determine GGUF file size for the model memory guard")
+                    val descriptorSize = modelDescriptor.statSize
+                    val modelBytes = when {
+                        descriptorSize > 0L -> descriptorSize
+                        modelPath.startsWith("saf-direct:") -> throw IllegalArgumentException(
+                            "Der SAF-Anbieter stellt keinen regulären Deskriptor mit bekannter Dateigröße bereit. " +
+                                "Direktes mmap-Laden ist damit nicht verifizierbar; nutze den ausdrücklichen Modellimport als Kopie."
+                        )
+                        else -> File(modelPath).length().takeIf { it > 0L }
+                            ?: throw IllegalArgumentException("Could not determine GGUF file size for the model memory guard")
+                    }
                     val memoryPlan = ModelMemoryGuard.plan(
                         modelBytes = modelBytes,
                         requestedContextTokens = config.contextSize,
