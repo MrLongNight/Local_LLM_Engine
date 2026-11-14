@@ -54,7 +54,7 @@ Status und Fehlerursachen werden hier aktualisiert. Keine getrennten Refactoring
 
 ## Task 3 — SettingsScreen
 
-**Status:** Backend/GPU-Sektion extrahiert; CI-Abnahme für diesen Schritt ausstehend. Die frühere Freigabe zur mechanischen Extraktion wird verwendet. Screen-Signatur, State-Sammlung, LaunchedEffect, LazyColumn-Reihenfolge und Card-/Column-Hierarchie bleiben erhalten.
+**Status:** Backend/GPU-Sektion extrahiert; Korrektur der nachträglich erkannten Imports committed; CI-Abnahme des korrigierten Stands ausstehend. Die frühere Freigabe zur mechanischen Extraktion wird verwendet. Screen-Signatur, State-Sammlung, LaunchedEffect, LazyColumn-Reihenfolge und Card-/Column-Hierarchie bleiben erhalten.
 
 | Sektion | Datei | Status |
 |---|---|---|

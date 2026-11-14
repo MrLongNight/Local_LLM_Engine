@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ui.EngineViewModel
+import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ModelInfo
