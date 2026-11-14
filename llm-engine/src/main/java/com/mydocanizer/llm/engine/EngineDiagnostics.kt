@@ -52,14 +52,17 @@ object EngineDiagnostics {
     }
 
     /**
-     * Persist output from explicitly invoked diagnostic tests and benchmarks only.
-     * Normal chat responses do not call this method. Release builds omit output
-     * unless localLlmReleaseTextDiagnostics=true was explicitly enabled.
+     * Compatibility shim for legacy demo/test callers.
+     *
+     * Raw prompt, document, token-piece and generated-response text must never be
+     * persisted by the engine diagnostics subsystem. Keep the signature so older
+     * demo call sites remain source-compatible, but intentionally discard payloads.
+     * Synthetic correctness evidence is recorded separately as numeric metadata.
      */
+    @Deprecated("Raw text diagnostics are disabled; record bounded structured metadata instead.")
+    @Suppress("UNUSED_PARAMETER")
     fun testText(tag: String, event: String, details: String) {
-        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
-        val oneLine = details.replace("\r", " ").replace("\n", "\\n").take(1400)
-        info(tag, event, oneLine)
+        // Intentionally empty: never forward caller-controlled text to info(), Log or disk.
     }
 
     fun error(tag: String, event: String, throwable: Throwable? = null) {
