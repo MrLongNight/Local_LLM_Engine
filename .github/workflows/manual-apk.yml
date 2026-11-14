@@ -228,7 +228,8 @@ jobs:
           build_config="$(find llm-engine/build/generated -type f -name BuildConfig.java -print -quit)"
           test -n "$build_config"
           grep -Eq "VULKAN_PERF_PROFILER_ENABLED[[:space:]]*=[[:space:]]*${expected};" "$build_config"
-          echo "Verified VULKAN_PERF_PROFILER_ENABLED=${expected} in ${build_config}"
+          grep -Eq "TEXT_DIAGNOSTICS_ENABLED[[:space:]]*=[[:space:]]*true;" "$build_config"
+          echo "Verified VULKAN_PERF_PROFILER_ENABLED=${expected} and TEXT_DIAGNOSTICS_ENABLED=true in ${build_config}"
 
       - name: Verify instrumentation test APK exists
         shell: bash
