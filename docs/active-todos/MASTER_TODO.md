@@ -31,6 +31,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [x] Route JNI role/content conversion through the shared host-testable UTF-16→UTF-8 utility; cover BMP characters, valid/unpaired surrogates and embedded NUL bytes in host-native tests.
 - [x] Move token-stream UTF-8 normalization into the host-testable native utility and cover multibyte code points split between token callbacks plus malformed/overlong UTF-8.
 - [x] Remove the competing Kotlin-side visible-chunk limit; native token-ID accounting now sets `MAX_TOKENS` and flushes a pending UTF-8 suffix before stream completion (`8f94fe3`).
+- [x] Finalize any pending UTF-8 suffix as U+FFFD on token-limit, cooperative-cancel and terminal error paths; add host-native coverage for 2/3/4-byte incomplete prefixes.
 - [ ] Compare CPU and Vulkan outputs using the same GGUF, messages, template, context, sampler and generation limits. Separate backend numerical variation from malformed templates, invalid token IDs, premature EOS and state corruption.
 - [ ] Assert expected structure/markers, valid UTF-8, non-empty meaningful output, correct finish reason and no unexpected control/special-token leakage. Include multi-turn and repeated-turn cases.
 - [ ] Run correctness gates before changing performance defaults. Do not accept a speed improvement that fails output parity/correctness.
