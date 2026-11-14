@@ -33,11 +33,11 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
         val testContext = InstrumentationRegistry.getInstrumentation().context
         assertInferenceServiceManifest(appContext)
 
-        val modelFile = File(testContext.cacheDir, "provider-${System.nanoTime()}.gguf")
+        val modelFile = File(appContext.cacheDir, "provider-${System.nanoTime()}.gguf")
         testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
             modelFile.outputStream().use { output -> input.copyTo(output) }
         }
-        assertTrue("Provider test GGUF must be staged in the provider's private cache",
+        assertTrue("Provider test GGUF must be staged in the target app cache visible to the provider",
             modelFile.isFile && modelFile.length() > 0L)
 
         val modelUri = Uri.parse(
