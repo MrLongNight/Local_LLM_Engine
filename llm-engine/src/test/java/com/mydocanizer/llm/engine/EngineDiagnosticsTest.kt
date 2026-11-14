@@ -1,10 +1,76 @@
 package com.mydocanizer.llm.engine
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EngineDiagnosticsTest {
+
+    @Test
+    fun extractedNativeMetricParserKeepsCurrentAndLegacySyncFieldsDistinct() {
+        val current = EngineDiagnosticsMetrics.nativeTokenStepMetric(
+            nativeMetric(index = 3, decodeUs = 900L, pid = 42, runId = "current-run", backend = "Vulkan")
+        )
+        assertNotNull(current)
+        assertEquals("current-run", current!!.runId)
+        assertEquals(0L, current.backendSyncWaitUs)
+        assertFalse(current.usedLegacyGpuSyncWaitLabel)
+
+        val legacyLine = nativeMetric(
+            index = 4, decodeUs = 1_100L, pid = 42, runId = "legacy-run", backend = "CPU"
+        ).replace("backendSyncWaitUs=0", "gpuSyncWaitUs=275")
+        val legacy = EngineDiagnosticsMetrics.nativeTokenStepMetric(legacyLine)
+        assertNotNull(legacy)
+        assertEquals(275L, legacy!!.backendSyncWaitUs)
+        assertTrue(legacy.usedLegacyGpuSyncWaitLabel)
+
+        assertNull(
+            EngineDiagnosticsMetrics.nativeTokenStepMetric(
+                "2026-11-09 21:00:00.000 [NATIVE] TOKEN_STEP_METRIC - index=1,decodeUs=100"
+            )
+        )
+    }
+
+    @Test
+    fun extractedKotlinAndVulkanMetricParsersRejectUncorrelatedOrInvalidRows() {
+        val kotlin = EngineDiagnosticsMetrics.kotlinTokenStepMetric(
+            kotlinMetric(index = 2, jniWallUs = 1_250L, pid = 73, runId = "kotlin-run", backend = "CPU")
+        )
+        assertNotNull(kotlin)
+        assertEquals("kotlin-run", kotlin!!.runId)
+        assertEquals(1_250L, kotlin.jniWallUs)
+
+        val vulkan = EngineDiagnosticsMetrics.vulkanOperationSample(
+            vulkanOperationMetric(
+                pid = 73,
+                runId = "vk-run",
+                snapshot = 5,
+                operation = "mul_mat_vec_q4_K",
+                samples = 3,
+                averageUs = 12.5,
+                totalUs = 37.5
+            ).replace("gflops=n/a", "gflops=0.125")
+        )
+        assertNotNull(vulkan)
+        assertEquals("vk-run", vulkan!!.runId)
+        assertEquals("mul_mat_vec_q4_K", vulkan.operation)
+        assertEquals(0.125, vulkan.gflops!!, 0.0001)
+
+        assertNull(
+            EngineDiagnosticsMetrics.vulkanOperationSample(
+                vulkanOperationMetric(73, "vk-run", 5, "broken", 0, -1.0, 0.0)
+            )
+        )
+        assertNull(
+            EngineDiagnosticsMetrics.kotlinTokenStepMetric(
+                "2026-11-09 21:00:00.000 [NATIVE] TOKEN_STEP_METRIC - runId=native,pid=1"
+            )
+        )
+    }
+
 
     @Test
     fun nativeDecodeMetricsAreGroupedByProcessBackendAndInferenceRun() {
