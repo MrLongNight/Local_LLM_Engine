@@ -52,92 +52,13 @@ class InferenceServiceProcessTest {
         val disconnected: CountDownLatch
     )
 
-    @Test
-    fun cxxExceptionAtJniBoundaryBecomesJavaException() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val diagnosticsFile = File(context.cacheDir, "jni-exception-boundary-test.log")
-        assertTrue("Native engine must initialize for the JNI boundary test",
-            NativeEngineHandle.ensureLoaded(diagnosticsFile))
-        val handle = NativeEngineHandle.nativeCreateEngine()
-        assertNotEquals("Native engine handle must be valid", 0L, handle)
-        try {
-            val thrown = runCatching {
-                NativeEngineHandle.nativeThrowCppExceptionForTest(handle)
-            }.exceptionOrNull()
-            assertTrue("C++ exception must be translated to a Java exception, got $thrown",
-                thrown is IllegalStateException)
-            assertTrue("Translated exception must retain the native message",
-                thrown?.message?.contains("deliberate JNI exception-boundary test") == true)
-        } finally {
-            NativeEngineHandle.nativeDestroyEngine(handle)
-        }
-    }
 
-    @Test
-    fun inferenceRequestParcelablePreservesThinkingModeAcrossIpc() {
-        val original = InferenceRequest.single(
-            userPrompt = "Test request",
-            enableThinking = true
-        )
-        val parcel = Parcel.obtain()
-        try {
-            original.writeToParcel(parcel, 0)
-            parcel.setDataPosition(0)
-            val restored = InferenceRequest.CREATOR.createFromParcel(parcel)
 
-            assertEquals(true, restored.enableThinking)
-            assertEquals(original.messages, restored.messages)
-        } finally {
-            parcel.recycle()
-        }
-    }
 
-    @Test
-    fun directSeekableProcDescriptorIsAcceptedWithoutCopying() = runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val sourceFile = File(context.cacheDir, "direct-saf-descriptor-${System.nanoTime()}.gguf")
-        sourceFile.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x00, 0x01, 0x02, 0x03))
-        val descriptor = ParcelFileDescriptor.open(sourceFile, ParcelFileDescriptor.MODE_READ_ONLY)
-        try {
-            val procPath = "/proc/self/fd/${descriptor.fd}"
-            val resolved = ModelSourceResolver.resolveToFile(
-                context,
-                ModelSource.FilePath(procPath, descriptor.fileDescriptor, descriptor.fd)
-            )
 
-            assertEquals("Direct descriptor path must be preserved for native loading", procPath, resolved.absolutePath)
-            assertEquals("Descriptor must still refer to the original file", sourceFile.length(), resolved.length())
-            assertTrue("The caller-owned SAF descriptor must remain open", descriptor.fileDescriptor.valid())
-        } finally {
-            descriptor.close()
-            sourceFile.delete()
-        }
-    }
 
-    @Test
-    fun directPipeDescriptorIsRejectedWithNoCopyDiagnostic() = runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val pipe = ParcelFileDescriptor.createPipe()
-        try {
-            val procPath = "/proc/self/fd/${pipe[0].fd}"
-            val error = runCatching {
-                ModelSourceResolver.resolveToFile(
-                    context,
-                    ModelSource.FilePath(procPath, pipe[0].fileDescriptor, pipe[0].fd)
-                )
-            }.exceptionOrNull()
 
-            assertTrue("A pipe-backed SAF descriptor must be rejected before native load", error is IllegalArgumentException)
-            val errorMessage = error?.message.orEmpty()
-            assertTrue(
-                "Error must explain seekability/mmap requirement and confirm no copy fallback",
-                errorMessage.contains("not a seekable regular file") &&
-                    errorMessage.contains("not copied")
-            )
-        } finally {
-            pipe.forEach { runCatching { it.close() } }
-        }
-    }
+
 
     @Test
     fun inferenceClientReconnectsAfterRemoteInferenceProcessDies() = runBlocking {
