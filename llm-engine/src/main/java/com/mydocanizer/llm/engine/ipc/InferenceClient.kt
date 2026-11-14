@@ -845,6 +845,24 @@ internal class InferenceClient(
         val effectiveTimeout = request.timeoutConfig
             ?: lastLoadedConfig?.timeoutConfig
             ?: timeoutConfig
+        val timeoutSource = when {
+            request.timeoutConfig != null -> "request_override"
+            lastLoadedConfig != null -> "last_loaded_model"
+            else -> "client_default"
+        }
+        EngineDiagnostics.info(
+            "ipc_client",
+            "INFERENCE_TIMEOUT_POLICY",
+            "request=$requestId,source=$timeoutSource," +
+                "serviceBindMs=${effectiveTimeout.serviceBindMs}," +
+                "modelLoadMs=${effectiveTimeout.modelLoadMs}," +
+                "prefillMs=${effectiveTimeout.prefillMs}," +
+                "firstTokenMs=${effectiveTimeout.firstTokenMs}," +
+                "interTokenMs=${effectiveTimeout.interTokenMs}," +
+                "totalInferenceMs=${effectiveTimeout.totalInferenceMs}," +
+                "abortGracePeriodMs=${effectiveTimeout.abortGracePeriodMs}," +
+                "reconnectMs=${effectiveTimeout.reconnectMs}"
+        )
 
         val startNano = System.nanoTime()
         val prefillCompletedNano = AtomicLong(0L)
