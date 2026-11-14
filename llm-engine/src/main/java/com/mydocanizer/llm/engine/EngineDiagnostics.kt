@@ -76,7 +76,11 @@ object EngineDiagnostics {
     ) {
         if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
         if (!nativeRunId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return
-        if (backend !in setOf("CPU", "Vulkan")) return
+        val normalizedBackend = when {
+            backend.contains("Vulkan", ignoreCase = true) -> "Vulkan"
+            backend.contains("CPU", ignoreCase = true) -> "CPU"
+            else -> return
+        }
         val numericTracePattern = Regex(
             """step=[0-9]+,selectedId=-?[0-9]+,top5=(?:-?[0-9]+:-?[0-9]+(?:\.[0-9]+)?(?:\|-?[0-9]+:-?[0-9]+(?:\.[0-9]+)?)*)?"""
         )
@@ -84,7 +88,7 @@ object EngineDiagnostics {
         info(
             "inference",
             "TOKEN_SELECTION_TRACE",
-            "runId=$nativeRunId,backend=$backend,$numericTrace"
+            "runId=$nativeRunId,backend=$normalizedBackend,$numericTrace"
         )
     }
 
