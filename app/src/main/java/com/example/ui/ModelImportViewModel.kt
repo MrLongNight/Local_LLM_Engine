@@ -111,6 +111,17 @@ abstract class ModelImportViewModel(
                     "found=${documents.size}, imported=$imported, failed=$skipped"
                 )
             } catch (cancelled: CancellationException) {
+                _statusMessage.value = if (imported > 0) {
+                    "Ordnerimport abgebrochen: $imported Datei(en) wurden bereits importiert."
+                } else {
+                    "Ordnerimport abgebrochen."
+                }
+                if (imported > 0) refreshModelFiles()
+                EngineDiagnostics.info(
+                    "model_import",
+                    "FOLDER_IMPORT_CANCELLED",
+                    "imported=$imported, skipped=$skipped"
+                )
                 throw cancelled
             } catch (error: Exception) {
                 EngineDiagnostics.error("model_import", "FOLDER_SCAN_FAILED", error)
@@ -186,6 +197,19 @@ abstract class ModelImportViewModel(
                     "BULK_IMPORT_COMPLETED",
                     "selected=${uris.size}, imported=$imported, skipped=$skipped"
                 )
+            } catch (cancelled: CancellationException) {
+                _statusMessage.value = if (imported > 0) {
+                    "GGUF-Import abgebrochen: $imported Datei(en) wurden bereits importiert."
+                } else {
+                    "GGUF-Import abgebrochen."
+                }
+                if (imported > 0) refreshModelFiles()
+                EngineDiagnostics.info(
+                    "model_import",
+                    "BULK_IMPORT_CANCELLED",
+                    "selected=${uris.size}, imported=$imported, skipped=$skipped"
+                )
+                throw cancelled
             } finally {
                 _isImporting.value = false
             }
