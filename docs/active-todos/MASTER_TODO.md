@@ -39,11 +39,12 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 ### P0-02 — Verify and correct the Mali-G57 Q4_K decode kernel path
 
-**Current source finding:** The Android Vulkan overlay currently contains a selector for `intDot && Q4_K && ne11 == 1` that requests Q8_1 and labels the selected path `MMVQ_INTEGER_DOT`; explicit base-DMMV override remains separate. This source-level presence is not yet proof that the target device actually dispatches the intended pipeline.
+**Current source finding:** The Android Vulkan overlay selects the Q4_K batch-1 integer-dot path only when the pinned upstream Q8_1 input/layout/alignment/precision prerequisites are satisfied. It intentionally bypasses only `ggml_vk_should_use_mmvq()`'s shape heuristic; explicit base-DMMV override remains separate. This source-level correction is not yet proof that the target device actually dispatches the intended pipeline.
 
+- [x] Compare the selector against pinned llama.cpp `a4d4f2f`; preserve Q8_1 input/layout/alignment/precision eligibility while bypassing only the upstream shape heuristic (`a0f1cee`). CMake now fails configuration if these guards disappear.
 - [ ] Trace the pinned upstream Vulkan decode selection and the generated overlay end to end. Confirm the condition is evaluated at the correct point and cannot be undone by later upstream logic.
 - [ ] On integer-dot-capable Q4_K batch-1 decode, require runtime evidence `selected=MMVQ_INTEGER_DOT`, `reason=intDot_q4k_batch1`, `quantizeY=1`, `yKernelType=q8_1`.
-- [ ] Confirm unsupported/missing Q8_1 pipeline fallback is explicit and reports `q8_1_pipeline_unavailable_fallback`; do not report MMVQ as selected when base DMMV actually ran.
+- [ ] Confirm missing Q4_K×Q8_1 DMMV pipeline fallback is explicit and reports `q8_1_pipeline_unavailable_fallback`; do not report MMVQ as selected when base DMMV actually ran.
 - [ ] Confirm Q4_K prefill, batch>1, Q5_K/Q6_K, CPU and the explicit A/B base override retain their intended paths.
 - [ ] Add/strengthen deterministic source-overlay and runtime-path tests for selection, fallback and override. Keep upstream llama.cpp untouched.
 - [ ] Verify actual dispatch and output correctness on nubia Z2462N / Mali-G57; correlate native run ID with the benchmark sample.
