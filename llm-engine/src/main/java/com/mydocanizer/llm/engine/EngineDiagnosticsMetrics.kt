@@ -47,45 +47,45 @@ internal object EngineDiagnosticsMetrics {
      */
     internal fun nativeTokenStepMetric(line: String): NativeTokenStepMetric? {
         if (!line.contains("TOKEN_STEP_METRIC")) return null
-        val currentSyncField = EngineDiagnostics.field(line, "backendSyncWaitUs")
-        val legacyGpuSyncField = if (currentSyncField == null) EngineDiagnostics.field(line, "gpuSyncWaitUs") else null
+        val currentSyncField = EngineDiagnosticsReportBuilder.field(line, "backendSyncWaitUs")
+        val legacyGpuSyncField = if (currentSyncField == null) EngineDiagnosticsReportBuilder.field(line, "gpuSyncWaitUs") else null
         return NativeTokenStepMetric(
-            pid = EngineDiagnostics.field(line, "pid") ?: return null,
-            runId = EngineDiagnostics.field(line, "runId") ?: return null,
-            backend = EngineDiagnostics.field(line, "backend") ?: return null,
-            index = EngineDiagnostics.field(line, "index")?.toIntOrNull() ?: return null,
-            sampleUs = EngineDiagnostics.field(line, "sampleUs")?.toLongOrNull() ?: return null,
-            decodeUs = EngineDiagnostics.field(line, "decodeUs")?.toLongOrNull() ?: return null,
-            decodeSubmitUs = EngineDiagnostics.field(line, "decodeSubmitUs")?.toLongOrNull() ?: return null,
+            pid = EngineDiagnosticsReportBuilder.field(line, "pid") ?: return null,
+            runId = EngineDiagnosticsReportBuilder.field(line, "runId") ?: return null,
+            backend = EngineDiagnosticsReportBuilder.field(line, "backend") ?: return null,
+            index = EngineDiagnosticsReportBuilder.field(line, "index")?.toIntOrNull() ?: return null,
+            sampleUs = EngineDiagnosticsReportBuilder.field(line, "sampleUs")?.toLongOrNull() ?: return null,
+            decodeUs = EngineDiagnosticsReportBuilder.field(line, "decodeUs")?.toLongOrNull() ?: return null,
+            decodeSubmitUs = EngineDiagnosticsReportBuilder.field(line, "decodeSubmitUs")?.toLongOrNull() ?: return null,
             backendSyncWaitUs = (currentSyncField ?: legacyGpuSyncField)?.toLongOrNull() ?: return null,
             usedLegacyGpuSyncWaitLabel = currentSyncField == null && legacyGpuSyncField != null,
-            pieceUs = EngineDiagnostics.field(line, "pieceUs")?.toLongOrNull() ?: return null,
-            totalUs = EngineDiagnostics.field(line, "totalUs")?.toLongOrNull() ?: return null
+            pieceUs = EngineDiagnosticsReportBuilder.field(line, "pieceUs")?.toLongOrNull() ?: return null,
+            totalUs = EngineDiagnosticsReportBuilder.field(line, "totalUs")?.toLongOrNull() ?: return null
         )
     }
 
     internal fun kotlinTokenStepMetric(line: String): KotlinTokenStepMetric? {
         if (!line.contains("TOKEN_STEP_METRIC") || line.contains("[NATIVE]")) return null
         return KotlinTokenStepMetric(
-            pid = EngineDiagnostics.field(line, "pid") ?: return null,
-            runId = EngineDiagnostics.field(line, "runId") ?: return null,
-            backend = EngineDiagnostics.field(line, "backend") ?: return null,
-            index = EngineDiagnostics.field(line, "nativeStep")?.toIntOrNull() ?: return null,
-            jniWallUs = EngineDiagnostics.field(line, "jniWallUs")?.toLongOrNull() ?: return null
+            pid = EngineDiagnosticsReportBuilder.field(line, "pid") ?: return null,
+            runId = EngineDiagnosticsReportBuilder.field(line, "runId") ?: return null,
+            backend = EngineDiagnosticsReportBuilder.field(line, "backend") ?: return null,
+            index = EngineDiagnosticsReportBuilder.field(line, "nativeStep")?.toIntOrNull() ?: return null,
+            jniWallUs = EngineDiagnosticsReportBuilder.field(line, "jniWallUs")?.toLongOrNull() ?: return null
         )
     }
 
     internal fun vulkanOperationSample(line: String): VulkanOperationSample? {
         if (!line.contains("LOCAL_LLM_VULKAN_OP_TIMING - ")) return null
         return VulkanOperationSample(
-            pid = EngineDiagnostics.field(line, "pid") ?: return null,
-            runId = EngineDiagnostics.field(line, "runId") ?: return null,
-            snapshot = EngineDiagnostics.field(line, "snapshot") ?: return null,
-            operation = EngineDiagnostics.field(line, "op") ?: return null,
-            sampleCount = EngineDiagnostics.field(line, "samples")?.toIntOrNull()?.takeIf { it > 0 } ?: return null,
-            averageUs = EngineDiagnostics.field(line, "avgUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
-            totalUs = EngineDiagnostics.field(line, "totalUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
-            gflops = EngineDiagnostics.field(line, "gflops")?.toDoubleOrNull()?.takeIf { it >= 0.0 }
+            pid = EngineDiagnosticsReportBuilder.field(line, "pid") ?: return null,
+            runId = EngineDiagnosticsReportBuilder.field(line, "runId") ?: return null,
+            snapshot = EngineDiagnosticsReportBuilder.field(line, "snapshot") ?: return null,
+            operation = EngineDiagnosticsReportBuilder.field(line, "op") ?: return null,
+            sampleCount = EngineDiagnosticsReportBuilder.field(line, "samples")?.toIntOrNull()?.takeIf { it > 0 } ?: return null,
+            averageUs = EngineDiagnosticsReportBuilder.field(line, "avgUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
+            totalUs = EngineDiagnosticsReportBuilder.field(line, "totalUs")?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: return null,
+            gflops = EngineDiagnosticsReportBuilder.field(line, "gflops")?.toDoubleOrNull()?.takeIf { it >= 0.0 }
         )
     }
 
