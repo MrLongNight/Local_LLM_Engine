@@ -1337,7 +1337,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     }
     engine->context = ctx;
     engine->supports_incremental_memory_ops =
-        !llama_model_is_hybrid(model) && !llama_model_is_recurrent(model);
+        local_llm::supports_incremental_memory_ops(
+            llama_model_is_hybrid(model),
+            llama_model_is_recurrent(model));
     LOGI("Model memory capabilities: hybrid=%d,recurrent=%d,prefixCache=%d,contextShift=%d",
          llama_model_is_hybrid(model) ? 1 : 0,
          llama_model_is_recurrent(model) ? 1 : 0,

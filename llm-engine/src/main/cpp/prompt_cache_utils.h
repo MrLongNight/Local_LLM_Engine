@@ -90,7 +90,13 @@ inline std::vector<std::size_t> build_prompt_truncation_plan(
 }
 
 
- // The cached token vector mirrors the exact length of sequence-0 KV state.
+ // Incremental KV/prefix reuse and context shifts are safe only for ordinary attention
+// models. Hybrid/recurrent architectures must always clear their full memory state.
+inline bool supports_incremental_memory_ops(bool is_hybrid, bool is_recurrent) noexcept {
+    return !is_hybrid && !is_recurrent;
+}
+
+// The cached token vector mirrors the exact length of sequence-0 KV state.
  // A mismatch (including a negative native position) makes prefix reuse unsafe.
 inline bool prompt_cache_state_is_consistent(
         std::size_t cached_token_count,

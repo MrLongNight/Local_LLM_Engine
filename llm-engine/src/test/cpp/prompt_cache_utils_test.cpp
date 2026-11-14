@@ -4,6 +4,13 @@
 #include <vector>
 
 int main() {
+    // Incremental KV reuse/context shifting stays disabled for either hybrid
+    // or recurrent memory. Only ordinary-attention models may enter the prefix cache.
+    assert(local_llm::supports_incremental_memory_ops(false, false));
+    assert(!local_llm::supports_incremental_memory_ops(true, false));
+    assert(!local_llm::supports_incremental_memory_ops(false, true));
+    assert(!local_llm::supports_incremental_memory_ops(true, true));
+
     {
         const std::vector<int> cached{1, 2, 3, 4, 5};
         const std::vector<int> prompt{1, 2, 3, 9, 10};
