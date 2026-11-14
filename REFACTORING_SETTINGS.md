@@ -105,7 +105,7 @@ Die einfachste verhaltensneutrale Übergabe ist, die bereits vorhandene `EngineV
 
 | Sektion | Status | Code-Commit | Build |
 |---|---|---|---|
-| SystemPromptSection | Extrahiert | `0600cdd903170d7e439c8621095868afc045e9d3` | APK + Unit Tests laufen (Runs `43557624968`, `43557624991`) |
+| SystemPromptSection | Extrahiert | `0600cdd903170d7e439c8621095868afc045e9d3` (Korrekturcommit folgt: fehlender Compose-testTag-Import ergänzt) | APK + Unit Tests laufen (Runs `43557624968`, `43557624991`) |
 | BackendSettingsSection | Offen | – | – |
 | VulkanTuningSection | Offen | – | – |
 | InferenceSettingsSection | Offen | – | – |
