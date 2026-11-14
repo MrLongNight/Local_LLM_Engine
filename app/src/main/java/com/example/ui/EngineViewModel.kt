@@ -703,8 +703,10 @@ class EngineViewModel(
                             systemPromptSnapshot = "",
                             benchmarkPrompt = BackendBenchmarkPlan.correctnessGatePrompt()
                         )
+                        val gateNativeRunId = gateSample.result.nativeRunId
+                            .ifBlank { gateSample.result.diagnosticRunId }
                         val gateTraceLines = EngineDiagnostics.tokenSelectionTraceLines(
-                            getApplication(), gateSample.result.diagnosticRunId
+                            getApplication(), gateNativeRunId
                         )
                         val gateRun = CorrectnessGatePlan.parse(gateSample.result.text, gateTraceLines)
                         val gateKey = Triple(profile.microBatchSize, profile.flashAttention, profile.config.gdnPolicy)
@@ -715,7 +717,7 @@ class EngineViewModel(
                             expectedBackend = actualBackend
                         )
                         profileGateStatus = gateEvaluation.status
-                        profileGateRunId = gateSample.result.diagnosticRunId
+                        profileGateRunId = gateNativeRunId
                         if (profile.backend == BackendPreference.CPU) {
                             cpuGateReferences[gateKey] = gateRun
                         }
@@ -723,7 +725,8 @@ class EngineViewModel(
                             "benchmark",
                             "CORRECTNESS_GATE_RESULT",
                             "model=${model.name},profile=${profile.id},backend=$actualBackend," +
-                                "gateRunId=${gateSample.result.diagnosticRunId}," +
+                                "gateRunId=$gateNativeRunId,nativeRunId=$gateNativeRunId," +
+                                "resourceRunId=${gateSample.result.diagnosticRunId}," +
                                 "cpuReferenceRunId=${cpuReference?.runId.orEmpty()},status=${gateEvaluation.status}," +
                                 "reason=${gateEvaluation.reason},steps=${gateEvaluation.comparedSteps}," +
                                 "minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}/5," +
@@ -784,7 +787,9 @@ class EngineViewModel(
                                 "kernelProfile=${profile.kernelProfile.name},nUbatch=${profile.microBatchSize}," +
                                 "flashAttention=${profile.flashAttention.name},gdnPolicy=${profile.config.gdnPolicy.name}," +
                                 "graphSplits=${measured.result.graphSplits},diagnosticRunId=${measured.result.diagnosticRunId}," +
-                                "gateRunId=${gateSample.result.diagnosticRunId},minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}," +
+                                "gateRunId=$gateNativeRunId,gateResourceRunId=${gateSample.result.diagnosticRunId}," +
+                                "nativeRunId=${measured.result.nativeRunId.ifBlank { measured.result.diagnosticRunId }}," +
+                                "minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}," +
                                 "activeBackend=${loaded.activeBackend},modelLoadMs=${modelLoadMs}," +
                                 "promptTokens=${measured.promptTokens},prefillMs=${measured.promptEvaluationMs ?: -1L}," +
                                 "firstTokenAfterPrefillMs=${measured.firstTokenAfterPrefillMs ?: -1L}," +
