@@ -398,10 +398,15 @@ struct EngineInstance {
 
     bool shift_context() {
         if (!context || !supports_incremental_memory_ops) return false;
+        if (!local_llm::prompt_cache_state_is_consistent(
+                cached_tokens.size(), static_cast<int64_t>(current_position))) {
+            LOGW("Context shift rejected: cached token count does not match current KV position");
+            return false;
+        }
         llama_memory_t memory = llama_get_memory(context);
         if (!llama_memory_can_shift(memory)) return false;
         const int n_discard = (current_position - system_prompt_position) / 2;
-        if (n_discard <= 0 || cached_tokens.size() < static_cast<size_t>(current_position)) return false;
+        if (n_discard <= 0) return false;
         LOGI("Controlled context shift: discarding %d non-system tokens starting at %d",
              n_discard, system_prompt_position);
         if (!llama_memory_seq_rm(memory, 0, system_prompt_position, system_prompt_position + n_discard)) {
@@ -1828,16 +1833,27 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
                                   llama_model_is_recurrent(engine->model);
     size_t reused_tokens = 0;
     if (engine->supports_incremental_memory_ops && !memory_is_hybrid) {
-        reused_tokens = local_llm::reusable_prefix_length(engine->cached_tokens, tokens);
         llama_memory_t memory = llama_get_memory(engine->context);
-        if (reused_tokens > 0) {
-            if (!llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(reused_tokens), -1)) {
-                LOGW("llama_memory_seq_rm declined partial prefix reuse; falling back to full KV clear");
-                llama_memory_clear(memory, false);
-                reused_tokens = 0;
-            }
-        } else {
+        if (!local_llm::prompt_cache_state_is_consistent(
+                engine->cached_tokens.size(), static_cast<int64_t>(engine->current_position))) {
+            LOGW(
+                "Prompt cache state mismatch: cachedTokens=%zu,currentPosition=%lld; clearing KV and disabling prefix reuse",
+                engine->cached_tokens.size(),
+                static_cast<long long>(engine->current_position));
             llama_memory_clear(memory, false);
+            engine->cached_tokens.clear();
+            engine->current_position = 0;
+        } else {
+            reused_tokens = local_llm::reusable_prefix_length(engine->cached_tokens, tokens);
+            if (reused_tokens > 0) {
+                if (!llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(reused_tokens), -1)) {
+                    LOGW("llama_memory_seq_rm declined partial prefix reuse; falling back to full KV clear");
+                    llama_memory_clear(memory, false);
+                    reused_tokens = 0;
+                }
+            } else {
+                llama_memory_clear(memory, false);
+            }
         }
     } else {
         // Gated/recurrent and hybrid memory layouts are not prefix-removable.

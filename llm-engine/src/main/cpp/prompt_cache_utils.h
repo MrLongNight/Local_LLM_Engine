@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace local_llm {
@@ -86,6 +87,16 @@ inline std::vector<std::size_t> build_prompt_truncation_plan(
         ++removed_before;
     }
     return plan;
+}
+
+
+ // The cached token vector mirrors the exact length of sequence-0 KV state.
+ // A mismatch (including a negative native position) makes prefix reuse unsafe.
+inline bool prompt_cache_state_is_consistent(
+        std::size_t cached_token_count,
+        std::int64_t current_position) {
+    return current_position >= 0 &&
+           static_cast<std::size_t>(current_position) == cached_token_count;
 }
 
 } // namespace local_llm

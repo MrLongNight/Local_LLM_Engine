@@ -97,5 +97,12 @@ int main() {
             2, std::vector<std::size_t>{0}, 1);
         assert(plan.empty());
     }
+    {
+        assert(local_llm::prompt_cache_state_is_consistent(0, 0));
+        assert(local_llm::prompt_cache_state_is_consistent(4, 4));
+        assert(!local_llm::prompt_cache_state_is_consistent(3, 4));
+        assert(!local_llm::prompt_cache_state_is_consistent(5, 4));
+        assert(!local_llm::prompt_cache_state_is_consistent(0, -1));
+    }
     return 0;
 }

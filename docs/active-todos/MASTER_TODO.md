@@ -100,6 +100,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [ ] Audit the exact pinned llama.cpp revision for ordinary attention, sliding-window, recurrent/SSM and convolution state behavior; classify each intended architecture, especially LFM3 and Qwen3.5.
 - [ ] Define cache identity/invalidation for loaded model/file identity, adapters, tokenizer/vocabulary, rendered chat template, BOS/EOS, system prompt, context settings and session.
 - [ ] Cover appended turns, prompt rewrites/deletions, tool messages, context shifts, cancellation/failure, model reload, process restart and memory pressure.
+- [x] Enforce `cached_tokens.size() == current_position` before prefix reuse and context shift; mismatch forces a full KV/cache clear, with host tests for shorter, longer and negative-position states.
 - [ ] Enable reuse only when all model-state components remain synchronized. Keep full-clear fallback whenever state integrity is uncertain.
 - [ ] Prove cache-on/cache-off output equivalence before benchmarking. Bound memory and invalidate on unload/reload, process restart, failed/cancelled inference and pressure eviction.
 
