@@ -1,272 +1,283 @@
 # Master TODO — Local LLM Engine
 
-**Purpose:** The single active implementation queue for architecture, correctness, security, cleanup and downstream integration.  
+**Purpose:** Single active execution queue. The order is deliberate: first make the standalone LLM engine correct and reliable, then clean up its code and architecture, and only after that adapt/freeze the myDocAnizer-Mobile integration.  
 **Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `main`  
-**Audit baseline:** `3426533a8d7e6c4be99e898d75ad70586446eb53` (14 November 2026)  
-**Target consumer:** `MrLongNight/myDocAnizer_Mobile`
+**Current HEAD at reordering:** `529008a90f0c578af74be53bbfad0fd18bf80d30`  
+**Target consumer (final phase only):** `MrLongNight/myDocAnizer_Mobile`
 
-> **Single source of truth:** This is the only active task list in the repository. Technical references, integration guides and historical reports may explain contracts and evidence, but must not contain competing active checklists. Add new findings here, merge duplicates and remove tasks only after acceptance evidence is recorded.
+> **Single source of truth:** This is the only active task list. Architecture references, integration guides and historical reports may document facts and contracts, but must not create parallel implementation queues.
 
-## Priority and execution rules
+## Execution order and invariants
 
-- **P0 — Integration blocker:** privacy, data integrity, original-file handling, public API/consumer compatibility or required device acceptance.
-- **P1 — Architecture foundation:** stable responsibility boundaries and lifecycle contracts needed before substantial integration.
-- **P2 — Reliability and maintainability:** tests, source organization, dependency hygiene, cache work and build reproducibility.
-- **P3 — Conditional feature cleanup:** remove or retain optional features only after confirming consumer requirements.
+1. **P0 — Correctness defects:** incorrect/garbled model output, backend/kernel selection defects, inference and loading failures, cache/state corruption, cancellation and recovery defects.
+2. **P1 — Runtime reliability and proof:** privacy-safe diagnostics, resource stability, automated regression coverage and real-device verification of the corrected engine.
+3. **P2 — Code and architecture refactoring:** reduce complexity and establish clear responsibility boundaries without changing behavior.
+4. **P3 — Cleanup and engineering guardrails:** feature inventory, dependency/build hygiene, test organization and documentation of the standalone engine.
+5. **P4 — myDocAnizer-Mobile integration (last):** define/freeze the consumer contract, perform compatibility changes and run the actual downstream build only after P0–P3 are accepted.
 
-Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before each write; use expected-HEAD leases. Make small, independently verifiable commits. Preserve public Kotlin/Java APIs, AIDL and Parcelable layouts, manifests, process names, JNI exports, ABI support and pinned llama.cpp revision. Do not introduce DI frameworks, dependencies, NPU backends, speculative abstractions or performance-default changes as side effects of refactoring. Preserve one shared engine instance in the demo app. Correctness evidence precedes performance tuning. Report JVM tests, APK builds, emulator instrumentation and physical-device acceptance as separate gates.
-
----
-
-## P0 — Integration blockers
-
-### P0-01 — Make diagnostics safe for document and conversation data
-
-**Evidence:** Debug currently enables `TEXT_DIAGNOSTICS_ENABLED` and `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS`. `EngineDiagnostics.testText()` persists through the normal log path. Benchmark/configuration callers can send generated output to it; native text tracing can record rendered prompt/template text and token pieces. This conflicts with the rule that prompts and responses must never enter persistent logs.
-
-- [ ] Remove raw prompt, OCR/document text, rendered template text, generated response text and token-piece strings from persistent logs, in-memory exports and compact reports.
-- [ ] Review whether token IDs/logits or other retained traces can expose user content. Keep only bounded structured evidence required for engineering: run IDs, counts, timings, backend/kernel selection, graph assignment and categorized errors.
-- [ ] Make text-level tracing an explicit disposable synthetic-test-only opt-in. Default Debug and Release builds must be content-safe.
-- [ ] Correct comments/docs that describe text diagnostics as opt-in when Debug currently enables them by default.
-- [ ] Add sentinel tests that pass unique fake prompt/response strings through Kotlin and native diagnostic paths and prove they do not appear in logs, compact reports or exported diagnostics.
-
-**Acceptance:** No user/document prompt or response can be persisted or exported by any supported build configuration. Structured timing/backend evidence remains available and correlated by run IDs.
-
-### P0-02 — Load selected GGUF files from their original location by default
-
-**Evidence:** The normal picker calls `ModelSource.ContentUri`; `ModelSourceResolver` materializes the source in `filesDir/models` under a content-addressed internal filename. A borrowed descriptor path exists through `ModelSource.FilePath("/proc/self/fd/N", descriptor, descriptorFd)`, but the normal selected-file workflow is not connected to a proven picker → Binder → service handoff. Folder/bulk import is a separate copy operation.
-
-- [ ] Make “load selected model” use the original selected GGUF URI/file and original display name when Android supplies a regular, seekable, read-only-mmap-capable descriptor.
-- [ ] Define descriptor ownership precisely: keep the caller descriptor open until the service has safely duplicated/accepted it; close every owned descriptor exactly once on success, failure, cancellation, timeout and process death.
-- [ ] Do not silently copy, rename or relocate a selected model as a side effect of loading. Show original filename and source location in model state.
-- [ ] Keep “copy/import into managed private model storage” as a separate explicit user action for bulk management or unsupported providers, not an invisible load fallback.
-- [ ] For pipe, non-seekable or provider descriptors that cannot be mmap-loaded, return a clear reason and require an explicit import/copy choice.
-- [ ] Add device instrumentation for picker URI/descriptor acquisition, Binder transfer, service-process lifetime, native load, unload, cancellation and follow-up inference. Cover local storage and representative cloud/document providers.
-
-**Acceptance:** Normal load uses the original GGUF without creating a renamed private copy. Any copy is explicit. Descriptor rejection/fallback is visible, deterministic and tested end to end.
-
-### P0-03 — Freeze and verify the reusable library/consumer contract
-
-**Evidence:** `:app` is a prototype/test harness; only `:llm-engine` is intended for myDocAnizer-Mobile. Some Parcelable compatibility tests exist, but `EngineConfig` lacks comprehensive legacy-payload coverage. Current CI verifies the demo app, not the real downstream consumer build.
-
-- [ ] Define the minimal stable consumer API: engine ownership/lifecycle, model source and identity, configuration, streaming progress/terminal events, cancellation, diagnostics export and close semantics.
-- [ ] Keep prototype UI, benchmarking orchestration, demo persistence and DMS concepts out of the reusable library.
-- [ ] Add old/new parcel compatibility tests for `EngineConfig`, `TimeoutConfig`, `InferenceRequest`, `InferenceResult`, model/backend parcelables and all AIDL data crossing the process boundary. Test appended fields, enum fallbacks and truncated legacy payloads.
-- [ ] Add a public API baseline/compatibility check so accidental API removals/additions are deliberate and reviewable.
-- [ ] Add a minimal consumer smoke build using only the pinned `:llm-engine` module and recursive llama.cpp submodule; preferably run the actual myDocAnizer-Mobile build against a pinned engine commit.
-- [ ] Verify consumer manifest merge, private `:inference` service registration, JNI/native ABI packaging, minSdk, coroutine lifecycle and dependency resolution without importing `:app`.
-- [ ] Record exact engine commit, consumer build result and consumer instrumentation result. A demo APK is not proof of downstream integration.
-
-**Acceptance:** The library builds and runs independently of the prototype app; cross-process contracts are backwards-compatible and tested; a pinned consumer build passes.
-
-### P0-04 — Complete actual target-device acceptance
-
-**Evidence:** Unit CI and Android-36 x86_64 emulator tests do not validate Mali-G57 drivers, real SAF descriptors, actual GPU layer assignment, graphics-memory release or real user-model recovery. The compatibility catalogue still marks Qwen3.5 and Gemma 4 device paths unverified.
-
-- [ ] On nubia Z2462N / Android 16 / ARM64 / Mali-G57, test representative Qwen3-4B and each model family intended for downstream use with explicit CPU and Vulkan selection.
-- [ ] Verify model identity, prompt/template correctness, output correctness, finish reason, actual offloaded layer count and per-run CPU/Vulkan graph-node assignment. Requested GPU layers or a Vulkan label alone are not proof of GPU execution.
-- [ ] Verify Q4_K prefill/decode path and profiler `runId` correlation on-device; repeat performance comparisons with profiling disabled.
-- [ ] Exercise timeout, cooperative cancellation, hard process abort, reconnect, same-model reload and successful follow-up inference with a real user-sized GGUF and actual selected-file descriptor path.
-- [ ] Run at least five load/inference/timeout/kill/reconnect cycles. Measure app-side before/after PSS, native/graphics PSS and Vulkan heap/budget data where available. The killed service's own resource monitor cannot prove post-kill release.
-- [ ] Record exact device/build/model/configuration, raw evidence, failures and acceptance status in the technical compatibility record. Keep emulator and physical-device evidence distinct.
-
-**Acceptance:** Each supported model/device combination has explicit load, correctness, backend, resource and recovery evidence. No generic performance or production-readiness claim is made from CI alone.
+Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before each write and use expected-HEAD leases where available. Make small, independently verifiable commits. Keep the pinned llama.cpp submodule pristine. Do not introduce DI frameworks, dependencies, NPU backends, speculative abstractions or unproven performance-default changes. Preserve public Kotlin/Java APIs, AIDL/Parcelable layouts, manifests, process names, JNI exports and ABI support during P0–P3 unless a defect fix is impossible without a separately documented compatibility change. Correctness comes before performance. Report JVM tests, host-native tests, APK builds, emulator instrumentation and physical-device checks separately. Never claim an APK/Actions result without the actual successful job and artifact.
 
 ---
 
-## P1 — Architecture and correctness foundation
+## P0 — Fix engine correctness and runtime defects first
 
-### P1-01 — Replace the deep ViewModel inheritance chain with composition
+### P0-01 — Restore and lock down output correctness across model families
 
-**Evidence:** The shared `EngineViewModel` inherits through `EngineLifecycleViewModel → ConfigurationSmokeViewModel → VulkanDiagnosticsViewModel → BackendBenchmarkViewModel → BenchmarkDiagnosticsViewModel → SettingsViewModel → ModelImportViewModel → ModelManagementViewModel → ChatViewModel`. This preserves one instance but couples unrelated features through inherited protected state and implementation order. Several extracted files retain imports from the pre-split parent.
+**Problem:** There have been incorrect/garbled outputs across Qwen3.5 and other model paths. A successful load or non-empty token stream is not sufficient evidence of correct inference.
 
-- [ ] Keep the existing public `EngineViewModel` constructor and screen-facing facade initially, but move feature behavior behind cohesive internal controllers/components composed by the facade.
-- [ ] Separate chat/session state, model selection/loading, explicit import, settings, diagnostics/benchmarks and engine lifecycle. Each component owns its state and dependencies; no inheritance-only visibility sharing.
-- [ ] Keep one engine instance and one application-level owner. Do not create one engine or independent engine ViewModel per screen.
-- [ ] Define explicit state ownership and one-way state/event flow between facade and feature controllers; avoid duplicate mutable copies of engine state.
-- [ ] Remove unused imports and copied dependencies left by the mechanical extraction.
-- [ ] Add tests for shared engine ownership, startup/restore order, cross-feature operation locks, navigation and lifecycle close semantics.
+- [ ] Trace the complete generation path: request/messages → chat-template selection/rendering → tokenization/BOS/EOS → prompt evaluation → sampler/token selection → detokenization/streaming → finish reason.
+- [ ] Identify why affected models emit garbage or lose output quality. Inspect model metadata, architecture detection, tokenizer/template choice, special-token handling, sampler configuration, context state and CPU/Vulkan differences. Do not mask defects with prompt wording or arbitrary parameter changes.
+- [ ] Add deterministic correctness fixtures per supported model family, including Qwen3, Qwen3.5 (dense/MoE where supported), Gemma 4 and ordinary attention models. Keep prompt fixtures synthetic and content-safe.
+- [ ] Compare CPU and Vulkan outputs using the same GGUF, messages, template, context, sampler and generation limits. Separate backend numerical variation from malformed templates, invalid token IDs, premature EOS and state corruption.
+- [ ] Assert expected structure/markers, valid UTF-8, non-empty meaningful output, correct finish reason and no unexpected control/special-token leakage. Include multi-turn and repeated-turn cases.
+- [ ] Run correctness gates before changing performance defaults. Do not accept a speed improvement that fails output parity/correctness.
 
-**Acceptance:** No deep feature inheritance chain remains. Each feature has a clear owner and test boundary; screen call sites and single-engine lifecycle remain compatible.
+**Acceptance:** Every intended model family passes repeatable output-correctness tests on CPU; Vulkan passes the same correctness contract on supported devices. Root causes and remaining unsupported combinations are explicit.
 
-### P1-02 — Decompose the IPC client by responsibility
+### P0-02 — Verify and correct the Mali-G57 Q4_K decode kernel path
 
-**Evidence:** `InferenceClient.kt` is approximately 1,455 lines / 70 KB. It combines service binding, Binder callbacks, PID/liveness inspection, reconnect/model recovery, model-load serialization, stream coordination, timeout watchdogs, cancellation escalation and terminal event delivery.
+**Current source finding:** The Android Vulkan overlay currently contains a selector for `intDot && Q4_K && ne11 == 1` that requests Q8_1 and labels the selected path `MMVQ_INTEGER_DOT`; explicit base-DMMV override remains separate. This source-level presence is not yet proof that the target device actually dispatches the intended pipeline.
 
-- [ ] Preserve `InferenceClient` as the internal facade while extracting collaborators for service binding, process liveness/abort, reconnect/model recovery, serialized model operations and inference stream/timeout coordination.
-- [ ] Define ownership of Binder references, active request IDs, jobs, mutexes, callbacks and last-loaded model snapshot. Do not duplicate state.
-- [ ] Make transitions explicit and model stale callbacks from old PIDs, replacement processes, repeated terminal callbacks and close during reconnect.
-- [ ] Keep cooperative cancellation first, bounded grace period, PID-safe hard abort and reconnect semantics unchanged unless a failing test proves a defect.
-- [ ] Preserve public API and AIDL wire contract; add focused tests for extracted collaborators plus existing process tests.
+- [ ] Trace the pinned upstream Vulkan decode selection and the generated overlay end to end. Confirm the condition is evaluated at the correct point and cannot be undone by later upstream logic.
+- [ ] On integer-dot-capable Q4_K batch-1 decode, require runtime evidence `selected=MMVQ_INTEGER_DOT`, `reason=intDot_q4k_batch1`, `quantizeY=1`, `yKernelType=q8_1`.
+- [ ] Confirm unsupported/missing Q8_1 pipeline fallback is explicit and reports `q8_1_pipeline_unavailable_fallback`; do not report MMVQ as selected when base DMMV actually ran.
+- [ ] Confirm Q4_K prefill, batch>1, Q5_K/Q6_K, CPU and the explicit A/B base override retain their intended paths.
+- [ ] Add/strengthen deterministic source-overlay and runtime-path tests for selection, fallback and override. Keep upstream llama.cpp untouched.
+- [ ] Verify actual dispatch and output correctness on nubia Z2462N / Mali-G57; correlate native run ID with the benchmark sample.
 
-**Acceptance:** The IPC facade coordinates cohesive components rather than implementing all transport/lifecycle concerns. Timeout, cancellation, PID-safety and recovery tests remain green.
+**Acceptance:** The intended path is proven by actual runtime selection and correctness evidence, or the selector is corrected based on a reproducible failing case. Requested configuration or source-string matches alone do not count.
 
-### P1-03 — Separate native JNI responsibilities without changing the boundary
+### P0-03 — Root-cause the Vulkan throughput and synchronization regression
 
-**Evidence:** `local_llm_engine_jni.cpp` is approximately 2,384 lines / 104 KB. It owns engine state, backend setup, model loading, chat-template preparation, prompt cache, token generation, progress callbacks, metrics, text traces, cancellation, diagnostics and test hooks.
+**Problem:** Current Mali-G57 measurements show Vulkan decode/prefill is not delivering the expected benefit and can be close to or slower than CPU. The existing measurements show substantial backend synchronization wait; changing threads, batch sizes or layer counts at random is not an acceptable fix.
 
-- [ ] Group native code by responsibility: engine/backend lifecycle, model loading, prompt/template and cache, inference/decode, metrics/diagnostics, and test hooks.
-- [ ] Move shared state/helpers into narrowly scoped internal headers/source files. Keep `EngineInstance` ownership and synchronization unambiguous.
-- [ ] Keep every exported JNI symbol and Java native declaration compatible unless a dedicated bridge change is approved.
-- [ ] Ensure no C++ exception crosses JNI; retain uniform exception conversion and cleanup on every native failure path.
-- [ ] Keep upstream llama.cpp pristine. Android-specific modifications remain checked build-directory overlays.
-- [ ] Retain native unit tests for cache/parsing utilities and boundary/instrumentation tests for load, inference, abort and destroy.
+- [ ] Establish a reproducible on-device baseline for the current pinned build and Qwen3-4B-Instruct Q4_K_M at fixed context/batch/microbatch/generation settings. Record CPU and Vulkan separately.
+- [ ] Separate prompt prefill, first-token latency, per-token decode, logits readback, queue submit, fence wait and JNI/client wall time. Identify whether the dominant cost is shader execution, dispatch shape, readback/synchronization or CPU scheduling.
+- [ ] Inspect Mali-G57 capabilities and actual driver reports: integer-dot, fp16, subgroup size/features, extension support and Vulkan memory budget. Do not infer capability from a device label.
+- [ ] Verify Q4_K batch-1 MMVQ versus base DMMV using actual selected-path logs and identical output correctness. Determine whether the integer-dot path is slower, unavailable or incorrectly dispatched.
+- [ ] Inspect the Android fence-wait implementation and queue/readback synchronization against the pinned upstream version. Any wait-strategy change must preserve completion ordering and pass stress/correctness tests.
+- [ ] Verify actual CPU/Vulkan graph node assignment and offloaded layers, then measure graphics/native memory before and after inference.
+- [ ] Keep profiler-enabled diagnosis separate from profiler-free throughput runs. Do not change production defaults until a controlled A/B result demonstrates both correctness and repeatable improvement.
 
-**Acceptance:** JNI entrypoints remain stable, native ownership is clearer, no behavior/default changes are introduced, and ARM64/x86_64 native builds and tests pass.
+**Acceptance:** A measured root cause explains the regression. Any fix is backed by repeatable profiler-free on-device CPU/Vulkan measurements and unchanged output correctness; otherwise retain the safe behavior and document the unresolved driver/backend limit.
 
-### P1-04 — Make CMake and Android overlays modular and reviewable
+### P0-04 — Make cancellation, timeout, abort and recovery deterministic
 
-**Evidence:** `CMakeLists.txt` is approximately 1,231 lines / 62 KB and contains generated-source transformations and verification gates for graph diagnostics, Qwen GDN policy, Android Vulkan compatibility, Q4_K instrumentation and profiler integration.
+- [ ] Trace cancellation from UI/coroutine through `InferenceClient`, Binder/AIDL, JNI and llama.cpp. Confirm cancellation reaches the active request and cannot be swallowed or delivered to a stale request.
+- [ ] Verify the effective `abortGracePeriodMs` from the actual run configuration (the current source default is 3,000 ms; older diagnostic runs may override it). Do not tune it based on a single token timing.
+- [ ] Confirm cooperative cancellation is attempted first, then hard-kill targets only the original inference-service PID after the configured grace period; never kill a replacement process.
+- [ ] Verify terminal events are emitted exactly once, streams close, timeouts remain timeouts, and client calls cannot hang after process death or stale Binder callbacks.
+- [ ] Verify reconnect, same-model reload and a successful follow-up inference after cancellation, timeout, native crash and process kill.
+- [ ] Add regression coverage for cancellation during model load, prefill, decode, stream collection and reconnect; include repeated abort/reconnect cycles.
 
-- [ ] Split CMake into responsibility-named helpers: upstream configuration, Android Vulkan overlay, llama-context diagnostics overlay, profiler overlay, native sources/targets and build verification.
-- [ ] Keep `CMakeLists.txt` as a small orchestration entry point; do not change target composition or compiler flags as part of the structural move.
-- [ ] Preserve fail-fast anchor checks against the exact pinned upstream source. Changed anchors must fail configuration rather than silently create a partial binary.
-- [ ] Preserve build-directory-only generated sources and prove the git submodule remains pristine.
-- [ ] Keep CI checks for ARM64 Vulkan source selection, overlay markers, shader features, optimization flags, graph diagnostics and profiler configuration.
+**Acceptance:** No stuck request, duplicate terminal event, stale-PID kill or poisoned post-cancel model state. A following inference succeeds after every tested recovery path.
 
-**Acceptance:** Same generated compile commands and target behavior for both ABIs; overlays remain deterministic, verified and isolated from upstream source.
+### P0-05 — Correct selected-model loading and descriptor ownership
 
-### P1-05 — Split diagnostics storage, parsing and export
+- [ ] Trace normal single-model selection from Android picker through URI/descriptor acquisition, Binder transfer, service process and native GGUF open.
+- [ ] Prefer the original selected file and its original display name when a regular seekable descriptor can be safely mmap-loaded. Do not silently copy, rename or relocate a selected model.
+- [ ] Define exact descriptor ownership and close-once behavior for success, failure, cancellation, timeout and service death.
+- [ ] Keep managed private-storage copy/import as a separate explicit operation. If a provider cannot supply a suitable descriptor, explain why and require an explicit copy/import action.
+- [ ] Cover local storage and representative document/cloud providers with instrumentation, including unload/reload and follow-up inference.
 
-**Evidence:** `EngineDiagnostics.kt` is approximately 904 lines / 45 KB and combines process-local logging, persistence/rotation, multi-process log reading, metric parsers, aggregation, compact report building and export.
+**Acceptance:** Original-source loading works end to end where supported; unsupported descriptors fail visibly and deterministically; no leaked descriptors or hidden copies.
 
-- [ ] Separate stable diagnostics facade from process log storage, structured parsing, metric aggregation and compact export/report composition.
-- [ ] Define a versioned structured event schema with bounded fields and explicit run/request/PID correlation; keep legacy parser support only where existing logs require it.
-- [ ] Make cross-process log merging deterministic and bounded. Avoid repeated full-directory reads and unbounded intermediate lists during export.
-- [ ] Keep profiler overhead opt-in and clearly distinguish profiler-enabled diagnostics from profiler-free performance measurements.
-- [ ] Add focused parser/aggregation/export tests and privacy sentinel coverage before moving code.
+### P0-06 — Prove model-aware cache and context-state correctness
 
-**Acceptance:** A small facade exposes stable operations; parsers/exporters have independent tests; exports remain bounded, privacy-safe and run-correlated.
+**Current implementation finding:** Ordinary attention uses common-token-prefix reuse where supported. Hybrid/recurrent models currently fall back to clearing state. Keep this safe fallback until all relevant state components are proven reusable.
 
-### P1-06 — Correct cancellation and lifecycle propagation in model import
+- [ ] Audit the exact pinned llama.cpp revision for ordinary attention, sliding-window, recurrent/SSM and convolution state behavior; classify each intended architecture, especially LFM3 and Qwen3.5.
+- [ ] Define cache identity/invalidation for loaded model/file identity, adapters, tokenizer/vocabulary, rendered chat template, BOS/EOS, system prompt, context settings and session.
+- [ ] Cover appended turns, prompt rewrites/deletions, tool messages, context shifts, cancellation/failure, model reload, process restart and memory pressure.
+- [ ] Enable reuse only when all model-state components remain synchronized. Keep full-clear fallback whenever state integrity is uncertain.
+- [ ] Prove cache-on/cache-off output equivalence before benchmarking. Bound memory and invalidate on unload/reload, process restart, failed/cancelled inference and pressure eviction.
 
-**Evidence:** In `ModelImportViewModel.importModelsFromSaf()`, the per-file `catch (Exception)` does not explicitly rethrow `CancellationException`, unlike the folder-import path. Cancellation can therefore be counted as a failed file and the loop may proceed instead of stopping promptly.
+**Acceptance:** No stale or cross-session state reuse. Every supported architecture has verified state reuse or a documented safe full-clear fallback.
+
+---
+
+## P1 — Privacy, runtime reliability and verification
+
+### P1-01 — Prevent prompt, document and response text from entering diagnostics
+
+**Evidence:** The current Debug Gradle configuration sets `TEXT_DIAGNOSTICS_ENABLED=true` and passes `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=ON`. `EngineDiagnostics.testText()` persists through the normal log path; callers include benchmark/configuration output and token-selection traces. The compact export omits the dedicated test-text section, but the persisted process logs still contain it.
+
+- [ ] Make all standard Debug and Release builds content-safe by default. Text tracing must require an explicit synthetic-test-only opt-in that is not enabled by normal build configuration.
+- [ ] Remove prompt, OCR/document text, rendered template, generated response and token-piece text from persistent logs and exports.
+- [ ] Review token IDs/logits and traces for content leakage. Keep bounded structured run IDs, token counts, timings, backend/kernel selection, graph assignment and categorized errors.
+- [ ] Make synthetic fixture tracing disposable and ensure normal UI/model inference cannot write user content even when diagnostics are enabled.
+- [ ] Add sentinel tests proving unique fake prompt/response strings do not occur in process logs, in-memory log queues, compact reports or exported diagnostics.
+
+**Acceptance:** No supported normal build persists user/document prompt or response content. Engineering diagnostics remain structured, bounded and run-correlated.
+
+### P1-02 — Stabilize memory/resource handling under repeated failure and recovery
+
+- [ ] Verify model-load peak memory, native heap, Java heap, PSS, graphics PSS and Vulkan heap/budget where available.
+- [ ] Confirm memory-pressure guard behavior under model load, prefill, decode, cancellation and reconnect.
+- [ ] Run at least five load/inference/timeout/kill/reconnect cycles on nubia Z2462N / Android 16 / ARM64 / Mali-G57.
+- [ ] Measure memory from the surviving app process before and after service death; the killed service cannot prove its own resource release.
+- [ ] Check file descriptors, Binder references, native handles, backend contexts and temporary files after every path.
+
+**Acceptance:** No resource leak or progressive memory growth across repeated cycles; process isolation and cleanup are verified on hardware.
+
+### P1-03 — Fix model-import cancellation propagation
+
+**Evidence:** `ModelImportViewModel.importModelsFromSaf()` catches `Exception` per file without rethrowing `CancellationException`, unlike the folder-import loop.
 
 - [ ] Rethrow `CancellationException` before handling recoverable per-file failures.
-- [ ] Ensure cancelling a bulk import stops new file work, leaves completed imports intact, removes incomplete temporary files and resets UI state exactly once.
-- [ ] Distinguish user cancellation from provider/file failure; never report a cancelled operation as successfully completed.
-- [ ] Add tests for cancellation during metadata lookup, copy, verification and between files; include folder scan cancellation and lifecycle teardown.
+- [ ] Ensure cancellation stops subsequent files, retains completed imports, removes incomplete temporary files and resets UI state once.
+- [ ] Add tests for cancellation during permission/metadata lookup, copy, verification and between files.
 
-**Acceptance:** Cancellation is never swallowed as a recoverable file error; cleanup and final UI state are deterministic.
+**Acceptance:** A cancelled import cannot continue as a sequence of ordinary file failures or report success.
 
-### P1-07 — Finish a model-aware in-memory cache strategy safely
+### P1-04 — Complete standalone engine regression and device acceptance
 
-**Evidence:** The native engine mirrors sequence-0 tokens and uses longest-common-prefix reuse where sequence removal is supported. Hybrid/recurrent models deliberately fall back to clearing state. This is safe but incomplete. Token-prefix match alone is insufficient when attention, recurrent/SSM, convolution or sliding-window state must remain synchronized.
+- [ ] Separate JVM logic tests, host-native tests, Android instrumentation, emulator IPC/process tests and physical-device checks.
+- [ ] On nubia Z2462N / Android 16 / ARM64 / Mali-G57, validate each model family intended to be supported with CPU and Vulkan separately.
+- [ ] Verify output correctness, prompt/template correctness, finish reason, actual offload and graph-node assignment, Q4_K kernel selection, cancellation, abort, recovery and memory cleanup.
+- [ ] Record exact device/build/model/configuration and run-correlated evidence. Clearly distinguish source tests, emulator evidence and physical-device evidence.
+- [ ] Update model compatibility status only from direct evidence. No generic performance or production-readiness claims based only on CI.
 
-- [ ] Audit the exact pinned llama.cpp revision and record state behavior for ordinary attention, sliding-window, recurrent/SSM and convolution state; classify intended architectures separately, especially LFM3 and Qwen3.5.
-- [ ] Define cache identity/invalidation for model file identity, adapters, tokenizer/vocabulary, rendered chat template, BOS/EOS, system prompt, context settings and model-specific state.
-- [ ] Isolate cache ownership by model instance and conversation/session; define prompt edits, message deletion, tool calls/results, truncation and context shifts.
-- [ ] Retain verified prefix reuse for supported architectures. Enable hybrid/recurrent reuse only when every state component can be preserved/restored through documented APIs.
-- [ ] Preserve a full-clear fallback whenever state integrity is uncertain. Keep CPU/Vulkan correctness contracts identical and synchronize asynchronous Vulkan work where required.
-- [ ] Bound cache memory, account for non-KV hybrid state, integrate memory pressure and evict deterministically. Invalidate after unload/reload, process restart, failed/cancelled inference and uncertainty.
-- [ ] Add cache hit/miss/fallback/invalidation reason codes and metrics correlated with native run ID and IPC/RAM request ID.
-- [ ] Prove cache-on/cache-off output equivalence for repeated prompts, appended turns, prompt rewrites, system/template changes, cancellation, context shift, reload and process recovery on each intended architecture.
-- [ ] Benchmark cold prompt, exact repeat and append-only turns on CPU/Vulkan only after correctness passes. Separate prefill savings from decode speed and record peak memory.
-
-**Acceptance:** No stale or cross-session reuse. Enabled architectures have verified full-state correctness; all others use explicit safe full-clear behavior. Performance improvement is repeatable on target hardware.
+**Acceptance:** Standalone engine defects are either fixed and verified or explicitly classified as unsupported/unresolved with evidence.
 
 ---
 
-## P2 — Maintainability and quality
+## P2 — Refactor code and architecture after correctness is stable
 
-### P2-01 — Introduce a clear package layout for the demo harness and library internals
+Structural work must preserve behavior. Keep each refactoring independently buildable/testable and separate from behavior changes.
 
-**Evidence:** Demo code is concentrated in `app/src/main/java/com/example/ui/`; `com.example` is a placeholder namespace, and chat, model management, import, settings, benchmark and Vulkan diagnostics share one package. The library has a public/internal/ipc split, but some internal helpers remain in the public package namespace.
+### P2-01 — Replace the deep ViewModel inheritance chain with composition
 
-- [ ] Define feature packages for demo chat, model library/import, settings, diagnostics/benchmarks and navigation; place shared UI primitives in a small common package.
-- [ ] Replace the placeholder `com.example` namespace with a project-owned demo namespace only after auditing manifest, generated BuildConfig, instrumentation, saved state and deep links. This is a demo-app refactor, not a library namespace change.
-- [ ] Organize library internals by lifecycle, model source, memory/resource policy, diagnostics and IPC without moving consumer contracts into `internal`.
-- [ ] Enforce dependency direction: `:app → :llm-engine`; never `:llm-engine → :app`; no UI or benchmark dependency in the library.
-- [ ] Update architecture diagram and import sites in the same structural commit; preserve screen behavior and tests.
+- [ ] Preserve the existing screen-facing `EngineViewModel` facade initially; move feature behavior behind cohesive internal controllers composed by the facade.
+- [ ] Separate chat/session, model selection/loading, explicit import, settings, diagnostics/benchmarks and engine lifecycle.
+- [ ] Keep exactly one engine instance and one application-level owner; do not create one engine per screen.
+- [ ] Define explicit state ownership and one-way state/event flow. Remove inheritance-only state sharing and stale imports/comments.
+- [ ] Add tests for startup/restore order, shared ownership, cross-feature locks, navigation and lifecycle close semantics.
 
-**Acceptance:** Package names describe ownership; module dependency direction is enforced; consumer-facing API is independent of demo packages.
+**Acceptance:** No deep feature inheritance chain remains; ownership is explicit and call sites remain compatible.
 
-### P2-02 — Remove stale imports and mechanical-extraction residue
+### P2-02 — Decompose the IPC client
 
-**Evidence:** The audit found likely unused imports left by the ViewModel split. Candidates include `BackendBenchmarkViewModel.kt`, `BenchmarkDiagnosticsViewModel.kt`, `ConfigurationSmokeViewModel.kt`, `EngineLifecycleViewModel.kt`, `ModelImportViewModel.kt`, `SettingsViewModel.kt`, `VulkanDiagnosticsViewModel.kt` and Compose screen files. These are cleanup candidates, not proof that features are dead.
+**Evidence:** `InferenceClient.kt` is approximately 1,455 lines / 70 KB and combines binding, Binder callbacks, PID/liveness, reconnect, model recovery, load serialization, streams, watchdogs and cancellation.
 
-- [ ] Re-run unused-import analysis using Kotlin compiler/IDE-aware resolution, not text search alone; remove imports that are genuinely unused.
-- [ ] Remove redundant whitespace, duplicate imports and misleading inherited-responsibility comments while touching affected files.
-- [ ] Do not broadly reformat or mix cleanup with behavior changes. Keep this as a mechanical, independently verified commit.
+- [ ] Preserve `InferenceClient` as a facade while extracting cohesive binding, process-lifecycle, recovery, serialized model-operation and stream/timeout components.
+- [ ] Define one owner for Binder references, active request IDs, jobs, mutexes, callbacks and loaded-model snapshots.
+- [ ] Model stale callbacks, old PIDs, repeated terminal callbacks and close-during-reconnect explicitly.
+- [ ] Keep AIDL and public API stable; carry over the P0 regression tests unchanged.
 
-**Acceptance:** No unused imports or stale split comments remain in audited files; no behavior/API changes; compilation and unit tests pass.
+**Acceptance:** IPC responsibilities are independently testable without duplicate mutable lifecycle state.
 
-### P2-03 — Make large test suites responsibility-oriented
+### P2-03 — Split native JNI implementation by responsibility
 
-**Evidence:** `InferenceIpcTest.kt` is approximately 36.9 KB and contains a large fake Binder service plus tests for liveness, cancellation, timeouts, model load, reconnect and stream behavior. `EngineDiagnosticsTest.kt` is approximately 26 KB and combines parser/export scenarios. `ModelSourceResolverTest.kt` currently tests four basic FilePath/header cases but not AssetPath or RemoteUrl.
+**Evidence:** `local_llm_engine_jni.cpp` is approximately 2,384 lines / 104 KB.
 
-- [ ] Extract reusable fake service/process fixtures into shared test fixtures with explicit ownership and reset behavior.
-- [ ] Group IPC tests by connection/recovery, model loading, streaming/timeouts and cancellation/process termination. Move existing test bodies unchanged first; add/change assertions only in a separate behavior-focused commit.
-- [ ] Group diagnostics tests by persistence/rotation, parser, metric aggregation, privacy and export.
-- [ ] Add deterministic local tests for AssetPath and RemoteUrl (HTTPS validation, redirect downgrade rejection, filename safety, GGUF validation, cleanup, interruption and atomic publish), or retire those paths through an approved API deprecation plan.
-- [ ] Keep Android-only Binder/process claims in `androidTest`; pure logic in JVM tests; native utilities in host C++ tests.
+- [ ] Separate engine/backend lifecycle, model loading, prompt/template/cache, inference/decode, metrics/diagnostics and test hooks into focused native files.
+- [ ] Keep `EngineInstance` ownership/synchronization unambiguous and shared helpers in narrow internal headers.
+- [ ] Preserve all JNI exports and Java native declarations. No C++ exception may cross JNI.
+- [ ] Retain native utility tests and boundary tests for load, inference, abort and destroy. Keep the llama.cpp submodule pristine.
 
-**Acceptance:** Test names and behavior remain traceable; fixtures are not duplicated; each production responsibility has focused deterministic coverage.
+**Acceptance:** Same JNI boundary and runtime behavior; native ownership and cleanup are easier to audit and test.
 
-### P2-04 — Inventory optional features before pruning or expanding them
+### P2-04 — Modularize CMake and generated Android overlays
 
-**Evidence:** `ModelSource.AssetPath` and `ModelSource.RemoteUrl` are implemented in the public API/resolver but are not used by the demo flow and lack dedicated resolver tests. Remote downloads add networking and partial-file behavior to a library whose initial downstream use is local document processing. Vulkan kernel sweeps are diagnostic tools, not necessarily product features.
+**Evidence:** `CMakeLists.txt` is approximately 1,231 lines / 62 KB and contains source overlays, validation anchors, native target wiring and build gates.
 
-- [ ] Inventory every public API, `ModelSource` variant, UI action, build flag, native diagnostic hook and benchmark sweep; record owner, callers, tests, integration value and maintenance cost.
-- [ ] Classify each as core engine contract, demo-only tool, diagnostic/test-only, optional consumer feature or obsolete.
-- [ ] Decide whether AssetPath and RemoteUrl are genuinely required by the consumer. Do not retain half-supported behavior without tests; do not delete public API casually.
-- [ ] Because this prototype has no production consumers, prepare deprecation/removal options where appropriate, but get explicit approval before public API breaks.
-- [ ] Hide experimental kernel profiles from normal product-facing controls unless they have a clear operator/diagnostic purpose; keep reproducible experiments accessible in the diagnostic harness.
-- [ ] Remove code, dependencies and permissions only after call-site, test, documentation and consumer searches show they are unnecessary.
+- [ ] Split upstream configuration, Android Vulkan compatibility, graph/GDN diagnostics, profiler, native source/target wiring and verification into responsibility-named CMake helpers.
+- [ ] Keep the root `CMakeLists.txt` as orchestration only; preserve targets, compile flags and ABI behavior during the move.
+- [ ] Retain fail-fast upstream anchors and build-directory-only generated files. Never patch the checked-out llama.cpp submodule.
+- [ ] Verify generated compile commands and overlay checks for ARM64 and x86_64.
 
-**Acceptance:** Every retained feature has an owner and purpose. Unused functionality is fully tested and intentionally retained or deliberately deprecated/removed with compatibility handling.
+**Acceptance:** Same outputs/compile configuration with smaller, reviewable CMake components; clean submodule remains unchanged.
 
-### P2-05 — Establish build and architecture guardrails
+### P2-05 — Split diagnostics implementation
 
-- [ ] Verify dependencies: no app/demo dependency leaks into `:llm-engine`; avoid duplicate versions and unnecessary API exposure.
-- [ ] Add automated architecture checks for module direction, package ownership, public API leakage and forbidden library references to app/Compose/DMS types.
-- [ ] Add appropriate Gradle Android lint and native compiler/static checks using existing tools before proposing new dependencies.
-- [ ] Review Gradle wrapper reproducibility. If wrapper scripts/JAR fit the repository/submodule workflow, pin Gradle 9.3.1 and verify CI/local use the same distribution; otherwise document supported parent-project invocation.
-- [ ] Keep CI path filters accurate for source, CMake overlays, submodule pins, build scripts and workflows. Documentation-only edits should not consume expensive native APK jobs.
-- [ ] Keep generated overlays and diagnostic outputs outside source-controlled production directories; verify clean checkout/submodule builds.
+**Evidence:** `EngineDiagnostics.kt` is approximately 904 lines / 45 KB and combines storage, rotation, multi-process reading, parsers, aggregation and export.
 
-**Acceptance:** CI rejects broken dependency direction/build drift; clean checkout reproduces documented builds without undocumented steps.
+- [ ] Establish the privacy-safe event contract from P1 before moving implementation.
+- [ ] Extract process-log storage/rotation, structured parsing, metric aggregation and compact report/export composition behind a small facade.
+- [ ] Define bounded versioned events with run/request/PID correlation; keep legacy parsing only when required.
+- [ ] Make multi-process merging deterministic and bounded; add focused parser, aggregation, export and privacy tests.
 
-### P2-06 — Keep architecture and integration documentation aligned
+**Acceptance:** Cohesive diagnostics components with bounded, privacy-safe exports and independent tests.
 
-- [ ] Update `docs/technical/ARCHITECTURE.md` after each accepted structural change: module ownership, state ownership, IPC lifecycle, native boundaries and model-source flow.
-- [ ] Keep `docs/planning/INTEGRATION_MYDOCANIZER.md` aligned with public API, min SDK/toolchain, descriptor semantics, dependencies, manifest merge and consumer lifecycle.
-- [ ] Keep `docs/technical/MODEL_COMPATIBILITY.md` explicit about source-recognized, backend-supported and physically device-verified models.
-- [ ] Move new evidence into technical references or historical reports; keep action items only in this Master TODO.
-- [ ] Tie version/revision and verification claims to exact commits, workflow IDs, artifact IDs and device evidence.
+### P2-06 — Organize demo and library packages by ownership
 
-**Acceptance:** One live queue, one canonical architecture reference and one integration guide; no stale API examples or competing task lists.
+- [ ] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages.
+- [ ] Replace `com.example` only after auditing manifests, generated BuildConfig, instrumentation, saved state and deep links.
+- [ ] Organize library internals by lifecycle, model source, memory/resource policy, diagnostics and IPC; keep consumer-facing types separate.
+- [ ] Enforce dependency direction `:app → :llm-engine`; no UI, benchmark or DMS dependency may leak into the library.
+
+**Acceptance:** Package and module boundaries express ownership; the library remains independently consumable.
 
 ---
 
-## P3 — Conditional cleanup (only after P0–P2)
+## P3 — Cleanup and engineering guardrails
 
-### P3-01 — Consolidate or remove low-value experimental controls
+### P3-01 — Inventory optional and obsolete functionality
 
-- [ ] Revisit every benchmark/sweep button and configuration option after the feature inventory. Retain tests needed to isolate correctness/regressions; remove duplicate/obsolete UI paths only when a replacement is verified.
-- [ ] Prefer a small number of task-oriented diagnostic workflows over many overlapping manual sweeps.
-- [ ] Do not remove diagnostic capabilities required to root-cause CPU/Vulkan correctness/performance until equivalent evidence exists elsewhere.
+- [ ] Inventory every public API, `ModelSource` variant, UI action, build flag, native diagnostic hook and benchmark sweep with owner, callers, tests and maintenance cost.
+- [ ] Classify features as engine core, demo-only, diagnostic/test-only, optional or obsolete.
+- [ ] Add missing resolver tests for `AssetPath`/`RemoteUrl` or propose deliberate retirement; do not retain half-supported behavior.
+- [ ] Remove dependencies, permissions and code only after reference/test/documentation searches prove they are unnecessary. Public API removal requires an explicit decision.
 
-### P3-02 — Consider further API simplification
+### P3-02 — Clean tests without changing their behavior
 
-- [ ] After a real consumer build exists, review whether advanced descriptor, AssetPath, RemoteUrl, profiler and diagnostic APIs belong in the stable public surface or should remain internal/experimental.
-- [ ] Make any API reduction through an explicit compatibility/deprecation decision and update API baseline, parcel tests and integration guide together.
+- [ ] Extract reusable fake Binder/process fixtures with explicit reset and ownership.
+- [ ] Split large IPC and diagnostics suites by responsibility. First move test methods unchanged; change assertions only in a separate defect-specific commit.
+- [ ] Keep pure logic in JVM tests, process/Binder claims in `androidTest` and native utility behavior in host C++ tests.
+- [ ] Remove genuinely unused imports and extraction residue using compiler-aware analysis, not text search alone.
+
+### P3-03 — Add architecture and build guardrails
+
+- [ ] Add automated checks for module direction, public API leakage and forbidden app/Compose/DMS references in `:llm-engine`.
+- [ ] Review dependencies, Gradle wrapper reproducibility, NDK/CMake pinning and clean recursive-submodule builds.
+- [ ] Keep CI path filters accurate; documentation-only changes must not trigger expensive native APK jobs.
+- [ ] Keep generated overlays and diagnostics outside tracked production sources.
+
+### P3-04 — Keep standalone engine documentation accurate
+
+- [ ] Update architecture, model compatibility, build and diagnostics references after accepted changes.
+- [ ] Keep evidence and limitations tied to exact commits, workflow IDs, artifacts and device configurations.
+- [ ] Ensure there is no second active implementation checklist.
 
 ---
 
-## Definition of done for the project foundation
+## P4 — myDocAnizer-Mobile integration (intentionally last)
 
-- [ ] No prompts, OCR text or model responses are persisted in diagnostics.
-- [ ] Normal model loading preserves selected original file/location; copying is a separate explicit operation.
-- [ ] Public library contract and parcel/AIDL compatibility are tested and consumer build passes.
-- [ ] Demo remains a thin harness with clear package ownership and no deep ViewModel inheritance chain.
-- [ ] IPC, diagnostics, native JNI and CMake responsibilities have explicit, testable boundaries.
-- [ ] Every retained feature has an owner, tests and integration reason; unused features are intentionally retired or marked optional.
-- [ ] Unit, native host, APK, emulator and target-device acceptance are recorded separately.
-- [ ] All current actions live in this document; no second active TODO list exists.
+**Do not spend implementation time on consumer adaptation while standalone engine correctness or foundational refactoring remains open.** The integration guide may document requirements, but it is not an active implementation queue.
 
-## Audit notes and scope
+### P4-01 — Define the minimal stable consumer contract
 
-The audit baseline contains the `:app` prototype and `:llm-engine` library modules, 154 tracked blob entries in the recursive repository tree and 90 Kotlin source files. Responsibility hotspots include `InferenceClient.kt` (~70 KB), `EngineDiagnostics.kt` (~45 KB), `local_llm_engine_jni.cpp` (~104 KB), `CMakeLists.txt` (~62 KB) and the deep ViewModel inheritance chain. These are evidence for responsibility review, not standalone reasons to split files.
+- [ ] Only after P0–P3 acceptance, define engine ownership/lifecycle, model source/identity, configuration, streaming progress/terminal events, cancellation, diagnostics export and close semantics.
+- [ ] Keep demo UI, benchmark orchestration, demo persistence and DMS concepts out of the reusable library.
+- [ ] Verify old/new Parcelable/AIDL compatibility, appended fields, enum fallbacks and malformed/truncated legacy data.
 
-The review was structural and source-based. No product code was changed as part of this audit. Items above are planned measures, not claims that implementation, target-device acceptance or downstream integration is complete.
+### P4-02 — Adapt and verify the actual consumer
+
+- [ ] Verify consumer manifest merge, non-exported `:inference` service, JNI/native ABI packaging, minSdk, coroutine lifecycle and dependency resolution without importing `:app`.
+- [ ] Pin the accepted engine commit in myDocAnizer-Mobile and perform the real downstream build/instrumentation only at this phase.
+- [ ] Record exact engine revision, consumer commit, build result, test result and generated artifact. A demo APK is not integration evidence.
+
+**Acceptance:** myDocAnizer-Mobile consumes the standalone engine through a minimal stable contract, without depending on the prototype app.
+
+---
+
+## Project-level definition of done
+
+- [ ] Model output correctness passes across every claimed supported model family and backend.
+- [ ] Q4_K Vulkan decode selection and actual Mali-G57 execution are evidenced, or support limitations are explicit.
+- [ ] Timeouts, cancellation, process abort/reconnect, model loading and cache state are deterministic.
+- [ ] Diagnostics do not persist prompts, document/OCR text or model responses.
+- [ ] Repeated physical-device cycles show no leaked processes, descriptors or progressive resource growth.
+- [ ] Deep inheritance and oversized mixed-responsibility components have been refactored without behavior regressions.
+- [ ] Every retained optional feature has an owner, tests and a reason to exist.
+- [ ] Standalone engine acceptance precedes all myDocAnizer-Mobile integration work.
+- [ ] This file remains the only active implementation queue.
+
+## Audit and current source notes
+
+The audit baseline has a demo `:app` and reusable `:llm-engine` module, with the pinned llama.cpp submodule. Large responsibility hotspots include `InferenceClient.kt`, `EngineDiagnostics.kt`, `local_llm_engine_jni.cpp` and `CMakeLists.txt`. These are refactoring candidates after correctness is stable, not reasons to split files by size alone.
+
+The current Vulkan overlay already contains the intended Q4_K batch-1 integer-dot selector in source. Actual hardware dispatch and output correctness remain unverified. The current `TimeoutConfig` default for `abortGracePeriodMs` is 3,000 ms; use the effective runtime configuration when analyzing any specific diagnostic run.
+
+This list is a plan and source-audit snapshot. A checkbox may be completed only when the named acceptance evidence exists. No task should be marked done merely because a code path or test name is present.
