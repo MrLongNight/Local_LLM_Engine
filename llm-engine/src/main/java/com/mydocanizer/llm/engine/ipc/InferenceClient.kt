@@ -392,6 +392,8 @@ internal class InferenceClient(
                 val elapsedMs = (System.nanoTime() - startNano) / 1_000_000L
                 Log.e(TAG, "Service reconnection timed out after ${elapsedMs}ms", tce)
                 _state.value = EngineState.Error("Service reconnection timed out ($elapsedMs ms)")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 Log.e(TAG, "Reconnection failed", e)
                 EngineDiagnostics.error("ipc_client", "SERVICE_RECONNECT_FAILED", e)
@@ -1299,6 +1301,8 @@ internal class InferenceClient(
                 )
             }
             service.streamChat(requestId, request, callback)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             val partial = synchronized(streamBuilder) { streamBuilder.toString() }
             finishStream(InferenceEvent.Error(e, partial))

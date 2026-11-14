@@ -331,6 +331,8 @@ class InferenceService : Service() {
                         EngineDiagnostics.error("ipc", "MODEL_LOAD_FAILED", err)
                         callback?.onModelLoadFailed(err.message ?: "Model load failed")
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (t: Throwable) {
                     Log.e(TAG, "Unhandled exception in loadModel", t)
                     EngineDiagnostics.error("ipc", "MODEL_LOAD_EXCEPTION", t)
@@ -364,6 +366,8 @@ class InferenceService : Service() {
                         resourceMonitor?.modelUnloadFailed()
                         callback?.onModelLoadFailed(err.message ?: "Unload failed")
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (t: Throwable) {
                     Log.e(TAG, "Error in unloadModel", t)
                     EngineDiagnostics.error("ipc", "MODEL_UNLOAD_EXCEPTION", t)
