@@ -3,8 +3,22 @@ plugins {
 }
 
 // Profiler builds are intentionally opt-in: timestamp queries perturb throughput.
+// Token-ID/logit diagnostics are also opt-in because they can reveal text when
+// decoded with the model tokenizer. Enable them only for synthetic test prompts.
 val localLlmVulkanPerfProfiler = providers.gradleProperty("localLlmVulkanPerfProfiler")
     .map { it.equals("true", ignoreCase = true) }
+    .getOrElse(false)
+
+val localLlmSyntheticTokenDiagnostics = providers.gradleProperty("localLlmSyntheticTokenDiagnostics")
+    .map { raw ->
+        when (raw.trim().lowercase()) {
+            "true" -> true
+            "false" -> false
+            else -> throw GradleException(
+                "localLlmSyntheticTokenDiagnostics must be either true or false (was '$raw')"
+            )
+        }
+    }
     .getOrElse(false)
 
 android {
@@ -15,12 +29,12 @@ android {
     buildTypes {
         getByName("debug") {
             buildConfigField("boolean", "VULKAN_PERF_PROFILER_ENABLED", localLlmVulkanPerfProfiler.toString())
-            buildConfigField("boolean", "TEXT_DIAGNOSTICS_ENABLED", "true")
+            buildConfigField("boolean", "TEXT_DIAGNOSTICS_ENABLED", localLlmSyntheticTokenDiagnostics.toString())
             externalNativeBuild {
                 cmake {
                     arguments += listOf(
                         "-DLOCAL_LLM_ENABLE_TEST_HOOKS=ON",
-                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=ON"
+                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=${if (localLlmSyntheticTokenDiagnostics) "ON" else "OFF"}"
                     )
                 }
             }
