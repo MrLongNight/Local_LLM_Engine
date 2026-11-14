@@ -52,7 +52,8 @@ gradle --no-daemon --continue --build-cache :llm-engine:testDebugUnitTest :app:t
 
 All project documentation is organized by document type under [`docs/`](docs/README.md):
 
-- [Technical documentation](docs/technical/) — model compatibility, CI signing and change history.
+- [Technical documentation](docs/technical/) — architecture, model compatibility, CI signing and change history.
+- [Mermaid architecture](docs/technical/ARCHITECTURE.md) — canonical module, process and inference-flow diagrams.
 - [Active todos](docs/active-todos/) — current refactoring status and model-aware cache work.
 - [Planning](docs/planning/) — overall implementation plan and the downstream myDocAnizer-Mobile integration plan.
 - [Agent rules](docs/AGENTS.md) — repository invariants and documentation ownership.

@@ -12,6 +12,25 @@
 - Reuse the single `EngineViewModel` instance across demo screens. Do not create parallel engine/ViewModel instances for separate screens.
 - Keep prompts and model responses out of persistent diagnostic logs.
 
+
+## Project structure and change discipline
+
+- Inspect the existing module/package tree and the closest related implementation before editing. Decide the final file, package and module for the change before writing code.
+- Place every new class, function, composable, test and helper in the package/module that owns that responsibility. Follow the existing conventions documented in [`technical/ARCHITECTURE.md`](technical/ARCHITECTURE.md).
+- Prefer a small, cohesive extension of the existing owner over moving code around. Check for an existing implementation/helper first; reuse it instead of creating a parallel path.
+- Avoid refactoring as a side effect of feature work. Do not rename, relocate, split, merge, broadly reformat or reorganize unrelated code merely because it could be cleaner.
+- Do not create temporary implementations in a convenient file and plan to move them later. Start in the correct final location.
+- Create a new class/file only when it has a clear, cohesive responsibility or is required by an existing package/module boundary. Do not split files just to reduce line count; do not allow one file/class to accumulate unrelated responsibilities.
+- Preserve the dependency direction: `:app` may depend on `:llm-engine`; the reusable library must never depend on the app or its UI/DMS types. Keep public contracts separate from `internal` implementation details.
+- Keep tests beside the responsibility they verify, using the matching `test` or `androidTest` source set. Do not duplicate existing test helpers, fake services or fixtures.
+- Keep each task's code diff limited to the requested behavior and necessary tests/docs. If a broader refactor is genuinely unavoidable, explain why and isolate it into a separate, explicitly tracked commit.
+
+## Mermaid architecture documentation
+
+- [`technical/ARCHITECTURE.md`](technical/ARCHITECTURE.md) is the single canonical, version-controlled Mermaid architecture document. Do not create competing diagrams in README, the implementation plan or status files.
+- Review the Mermaid diagrams whenever a code change affects modules, package ownership, component responsibility, dependency direction, public API, model import/persistence flow, AIDL/Binder communication, process lifecycle, JNI/native flow or backend selection.
+- If architecture or control flow changes, update the affected Mermaid diagram(s) and source-layout table in the same commit as the code change. Never knowingly leave the diagrams stale.
+- If a change does not alter the architecture or control flow, keep the diagrams unchanged; do not add decorative or duplicate diagrams.
 ## Build and verification rules
 
 - No Gradle wrapper launcher scripts/JAR are checked in. CI uses Gradle 9.3.1 and JDK 21; Java source/target compatibility remains 17.

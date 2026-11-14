@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Documentation
+
+- Added a canonical Mermaid architecture reference and made project-structure discipline, avoidance of unrelated refactoring and same-commit diagram updates explicit agent requirements.
+
 ### Added
 
 - Added a Debug/TEXT_DIAGNOSTICS correctness gate to the G1 matrix. It captures the actual selected token and pre-decode top-five logits for 16 greedy steps, checks the fixed 2..320 continuation, and compares every Vulkan profile against its matching CPU reference (same GGUF, micro-batch and Flash Attention setting). The result now preserves the native run ID; missing CPU references, incomplete gates and measurement failures fail closed, and invalid rows do not report tok/s.

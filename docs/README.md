@@ -6,6 +6,7 @@ Project documentation is grouped by purpose. Each topic has one canonical docume
 
 Located in [`technical/`](technical/):
 
+- [`ARCHITECTURE.md`](technical/ARCHITECTURE.md) — canonical Mermaid diagrams for module ownership, process boundaries and model/inference flow.
 - [`MODEL_COMPATIBILITY.md`](technical/MODEL_COMPATIBILITY.md) — architecture recognition, backend/operator coverage, Android overlay behavior, model test catalogue and device-acceptance criteria.
 - [`CI_DEBUG_SIGNING.md`](technical/CI_DEBUG_SIGNING.md) — persistent signing setup for the prototype's side-by-side Debug APK and the temporary-key fallback.
 - [`CHANGELOG.md`](technical/CHANGELOG.md) — implementation changes and verified historical milestones.
