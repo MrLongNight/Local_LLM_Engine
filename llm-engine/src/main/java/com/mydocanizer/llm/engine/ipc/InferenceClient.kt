@@ -124,6 +124,9 @@ internal class InferenceClient(
     @Volatile private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
 
     private val activeRequestId = AtomicReference<String?>(null)
+    // PID captured from the service that actually received this request. _remotePid
+    // may change during reconnect and must never redirect an old abort to a replacement.
+    private val activeRequestPid = AtomicReference<Int?>(null)
     private val cooperativeCancelCount = AtomicLong(0L)
     private val processKillCount = AtomicLong(0L)
     private val activeStreamControl = AtomicReference<ActiveStreamControl?>(null)
@@ -797,6 +800,7 @@ internal class InferenceClient(
             awaitClose { /* This request never acquired the active slot or registered a callback. */ }
             return@callbackFlow
         }
+        activeRequestPid.set(null)
         _state.value = EngineState.Inferring(request)
 
         val effectiveTimeout = request.timeoutConfig
@@ -853,7 +857,9 @@ internal class InferenceClient(
         fun finishStream(event: InferenceEvent): Boolean {
             if (!terminalSent.compareAndSet(false, true)) return false
             watchdogJob?.cancel()
-            activeRequestId.compareAndSet(requestId, null)
+            if (activeRequestId.compareAndSet(requestId, null)) {
+                activeRequestPid.set(null)
+            }
             streamControl?.let { activeStreamControl.compareAndSet(it, null) }
             // Keep the lifecycle state aligned with the terminal callback. In particular,
             // collector cancellation leaves this as Inferring until cooperative unwind
@@ -899,7 +905,7 @@ internal class InferenceClient(
             ) return
 
             EngineDiagnostics.error("ipc_client", "INFERENCE_TIMEOUT", InferenceTimeoutException(reason, elapsedMs))
-            val targetPid = _remotePid.value
+            val targetPid = activeRequestPid.get()
             val service = remoteService
             val serviceMatchesTarget = service != null &&
                 (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
@@ -928,6 +934,7 @@ internal class InferenceClient(
                 }
 
                 if (activeRequestId.compareAndSet(requestId, null)) {
+                    activeRequestPid.compareAndSet(targetPid, null)
                     _state.value = EngineState.Reconnecting
                     EngineDiagnostics.info(
                         "ipc_client",
@@ -1243,6 +1250,17 @@ internal class InferenceClient(
 
         try {
             val service = getService()
+            val servicePid = runCatching { service.processId }
+                .onFailure { EngineDiagnostics.error("ipc_client", "REQUEST_SERVICE_PID_READ_FAILED", it) }
+                .getOrNull()
+            if (servicePid != null && activeRequestId.get() == requestId) {
+                activeRequestPid.set(servicePid)
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "REQUEST_SERVICE_PID_CAPTURED",
+                    "request=$requestId,remotePid=$servicePid"
+                )
+            }
             service.streamChat(requestId, request, callback)
         } catch (e: Exception) {
             val partial = synchronized(streamBuilder) { streamBuilder.toString() }
@@ -1258,7 +1276,7 @@ internal class InferenceClient(
             // Keep the request ID and ActiveStreamControl alive until the service
             // acknowledges native unwind or the original inference PID is killed.
             if (activeRequestId.get() == requestId) {
-                val targetPid = _remotePid.value
+                val targetPid = activeRequestPid.get()
                 val graceMs = effectiveTimeout.abortGracePeriodMs
                 EngineDiagnostics.info(
                     "ipc_client",
@@ -1345,6 +1363,7 @@ internal class InferenceClient(
 
             delay(graceMs.coerceAtLeast(0L))
             if (activeRequestId.compareAndSet(requestId, null)) {
+                activeRequestPid.compareAndSet(targetPid, null)
                 _state.value = EngineState.Reconnecting
                 EngineDiagnostics.info(
                     "ipc_client",
@@ -1379,7 +1398,7 @@ internal class InferenceClient(
             return
         }
 
-        val targetPid = _remotePid.value
+        val targetPid = activeRequestPid.get()
         EngineDiagnostics.info(
             "ipc_client",
             "CANCEL_REQUESTED",
@@ -1506,6 +1525,7 @@ internal class InferenceClient(
     override fun close() {
         isClosed.set(true)
         activeRequestId.set(null)
+        activeRequestPid.set(null)
         try {
             remoteService?.shutdown()
             if (isBound) {
