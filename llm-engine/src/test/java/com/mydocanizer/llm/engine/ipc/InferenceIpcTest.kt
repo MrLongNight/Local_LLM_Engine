@@ -366,6 +366,56 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun timeoutAfterReconnectNeverTargetsReplacementServicePid() = runBlocking {
+        val fakeService = FakeInferenceService().apply { hangBeforeStarted.set(true) }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 500L,
+            firstTokenMs = 2_000L,
+            interTokenMs = 2_000L,
+            totalInferenceMs = 10_000L,
+            abortGracePeriodMs = 100L,
+            reconnectMs = 1_000L
+        )
+        val observedAbortPid = AtomicInteger(0)
+        val livenessChecks = AtomicInteger(0)
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig,
+            processLivenessCheck = { pid ->
+                observedAbortPid.set(pid)
+                // Simulate the original PID exiting between the two liveness samples.
+                livenessChecks.incrementAndGet() == 1
+            }
+        )
+        client.initialize()
+
+        val stream = async {
+            client.streamChat(InferenceRequest.single("timeout after replacement")).toList()
+        }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) delay(5L)
+        }
+
+        // The request was dispatched to PID 99999. The proxy now reports its
+        // replacement before the prefill timeout is reached.
+        fakeService.currentProcessId.set(22222)
+        val events = withTimeout(2_000L) { stream.await() }
+
+        assertEquals(99999, observedAbortPid.get())
+        assertTrue("Timeout checks must remain bound to the original request PID", livenessChecks.get() >= 2)
+        assertEquals(null, fakeService.cancelledRequestId.get())
+        assertFalse("Timeout must not kill the replacement service", fakeService.isKilled.get())
+        assertTrue(events.none { it is InferenceEvent.Completed })
+        val timeout = events.filterIsInstance<InferenceEvent.Error>().single().throwable
+            as InferenceTimeoutException
+        assertEquals(FinishReason.TIMEOUT_PREFILL, timeout.reason)
+        client.close()
+    }
+
+    @Test
     fun cancellingStreamCollectorEscalatesWhenServiceIgnoresCooperativeCancel() = runBlocking {
         val fakeService = FakeInferenceService().apply {
             hangAfterFirstToken.set(true)
