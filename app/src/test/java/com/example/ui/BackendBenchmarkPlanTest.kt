@@ -43,6 +43,57 @@ class BackendBenchmarkPlanTest {
     }
 
     @Test
+    fun qwen35AcceptancePassPairsCpuAndVulkanForDefaultAndEveryGdnFusionPolicy() {
+        val profiles = BackendBenchmarkPlan.backendAcceptanceProfiles(
+            EngineConfig(batchSize = 128, microBatchSize = 64),
+            "QWEN35"
+        )
+        val policies = listOf(
+            GdnPolicy.ARCH_DEFAULT,
+            GdnPolicy.BOTH_FUSED,
+            GdnPolicy.BOTH_UNFUSED,
+            GdnPolicy.AR_FUSED_CH_UNFUSED,
+            GdnPolicy.AR_UNFUSED_CH_FUSED
+        )
+
+        assertEquals(10, profiles.size)
+        assertEquals(5, profiles.count { it.backend == BackendPreference.CPU })
+        assertEquals(5, profiles.count { it.backend == BackendPreference.VULKAN })
+        for ((index, policy) in policies.withIndex()) {
+            val cpu = profiles[index * 2]
+            val vulkan = profiles[index * 2 + 1]
+            assertEquals(BackendPreference.CPU, cpu.backend)
+            assertEquals(BackendPreference.VULKAN, vulkan.backend)
+            assertEquals(policy, cpu.config.gdnPolicy)
+            assertEquals(policy, vulkan.config.gdnPolicy)
+            assertEquals(0, cpu.config.gpuLayers)
+            assertEquals(99, vulkan.config.gpuLayers)
+            assertEquals(cpu.config.contextSize, vulkan.config.contextSize)
+            assertEquals(cpu.config.batchSize, vulkan.config.batchSize)
+            assertEquals(cpu.microBatchSize, vulkan.microBatchSize)
+            assertEquals(cpu.flashAttention, vulkan.flashAttention)
+            assertEquals(cpu.config.temperature, vulkan.config.temperature, 0f)
+            assertEquals(cpu.config.topP, vulkan.config.topP, 0f)
+            assertTrue(cpu.id.contains(policy.name))
+            assertTrue(vulkan.id.contains(policy.name))
+        }
+    }
+
+    @Test
+    fun qwen35MoeUsesSameCompactGdnAcceptanceCoverage() {
+        val profiles = BackendBenchmarkPlan.backendAcceptanceProfiles(
+            EngineConfig(),
+            "qwen35moe"
+        )
+        assertEquals(10, profiles.size)
+        assertEquals(
+            setOf(GdnPolicy.ARCH_DEFAULT, GdnPolicy.BOTH_FUSED, GdnPolicy.BOTH_UNFUSED,
+                GdnPolicy.AR_FUSED_CH_UNFUSED, GdnPolicy.AR_UNFUSED_CH_FUSED),
+            profiles.map { it.config.gdnPolicy }.toSet()
+        )
+    }
+
+    @Test
     fun q4kDecodePathSweepChangesOnlyTheInternalQ4kKernelModeAndForcesFullOffload() {
         val original = EngineConfig(
             contextSize = 4096,

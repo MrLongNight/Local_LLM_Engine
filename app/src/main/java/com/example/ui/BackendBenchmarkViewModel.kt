@@ -68,7 +68,7 @@ abstract class BackendBenchmarkViewModel(
         val source = if (model.path.startsWith("content://", ignoreCase = true)) {
             ModelSource.ContentUri(model.path, model.name)
         } else ModelSource.FilePath(model.path)
-        val profiles = BackendBenchmarkPlan.backendAcceptanceProfiles(originalConfig)
+        val profiles = BackendBenchmarkPlan.backendAcceptanceProfiles(originalConfig, model.architecture)
         val benchmarkPrompt =
             "Gib die Zahlen 1 bis 48 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
 
@@ -88,8 +88,9 @@ abstract class BackendBenchmarkViewModel(
                 "model=${model.name},modelBytes=${model.sizeBytes},profiles=${profiles.size}," +
                     "backends=VULKAN,CPU,kernelProfiles=AUTO,SUBGROUP,LARGE,QUANTIZATION_MATCHED_AB_PATHS,nUbatch=32,64,128," +
                     "flashAttention=DISABLED,ENABLED,AUTO_UB64,gdnPolicyMatrix=AR_CH_FUSION_COMBINATIONS,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
-                    "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS},context=${originalConfig.contextSize}," +
-                    "batch=${originalConfig.batchSize},prompt=fixed_counting_sequence"
+                    "measuredTokens=${BackendBenchmarkPlan.MEASURED_TOKENS}," +
+                    "gdnPolicies=${profiles.map { it.config.gdnPolicy.name }.distinct().joinToString("|")}," +
+                    "context=${originalConfig.contextSize},batch=${originalConfig.batchSize},prompt=fixed_counting_sequence"
             )
             try {
                 for ((index, profile) in profiles.withIndex()) {
@@ -305,8 +306,8 @@ abstract class BackendBenchmarkViewModel(
                 _benchmarkReport.value = buildString {
                     appendLine("Kompakter CPU/Vulkan-Abnahmetest – ${successfulRuns}/${profiles.size} Profile mit bestandenem Gate und gültiger Messung")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB); SHA-256: ${model.sha256 ?: "nicht verfügbar"}")
-                    appendLine("Umfang: genau zwei Referenzläufe mit identischem Modell und identischen Parametern – zuerst CPU, danach Vulkan.")
-                    appendLine("Vor jeder Messung: 16-Token-Greedy-Gate; CPU-Referenz zuerst, Vulkan nur bei Top-1-Identität und mindestens 4/5 Top-5-Überschneidung.")
+                    appendLine("Umfang: ${profiles.size / 2} CPU/Vulkan-Paare mit identischem Modell und identischen Parametern; Qwen3.5 prüft zusätzlich ARCH_DEFAULT und alle vier GDN-Fusionsmodi.")
+                    appendLine("Vor jeder Messung: 16-Token-Greedy-Gate; je GDN-Policy CPU-Referenz zuerst, Vulkan nur bei Top-1-Identität und mindestens 4/5 Top-5-Überschneidung.")
                     appendLine("Profile ohne Gate PASS sind ungültig; für sie werden keine tok/s ausgewiesen.")
                     appendLine("Je gültigem Profil: Modell-Load, Prefill, TTFT, 4 Warm-up- und 20 Mess-Tokens, Decode tok/s.")
                     appendLine("Graph-Splits stehen direkt in jeder Profilzeile. diagnosticRunId verbindet jede Zeile mit dem exakten INFERENCE_<runId>-Peak-PSS/RAM-/Thermal-Summary.")

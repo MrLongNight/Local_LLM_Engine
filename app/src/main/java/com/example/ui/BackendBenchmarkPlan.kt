@@ -37,25 +37,46 @@ internal object BackendBenchmarkPlan {
     )
 
     /**
-     * One compact acceptance pass: CPU reference first, then Vulkan candidate.
-     * Both use the same context, batch, threading, sampler, GDN and Flash Attention
-     * settings. Only the backend and requested GPU-layer count differ.
+     * Compact acceptance pass: paired CPU reference and Vulkan candidate per GDN policy.
+     * Qwen3.5 also exercises ARCH_DEFAULT and all four explicit autoregressive/chunked
+     * fusion combinations; other architectures retain the single configured policy.
+     * Every pair keeps context, batch, sampler, Flash Attention and GDN identical.
      */
-    fun backendAcceptanceProfiles(original: EngineConfig): List<FullMatrixProfile> {
+    fun backendAcceptanceProfiles(
+        original: EngineConfig,
+        modelArchitecture: String = ""
+    ): List<FullMatrixProfile> {
         val base = configuration(original)
-        return listOf(BackendPreference.CPU, BackendPreference.VULKAN).map { backend ->
-            val useVulkan = backend == BackendPreference.VULKAN
-            FullMatrixProfile(
-                id = if (useVulkan) "VULKAN_CANDIDATE" else "CPU_REFERENCE",
-                backend = backend,
-                kernelProfile = VulkanMatvecWorkgroup.AUTO,
-                microBatchSize = original.microBatchSize,
-                flashAttention = original.flashAttentionMode,
-                config = base.copy(
-                    backendPreference = backend,
-                    gpuLayers = if (useVulkan) 99 else 0
-                )
+        val isQwen35 = modelArchitecture.equals("qwen35", ignoreCase = true) ||
+            modelArchitecture.equals("qwen35moe", ignoreCase = true)
+        val gdnPolicies = if (isQwen35) {
+            listOf(
+                GdnPolicy.ARCH_DEFAULT,
+                GdnPolicy.BOTH_FUSED,
+                GdnPolicy.BOTH_UNFUSED,
+                GdnPolicy.AR_FUSED_CH_UNFUSED,
+                GdnPolicy.AR_UNFUSED_CH_FUSED
             )
+        } else {
+            listOf(original.gdnPolicy)
+        }
+        return gdnPolicies.flatMap { gdnPolicy ->
+            listOf(BackendPreference.CPU, BackendPreference.VULKAN).map { backend ->
+                val useVulkan = backend == BackendPreference.VULKAN
+                val suffix = if (isQwen35) "_GDN_${gdnPolicy.name}" else ""
+                FullMatrixProfile(
+                    id = (if (useVulkan) "VULKAN_CANDIDATE" else "CPU_REFERENCE") + suffix,
+                    backend = backend,
+                    kernelProfile = VulkanMatvecWorkgroup.AUTO,
+                    microBatchSize = original.microBatchSize,
+                    flashAttention = original.flashAttentionMode,
+                    config = base.copy(
+                        backendPreference = backend,
+                        gpuLayers = if (useVulkan) 99 else 0,
+                        gdnPolicy = gdnPolicy
+                    )
+                )
+            }
         }
     }
 
