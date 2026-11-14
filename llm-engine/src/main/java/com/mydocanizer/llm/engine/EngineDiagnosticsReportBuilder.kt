@@ -391,10 +391,18 @@ internal object EngineDiagnosticsReportBuilder {
                         appendLine(EngineDiagnosticsMetrics.timingSummary("sample", metrics.map { it.sampleUs }))
                         appendLine(EngineDiagnosticsMetrics.timingSummary("decode", metrics.map { it.decodeUs }))
                         appendLine(EngineDiagnosticsMetrics.timingSummary("decodeSubmit", metrics.map { it.decodeSubmitUs }))
+                        val queueSubmitSamples = metrics.mapNotNull { it.vulkanQueueSubmitUs }
+                        if (queueSubmitSamples.isNotEmpty()) {
+                            appendLine(EngineDiagnosticsMetrics.timingSummary("vkQueueSubmit", queueSubmitSamples))
+                        }
+                        val fenceWaitSamples = metrics.mapNotNull { it.vulkanFenceWaitUs }
+                        if (fenceWaitSamples.isNotEmpty()) {
+                            appendLine(EngineDiagnosticsMetrics.timingSummary("vkFenceWait", fenceWaitSamples))
+                        }
                         appendLine(EngineDiagnosticsMetrics.timingSummary("backendSyncWait", metrics.map { it.backendSyncWaitUs }))
                         appendLine(EngineDiagnosticsMetrics.timingSummary("tokenPiece", metrics.map { it.pieceUs }))
                         appendLine(EngineDiagnosticsMetrics.timingSummary("nativeStep", metrics.map { it.totalUs }))
-                        appendLine("Token-Schritte (index/sampleUs/decodeUs/submitUs/backendSyncWaitUs/pieceUs/totalUs):")
+                        appendLine("Token-Schritte (index/sampleUs/decodeUs/submitUs/vkQueueSubmitUs/vkFenceWaitUs/backendSyncWaitUs/pieceUs/totalUs):")
                         val orderedMetrics = metrics.sortedBy { it.index }
                         val representativeMetrics = if (orderedMetrics.size <= 8) {
                             orderedMetrics
@@ -402,7 +410,11 @@ internal object EngineDiagnosticsReportBuilder {
                             (orderedMetrics.take(4) + orderedMetrics.takeLast(4)).distinctBy { it.index }
                         }
                         representativeMetrics.forEach { metric ->
-                            appendLine("${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.decodeSubmitUs}/${metric.backendSyncWaitUs}/${metric.pieceUs}/${metric.totalUs}")
+                            appendLine(
+                                "${metric.index}/${metric.sampleUs}/${metric.decodeUs}/${metric.decodeSubmitUs}/" +
+                                    "${metric.vulkanQueueSubmitUs ?: "n/a"}/${metric.vulkanFenceWaitUs ?: "n/a"}/" +
+                                    "${metric.backendSyncWaitUs}/${metric.pieceUs}/${metric.totalUs}"
+                            )
                         }
                     }
             }
@@ -567,13 +579,6 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[VULKAN-GPU-OPERATIONSPROFIL – LETZTE ${MAX_VULKAN_PROFILE_SNAPSHOTS} GRAPH-SNAPSHOTS]")
             vulkanOperationSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
-            appendLine("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
-            if (memorySummaries.isEmpty()) appendLine("Keine RAM-Samples gefunden.")
-            memorySummaries.forEach(::appendLine)
-            appendLine()
-            appendLine("[RAM-ZEITVERLAUF – AUSGEDÜNNT, SPITZEN UND BACKEND-SAMPLES]")
-            memoryTimeline.forEach(::appendLine)
-            appendLine()
             appendLine("[BACKEND- UND INFERENZ-MESSWERTE]")
             if (performanceEvents.isEmpty()) {
                 appendLine("Keine abgeschlossenen Backend-/Inferenz-Messwerte gefunden.")
@@ -584,8 +589,17 @@ internal object EngineDiagnosticsReportBuilder {
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
             events.forEach(::appendLine)
             appendLine()
+            // Keep the most valuable throughput and synchronization evidence ahead
+            // of the potentially unbounded number of per-PID/per-phase RAM groups.
             appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
             tokenMetricSummary.lineSequence().forEach { appendLine(it) }
+            appendLine()
+            appendLine("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
+            if (memorySummaries.isEmpty()) appendLine("Keine RAM-Samples gefunden.")
+            memorySummaries.forEach(::appendLine)
+            appendLine()
+            appendLine("[RAM-ZEITVERLAUF – AUSGEDÜNNT, SPITZEN UND BACKEND-SAMPLES]")
+            memoryTimeline.forEach(::appendLine)
             appendLine()
             appendLine("[TESTAUSGABEN – IM STANDARD-EXPORT AUSGEBLENDET]")
             appendLine("Prompt-Inhalte, Token-Text und generierte Testantworten werden nicht exportiert.")

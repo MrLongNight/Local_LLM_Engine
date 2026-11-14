@@ -11,12 +11,18 @@ class EngineDiagnosticsTest {
 
     @Test
     fun extractedNativeMetricParserKeepsCurrentAndLegacySyncFieldsDistinct() {
-        val current = EngineDiagnosticsMetrics.nativeTokenStepMetric(
-            nativeMetric(index = 3, decodeUs = 900L, pid = 42, runId = "current-run", backend = "Vulkan")
+        val currentLine = nativeMetric(
+            index = 3, decodeUs = 900L, pid = 42, runId = "current-run", backend = "Vulkan"
+        ).replace(
+            "backendSyncWaitUs=0",
+            "vkQueueSubmitUs=120,vkFenceWaitUs=650,backendSyncWaitUs=770"
         )
+        val current = EngineDiagnosticsMetrics.nativeTokenStepMetric(currentLine)
         assertNotNull(current)
         assertEquals("current-run", current!!.runId)
-        assertEquals(0L, current.backendSyncWaitUs)
+        assertEquals(120L, current.vulkanQueueSubmitUs)
+        assertEquals(650L, current.vulkanFenceWaitUs)
+        assertEquals(770L, current.backendSyncWaitUs)
         assertFalse(current.usedLegacyGpuSyncWaitLabel)
 
         val legacyLine = nativeMetric(
@@ -71,6 +77,21 @@ class EngineDiagnosticsTest {
         )
     }
 
+
+    @Test
+    fun nativeDecodeReportIncludesQueueSubmitAndFenceWaitSeparately() {
+        val line = nativeMetric(
+            index = 1, decodeUs = 900_000, pid = 42, runId = "split-sync-run", backend = "Vulkan"
+        ).replace(
+            "backendSyncWaitUs=0",
+            "vkQueueSubmitUs=12,vkFenceWaitUs=840000,backendSyncWaitUs=850000"
+        )
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(line))
+
+        assertTrue(report.contains("vkQueueSubmit p50=12us"))
+        assertTrue(report.contains("vkFenceWait p50=840000us"))
+        assertTrue(report.contains("12/840000/850000"))
+    }
 
     @Test
     fun nativeDecodeMetricsAreGroupedByProcessBackendAndInferenceRun() {
@@ -376,7 +397,7 @@ class EngineDiagnosticsTest {
     }
 
     @Test
-    fun ramSummaryIsPlacedBeforeVerboseTokenMetricsWhenExportMustBeTruncated() {
+    fun nativeDecodeMetricsArePlacedBeforeVerboseRamAggregatesWhenExportMustBeTruncated() {
         val ramSample =
             "2026-11-10 16:00:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
                 "pid=100,phase=MODEL_LOADED_IDLE,processPssMb=123.4,nativePssMb=50.0," +
@@ -399,8 +420,12 @@ class EngineDiagnosticsTest {
 
         assertTrue(report.contains("MODEL_LOADED_IDLE"))
         assertTrue(ramIndex >= 0)
-        assertTrue(tokenIndex < 0 || ramIndex < tokenIndex)
+        assertTrue(tokenIndex >= 0)
+        assertTrue(tokenIndex < ramIndex)
         assertTrue(report.contains("PSS_peak=123.4MB"))
+        // Even when later RAM groups hit the hard export limit, the current
+        // native decode metrics are already present in the export.
+        assertTrue(report.contains("pid=850 backend=Vulkan runId=ram-priority-run-50 samples=8"))
     }
 
     @Test
