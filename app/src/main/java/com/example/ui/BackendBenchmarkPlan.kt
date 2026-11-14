@@ -229,11 +229,15 @@ internal object BackendBenchmarkPlan {
      * Only Q4_K decode changes; all other tensor types and inference settings remain fixed.
      */
     fun vulkanQ4kDecodeConfigurations(original: EngineConfig): List<EngineConfig> {
+        // AUTO is intentionally not used for the MMVQ arm: the Mali-specific AUTO
+        // policy selects base DMMV for Q4_K decode. Mode 7 explicitly requests MMVQ
+        // when the runtime's integer-dot and Q8_1 pipeline prerequisites are satisfied.
+        // Runtime path diagnostics still verify whether the requested kernel was available.
         val paths = listOf(
-            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO,
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE,
             com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
             com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
-            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.AUTO
+            com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE
         )
         val base = configuration(original).copy(
             backendPreference = BackendPreference.VULKAN,
