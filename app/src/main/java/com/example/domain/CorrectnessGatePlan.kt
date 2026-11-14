@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.domain
 
 /**
  * Pure evaluator for the Debug/TEXT_DIAGNOSTICS greedy correctness gate.
