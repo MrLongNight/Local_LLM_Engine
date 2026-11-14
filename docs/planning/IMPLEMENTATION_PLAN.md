@@ -1,4 +1,4 @@
-> **Dokumenttyp:** Übergeordneter Umsetzungsplan mit technischen Entscheidungen und datierter Nachweishistorie. CI- und Hardware-Statusblöcke sind historische Snapshots und kein aktueller Live-Status. Refactoring-Fortschritt steht ausschließlich in `../active-todos/REFACTORING_STATUS.md`; die offene Cache-Arbeit steht in `../active-todos/TODO_CACHE_STRATEGY.md`. Verbindliche Agent-Regeln stehen in `../AGENTS.md`.
+> **Dokumenttyp:** Übergeordneter Umsetzungsplan mit technischen Entscheidungen und datierter Nachweishistorie. CI- und Hardware-Statusblöcke sind historische Snapshots und kein aktueller Live-Status. Aktuell geplante Maßnahmen stehen ausschließlich in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md). Die nachfolgenden CI-, Geräte- und Umsetzungsstände sind datierte historische Snapshots, keine zweite aktive Aufgabenliste. Verbindliche Agent-Regeln stehen in `../AGENTS.md`.
 
 # CI-/APK-Nachweis-Snapshot vom 12.11.2026 (historisch)
 
