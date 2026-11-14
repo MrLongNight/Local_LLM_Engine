@@ -4,14 +4,14 @@ An Android demo application and reusable Android library for running local GGUF 
 
 > **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. Successful Kotlin unit tests, emulator instrumentation and APK compilation do not prove target-device model loading, inference, cancellation, hardware offload or performance.
 >
-> **For coding agents:** Start with [AGENTS.md](AGENTS.md), then read the live [refactoring roadmap](REFACTORING_ROADMAP.md) and the task-specific plan it links. Timestamped status sections in older documents are historical evidence, not the live task register.
+> **For coding agents:** Read [Agent-Regeln](docs/AGENTS.md) and the single live [Refactoring-Status](docs/REFACTORING_STATUS.md). All project documentation is under docs/.
 
 ## Project layout
 
 - `:app` — demo Android application.
 - `:llm-engine` — reusable Android library containing the public engine API and JNI/native llama.cpp integration.
 - `:llm-engine/src/main/cpp/llama.cpp` — pinned Git submodule of `ggml-org/llama.cpp` at `a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5` (2026-11-09).
-- `INTEGRATION_MYDOCANIZER.md` — integration notes for the intended myDocAnizer-Mobile target.
+- `docs/INTEGRATION_MYDOCANIZER.md` — integration notes for the intended myDocAnizer-Mobile target.
 
 ## Requirements
 
@@ -290,4 +290,4 @@ The single active implementation backlog and acceptance criteria are in [docs/IM
 
 ## Integration direction
 
-The `:llm-engine` module is intended to be reusable by myDocAnizer-Mobile without importing the demo application's UI or application-specific storage layer. See [INTEGRATION_MYDOCANIZER.md](INTEGRATION_MYDOCANIZER.md) and verify its instructions against the current public API before integrating.
+The `:llm-engine` module is intended to be reusable by myDocAnizer-Mobile without importing the demo application's UI or application-specific storage layer. See [docs/INTEGRATION_MYDOCANIZER.md](docs/INTEGRATION_MYDOCANIZER.md) and verify its instructions against the current public API before integrating.
