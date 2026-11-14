@@ -1,6 +1,6 @@
 # EngineViewModel – Struktur-Analyse vor Refactoring
 
-**Status:** Refactoring läuft – Chat-Extraktion umgesetzt; Model-Management-Extraktion auf main; aktuelle CI für HEAD a6bcd532 läuft  
+**Status:** Refactoring läuft – Chat-Extraktion umgesetzt; Model-Management-Extraktion auf main; JVM-Tests für HEAD a6bcd532 grün, APK-Build läuft  
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
 **Analyse-Commit:** `8947f76bf48e6553e8d62a3d8f93d19d8fb49645`  
@@ -198,9 +198,9 @@ Commits auf main:
 - a6bcd532be45bc7d08381ed802c388dd6219cf4e – Engine-Config-Abhängigkeit verdrahtet.
 
 Aktuelle CI für HEAD a6bcd532:
-- Unit Tests: Run 43556762677, Status in_progress bei letzter Abfrage.
-- Android APK Build: Run 43556762673, Status in_progress bei letzter Abfrage.
-- Daher sind die Model-Management-Änderungen noch nicht CI-verifiziert. Abgebrochene ältere Läufe auf Zwischen-Commits gelten nicht als Fehlernachweis und nicht als erfolgreiche Verifikation.
+- Unit Tests: Run 43556762677, **completed / success** (14.11.2026); der Lauf für HEAD a6bcd532 ist grün.
+- Android APK Build: Run 43556762673, bei letzter Abfrage weiterhin **in_progress**.
+- Damit ist die JVM-Testprüfung für Model Management bestanden; die vollständige Abnahme bleibt bis zum erfolgreichen APK-Build offen. Abgebrochene ältere Läufe auf Zwischen-Commits gelten nicht als Fehlernachweis und nicht als erfolgreiche Verifikation.
 
 ### 6.4 Nächste Schritte und Verifikationsregeln
 
