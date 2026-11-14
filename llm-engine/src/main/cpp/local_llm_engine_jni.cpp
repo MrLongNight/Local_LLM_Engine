@@ -286,6 +286,23 @@ static void log_native_info_message(const std::string& message) {
     local_llm_native_log_callback(GGML_LOG_LEVEL_INFO, message.c_str(), nullptr);
 }
 
+// Force pending stdio bytes into the shared file so the app process can read the
+// native log immediately after export or an inference terminal event. This only
+// flushes the file stream; it does not add an fsync to the inference hot path.
+static bool flush_native_log_file() {
+    std::lock_guard<std::mutex> lock(g_native_log_file_mutex);
+    if (g_native_log_file == nullptr) return false;
+    if (std::fflush(g_native_log_file) != 0) {
+        const int flush_error = errno;
+        __android_log_print(
+            ANDROID_LOG_ERROR, TAG,
+            "Failed to flush native diagnostics file: errno=%d", flush_error);
+        return false;
+    }
+    g_last_native_log_flush = std::chrono::steady_clock::now();
+    return true;
+}
+
 static constexpr int OVERFLOW_HEADROOM = 8;
 static constexpr int BATCH_SIZE = 512;
 static constexpr float DEFAULT_TEMP = 0.7f;
@@ -725,6 +742,12 @@ static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {
     return new_java_string_from_utf8(env, replacement);
 }
 
+static jstring finish_native_generation(JNIEnv* env, EngineInstance* engine) {
+    jstring final_piece = flush_incomplete_utf8(env, engine);
+    flush_native_log_file();
+    return final_piece;
+}
+
 static bool append_token_to_batch(
         llama_batch& batch,
         llama_token token,
@@ -808,6 +831,7 @@ static void local_llm_report_jni_exception(
     LOGE("JNI boundary caught C++ exception in %s: %s",
          function_name != nullptr ? function_name : "unknown",
          message != nullptr ? message : "unknown C++ exception");
+    flush_native_log_file();
     jclass exception_class = env->FindClass("java/lang/IllegalStateException");
     if (exception_class == nullptr) return;
     env->ThrowNew(
@@ -840,6 +864,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeSetDiagnostics
     // Install before llama_backend_init so Vulkan device discovery is captured too.
     llama_log_set(local_llm_native_log_callback, nullptr);
     if (new_file != nullptr) {
+        // A first row proves this process opened the exact file the exporter scans,
+        // even when backend initialization is short or fails.
+        log_native_info_message("LOCAL_LLM_NATIVE_DIAGNOSTICS_FILE_OPENED");
+        if (!flush_native_log_file()) {
+            LOGE("Native diagnostics file opened but the initial flush failed");
+        }
         LOGI("Native llama.cpp/ggml diagnostics file configured");
     } else {
         LOGE("Could not open native diagnostics file; native messages remain available in logcat");
@@ -888,6 +918,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(
     log_native_info_message("VULKAN_INTEGER_DOT_SHADER_COMPILED=false");
 #endif
     llama_backend_init();
+    log_native_info_message("LOCAL_LLM_BACKEND_INITIALIZATION_COMPLETED");
+    flush_native_log_file();
     LOGI("llama_backend_init completed");
 } catch (const std::exception& error) {
     local_llm_report_jni_exception(env, "nativeInitBackend", error.what());
@@ -900,6 +932,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeInitBackend(
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeShutdownBackend(JNIEnv* env, jclass /*clazz*/) try {
     llama_backend_free();
+    flush_native_log_file();
     LOGI("llama_backend_free completed");
 } catch (const std::exception& error) {
     local_llm_report_jni_exception(env, "nativeShutdownBackend", error.what());
@@ -921,6 +954,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetSystemInfo(
             << ",FP16=" << ggml_cpu_has_fp16_va()
             << ",recommendedPerformanceCores=" << recommended_performance_core_count();
     log_native_info_message(details.str());
+    flush_native_log_file();
     return env->NewStringUTF(details.str().c_str());
 } catch (const std::exception& error) {
     local_llm_report_jni_exception(env, "nativeGetSystemInfo", error.what());
@@ -1346,6 +1380,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     LOGI("Model loaded: n_ctx=%d, n_batch=%d, n_ubatch=%d, n_threads=%d, n_threads_batch=%d, active_backend=%s",
          ctx_size, b_size, resolved_micro_batch, n_threads, resolved_batch_threads,
          engine->active_backend.c_str());
+    flush_native_log_file();
     return 0;
 } catch (const std::exception& error) {
     local_llm_report_jni_exception(env, "nativeLoadModel", error.what());
@@ -1867,6 +1902,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     engine->stop_generation_position = engine->current_position + predict_len;
     engine->inference_start_us = llama_time_us();
 
+    flush_native_log_file();
     return 0;
 } catch (const std::exception& error) {
     local_llm_report_jni_exception(env, "nativeProcessChat", error.what());
@@ -1895,7 +1931,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         LOGI("Inference cancelled cooperatively");
         engine->last_finish_reason = 2; // CANCELLED
         engine->generation_finished = true;
-        return flush_incomplete_utf8(env, engine);
+        return finish_native_generation(env, engine);
     }
 
     if (engine->current_position >= engine->context_size - OVERFLOW_HEADROOM) {
@@ -1904,7 +1940,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
             LOGW("This model memory cannot shift safely; ending generation before context overflow");
             engine->last_finish_reason = 1; // controlled MAX_TOKENS stop
             engine->generation_finished = true;
-            return flush_incomplete_utf8(env, engine);
+            return finish_native_generation(env, engine);
         }
     }
 
@@ -1912,14 +1948,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         LOGI("Reached stop generation token count");
         engine->last_finish_reason = 1; // MAX_TOKENS
         engine->generation_finished = true;
-        return flush_incomplete_utf8(env, engine);
+        return finish_native_generation(env, engine);
     }
 
     if (engine->sampler == nullptr) {
         LOGE("Token generation requested without an initialized sampler");
         engine->last_finish_reason = 3; // ERROR
         engine->generation_finished = true;
-        return flush_incomplete_utf8(env, engine);
+        return finish_native_generation(env, engine);
     }
 
     // Token decoding happens in separate JNI calls after nativeProcessChat()
@@ -1971,7 +2007,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     if (!append_token_to_batch(engine->batch, new_token_id, engine->current_position, 0, true, engine->batch_size)) {
         engine->last_finish_reason = 3; // ERROR
         engine->generation_finished = true;
-        return flush_incomplete_utf8(env, engine);
+        return finish_native_generation(env, engine);
     }
 
     int decode_result = 0;
@@ -2002,7 +2038,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->system_prompt_position = 0;
         engine->last_finish_reason = 2; // CANCELLED
         engine->generation_finished = true;
-        return flush_incomplete_utf8(env, engine);
+        return finish_native_generation(env, engine);
     }
     if (decode_result != 0) {
         LOGE("llama_decode failed during token generation with code %d; invalidating KV state", decode_result);
@@ -2012,7 +2048,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->system_prompt_position = 0;
         engine->last_finish_reason = 3; // ERROR
         engine->generation_finished = true;
-        return flush_incomplete_utf8(env, engine);
+        return finish_native_generation(env, engine);
     }
     const int64_t decode_duration_us = decode_submit_duration_us + backend_sync_wait_us;
 
@@ -2027,7 +2063,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
              static_cast<double>(stop_step_duration_us) / 1000.0);
         engine->last_finish_reason = 0; // STOP
         engine->generation_finished = true;
-        return flush_incomplete_utf8(env, engine);
+        return finish_native_generation(env, engine);
     }
 
     // The EOG token is decoded into the native context but is not returned to the UI.
@@ -2069,9 +2105,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     return new_java_string_from_utf8(env, valid_output);
 } catch (const std::exception& error) {
     local_llm_report_jni_exception(env, "nativeGenerateNextToken", error.what());
+    flush_native_log_file();
     return nullptr;
 } catch (...) {
     local_llm_report_jni_exception(env, "nativeGenerateNextToken", "unknown C++ exception");
+    flush_native_log_file();
     return nullptr;
 }
 

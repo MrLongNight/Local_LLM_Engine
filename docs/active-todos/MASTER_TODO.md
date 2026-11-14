@@ -120,6 +120,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 **Acceptance:** No supported normal build persists user/document prompt or response content. Engineering diagnostics remain structured, bounded and run-correlated.
 
+- [x] Add a native diagnostics-file startup marker and explicit `fflush` checkpoints after backend/model/prompt initialization and inference terminal paths, so native log bytes are visible to export immediately instead of waiting for the 500 ms batching window.
 - [ ] Verify the exported document-provider file is byte-identical and non-empty, and confirm the scan includes both app-process and `:inference` process logs on the target device.
 
 ### P1-02 — Stabilize memory/resource handling under repeated failure and recovery
