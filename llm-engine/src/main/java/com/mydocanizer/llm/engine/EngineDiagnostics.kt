@@ -323,6 +323,7 @@ object EngineDiagnostics {
         ) || event.startsWith("BACKEND_BENCHMARK_") ||
             event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
             event.startsWith("VULKAN_Q4K_PATH_SWEEP_") || event.startsWith("FULL_MATRIX_") ||
+            event.startsWith("BACKEND_ACCEPTANCE_") ||
             event.startsWith("CORRECTNESS_GATE_")
     }
 
@@ -423,7 +424,9 @@ object EngineDiagnostics {
         val fullMatrixRows = kotlinLines
             .filter {
                 eventName(it) == "FULL_MATRIX_RESULT" ||
-                    eventName(it) == "FULL_MATRIX_ROW_INVALID"
+                    eventName(it) == "FULL_MATRIX_ROW_INVALID" ||
+                    eventName(it) == "BACKEND_ACCEPTANCE_RESULT" ||
+                    eventName(it) == "BACKEND_ACCEPTANCE_ROW_INVALID"
             }
             .takeLast(48)
         val fullMatrixLifecycleEvents = kotlinLines
@@ -434,7 +437,13 @@ object EngineDiagnostics {
                     "FULL_MATRIX_CANCELLED",
                     "FULL_MATRIX_FAILED",
                     "FULL_MATRIX_RESTORED",
-                    "FULL_MATRIX_RESTORE_FAILED"
+                    "FULL_MATRIX_RESTORE_FAILED",
+                    "BACKEND_ACCEPTANCE_STARTED",
+                    "BACKEND_ACCEPTANCE_SAFETY_STOP",
+                    "BACKEND_ACCEPTANCE_CANCELLED",
+                    "BACKEND_ACCEPTANCE_FAILED",
+                    "BACKEND_ACCEPTANCE_RESTORED",
+                    "BACKEND_ACCEPTANCE_RESTORE_FAILED"
                 )
             }
             .takeLast(6)
@@ -455,6 +464,7 @@ object EngineDiagnostics {
                     event.startsWith("VULKAN_DMMV_SWEEP_") ||
                         event.startsWith("VULKAN_Q4K_PATH_SWEEP_") ||
                         event.startsWith("FULL_MATRIX_") ||
+                        event.startsWith("BACKEND_ACCEPTANCE_") ||
                         event.startsWith("CORRECTNESS_GATE_") ||
                         event.endsWith("_TEST_OUTPUT")
                 }
@@ -768,7 +778,7 @@ object EngineDiagnostics {
             if (gateStatusSummary.isEmpty()) appendLine("Keine Korrektheits-Gate-Ergebnisse vorhanden.")
             else gateStatusSummary.forEach(::appendLine)
             appendLine()
-            appendLine("[VOLLSTÄNDIGE MODELLMATRIX – PROFILERGEBNISSE]")
+            appendLine("[CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE]")
             if (fullMatrixRows.isEmpty()) {
                 appendLine("Keine Matrix-Profilzeilen vorhanden.")
             } else {
