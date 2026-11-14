@@ -48,5 +48,4 @@ internal fun VulkanQ4kDiagnosticsSection(
                         }
                     }
                 }
-            }
 }
