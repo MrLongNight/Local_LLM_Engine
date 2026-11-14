@@ -361,6 +361,46 @@ class EngineDiagnosticsTest {
         assertFalse(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
     }
 
+
+    @Test
+    fun compactExportRetainsBothBackendAcceptanceRowsAndLifecycleEvents() {
+        val lines = listOf(
+            "2026-11-14 02:00:00.000 [INFO] [benchmark] BACKEND_ACCEPTANCE_STARTED - " +
+                "model=lfm3,profiles=2,backends=CPU,VULKAN",
+            "2026-11-14 02:00:01.000 [INFO] [benchmark] BACKEND_ACCEPTANCE_PROFILE_STARTED - " +
+                "index=1,total=2,profile=CPU_REFERENCE,backend=CPU",
+            "2026-11-14 02:00:02.000 [INFO] [benchmark] CORRECTNESS_GATE_RESULT - " +
+                "profile=CPU_REFERENCE,backend=CPU,gateRunId=cpu-gate,status=PASS",
+            "2026-11-14 02:00:03.000 [INFO] [benchmark] BACKEND_ACCEPTANCE_RESULT - " +
+                "profile=CPU_REFERENCE,model=lfm3,backend=CPU,gateStatus=PASS," +
+                "decodeTokensPerSecond=5.1,diagnosticRunId=cpu-measurement,gateRunId=cpu-gate",
+            "2026-11-14 02:00:04.000 [INFO] [benchmark] BACKEND_ACCEPTANCE_PROFILE_STARTED - " +
+                "index=2,total=2,profile=VULKAN_CANDIDATE,backend=VULKAN",
+            "2026-11-14 02:00:05.000 [INFO] [benchmark] CORRECTNESS_GATE_RESULT - " +
+                "profile=VULKAN_CANDIDATE,backend=VULKAN,gateRunId=vulkan-gate," +
+                "cpuReferenceRunId=cpu-gate,status=PASS",
+            "2026-11-14 02:00:06.000 [INFO] [benchmark] BACKEND_ACCEPTANCE_RESULT - " +
+                "profile=VULKAN_CANDIDATE,model=lfm3,backend=VULKAN,gateStatus=PASS," +
+                "decodeTokensPerSecond=2.9,diagnosticRunId=vulkan-measurement,gateRunId=vulkan-gate",
+            "2026-11-14 02:00:07.000 [INFO] [benchmark] BACKEND_ACCEPTANCE_RESTORED - " +
+                "backendPreference=VULKAN,activeBackend=Vulkan"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+
+        assertTrue(report.contains("[CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE]"))
+        assertTrue(report.contains("profile=CPU_REFERENCE"))
+        assertTrue(report.contains("decodeTokensPerSecond=5.1"))
+        assertTrue(report.contains("diagnosticRunId=cpu-measurement"))
+        assertTrue(report.contains("profile=VULKAN_CANDIDATE"))
+        assertTrue(report.contains("decodeTokensPerSecond=2.9"))
+        assertTrue(report.contains("diagnosticRunId=vulkan-measurement"))
+        assertTrue(report.contains("BACKEND_ACCEPTANCE_STARTED"))
+        assertTrue(report.contains("BACKEND_ACCEPTANCE_RESTORED"))
+        assertFalse(report.contains("BACKEND_ACCEPTANCE_PROFILE_STARTED"))
+        assertFalse(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
+    }
+
     private fun vulkanOperationMetric(
         pid: Int,
         runId: String,
