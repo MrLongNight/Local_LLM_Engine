@@ -4,7 +4,9 @@
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
 **Analyse-HEAD:** `98cbaf367ba8661e2377c09cf3ca0514bcb5ec18`
-**Aktueller Extraktionsstand:** erster Code-Commit wird erstellt  
+**Aktueller Extraktionsstand:** SystemPromptSection extrahiert; GitHub Actions laufen
+**Mermaid-Diagramm:** [SettingsScreen-Struktur live öffnen](https://mermaid.ai/app/projects/d7b9e612-2e4e-4eba-ac5b-098c4d58b067/diagrams/4583f977-9047-4e7c-bf08-18105680eae0/version/v0.1/edit?utm_source=mermaid_app_widget&utm_medium=mermaid-chatgpt-app)  
+**Mermaid documentID:** `4583f977-9047-4e7c-bf08-18105680eae0` (bestehendes Diagramm wird aktualisiert, keine Duplikate)  
 **Datei:** `app/src/main/java/com/example/ui/SettingsScreen.kt`  
 **Datei-Snapshot (Git-Blob):** `68c1f57b8f0ffc78cb0a3ae86a2c1f07a8eff4dd`  
 **Umfang:** 22.823 Bytes laut GitHub-Dateimetadaten, 438 Zeilen
@@ -103,7 +105,7 @@ Die einfachste verhaltensneutrale Übergabe ist, die bereits vorhandene `EngineV
 
 | Sektion | Status | Code-Commit | Build |
 |---|---|---|---|
-| SystemPromptSection | Extrahiert | wird erstellt | CI ausstehend |
+| SystemPromptSection | Extrahiert | `0600cdd903170d7e439c8621095868afc045e9d3` | APK + Unit Tests laufen (Runs `43557624968`, `43557624991`) |
 | BackendSettingsSection | Offen | – | – |
 | VulkanTuningSection | Offen | – | – |
 | InferenceSettingsSection | Offen | – | – |
@@ -114,3 +116,8 @@ Die einfachste verhaltensneutrale Übergabe ist, die bereits vorhandene `EngineV
 **Erste Extraktion:** Die bestehende System-Prompt-Card wurde in `SystemPromptSection.kt` verschoben. Die ursprünglichen Card-Inhalte (Text, Modifier, TestTag, Callbacks und Parameter) werden unverändert übernommen. Der vorhandene LazyColumn-Eintrag bleibt an derselben Position und ruft die neue Composable auf. `SettingsScreen`-Signatur und Screen-weite State-Sammlung bleiben unverändert.
 
 **Build-Gate:** Der Commit wird durch die vorhandenen GitHub-Actions geprüft. Weitere Sektionen werden erst nach erfolgreicher Prüfung des jeweiligen Code-Commits extrahiert. Bei einem CI-Fehler wird zuerst die Ursache behoben und erneut geprüft.
+
+
+### Strukturdiagramm – Pflegepflicht
+
+Das gespeicherte Mermaid-Diagramm ist Teil der Refactoring-Dokumentation. Es wird nach **jedem** Sektion-Commit und jeder strukturellen Abweichung aktualisiert. Die `documentID` bleibt stabil; es wird das bestehende Diagramm aktualisiert, kein neues angelegt. Statusfarben und Dateigrößen müssen dem tatsächlich verifizierten Repository-Stand entsprechen.
