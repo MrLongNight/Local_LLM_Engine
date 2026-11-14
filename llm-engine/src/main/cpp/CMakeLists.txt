@@ -501,10 +501,17 @@ static void ggml_vk_get_physical_device_features2(
     // LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV: Mali without integer-dot keeps the AUTO base path.
     // Modes 3/4/5 expose explicit Q4_K/Q5_K/Q6_K A/B paths; Q5_K/Q6_K logic is unchanged.
     const int local_llm_quant_override = local_llm_vulkan_dmmv_workgroup_override();
+    // LOCAL_LLM_Q4K_Q8_1_ELIGIBILITY: preserve upstream Q8_1 input/layout/alignment/precision requirements.
+    // Only bypass ggml_vk_should_use_mmvq()'s shape heuristic for this measured Q4_K batch-1 A/B path.
     const bool local_llm_q4k_integer_dot_batch1 =
         src0->type == GGML_TYPE_Q4_K &&
         ne11 == 1 &&
         ctx->device->integer_dot_product &&
+        src1->type == GGML_TYPE_F32 &&
+        ggml_is_contiguous(src1) &&
+        !y_non_contig &&
+        (ne11 * ne10) % 4 == 0 &&
+        (swap_inputs || ggml_vk_src1_prec_allows_q8(dst)) &&
         local_llm_quant_override != 3;
     const bool local_llm_mali_q4k_auto =
         local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;
@@ -967,6 +974,10 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH" OR
        NOT _vulkan_contents MATCHES "local_llm_q4k_integer_dot_batch1" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_Q8_1_ELIGIBILITY" OR
+       NOT _vulkan_contents MATCHES "src1->type == GGML_TYPE_F32" OR
+       NOT _vulkan_contents MATCHES "ggml_is_contiguous\\(src1\\)" OR
+       NOT _vulkan_contents MATCHES "ggml_vk_src1_prec_allows_q8\\(dst\\)" OR
        NOT _vulkan_contents MATCHES "selected=MMVQ_INTEGER_DOT" OR
        NOT _vulkan_contents MATCHES "reason=%s" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
