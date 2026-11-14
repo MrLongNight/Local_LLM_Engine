@@ -5,6 +5,14 @@ package com.example.ui
  * Trace rows contain token IDs and logits only; prompt and token-piece text is not parsed.
  */
 internal object CorrectnessGatePlan {
+    /**
+     * The gate decodes only [BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS] tokens. Tokenizers that
+     * emit every digit as its own token (Qwen, LFM, ...) need 23+ tokens for
+     * "322, 324, 326, 328, 330", so the token budget cuts the answer mid-number. A budget-truncated
+     * answer is accepted when it is a long enough prefix of the expected answer.
+     */
+    private const val MIN_TRUNCATED_ANSWER_CHARS = 7
+
     data class Candidate(val tokenId: Int, val logit: Double)
     data class TokenStep(val step: Int, val selectedId: Int, val top5: List<Candidate>)
     data class GateRun(
@@ -125,7 +133,13 @@ internal object CorrectnessGatePlan {
 
         val normalizedOutput = run.output.filterNot { it.isWhitespace() }
         val expectedOutput = BackendBenchmarkPlan.CORRECTNESS_GATE_EXPECTED.joinToString(",")
-        if (normalizedOutput != expectedOutput) {
+        // Exact answer, or an answer cut by the 16-token budget. Extra numbers, explanatory text,
+        // wrong digits and a too-short stub are still rejected.
+        val isExactAnswer = normalizedOutput == expectedOutput
+        val isBudgetTruncatedPrefix = normalizedOutput.length >= MIN_TRUNCATED_ANSWER_CHARS &&
+            normalizedOutput.length < expectedOutput.length &&
+            expectedOutput.startsWith(normalizedOutput)
+        if (!isExactAnswer && !isBudgetTruncatedPrefix) {
             return "EXPECTED_OUTPUT_MISMATCH"
         }
         if (maxConsecutiveRepeat(steps) > 8) return "TOKEN_REPEAT_OVER_8"

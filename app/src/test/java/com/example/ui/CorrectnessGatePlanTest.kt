@@ -203,4 +203,43 @@ class CorrectnessGatePlanTest {
         assertEquals("EXPECTED_OUTPUT_MISMATCH", explanationResult.reason)
     }
 
+    @Test
+    fun acceptsAnswerCutByTheSixteenTokenBudgetWhenItIsAPrefixOfTheExpectedAnswer() {
+        // Digit-per-token tokenizers (Qwen, LFM) cannot emit all five numbers in 16 tokens.
+        val truncated = CorrectnessGatePlan.parse("322, 324, 326, 3", trace("budget-cut", "CPU"))
+        val result = CorrectnessGatePlan.evaluate(truncated, expectedBackend = "CPU")
+        assertTrue(result.passed)
+    }
+
+    @Test
+    fun truncatedPrefixStillComparesVulkanAgainstTheCpuReference() {
+        val cpu = CorrectnessGatePlan.parse("322, 324, 326, 3", trace("cpu-cut", "CPU"))
+        val vulkan = CorrectnessGatePlan.parse(
+            "322, 324, 326, 3",
+            trace("vulkan-cut", "Vulkan", changeSelectedAtStep = 5)
+        )
+        val result = CorrectnessGatePlan.evaluate(vulkan, cpu, expectedBackend = "Vulkan")
+        assertFalse(result.passed)
+        assertEquals("CPU_TOP1_MISMATCH", result.reason)
+    }
+
+    @Test
+    fun rejectsTooShortOrWrongTruncatedAnswers() {
+        val tooShort = CorrectnessGatePlan.parse("322,3", trace("stub", "CPU"))
+        assertEquals(
+            "EXPECTED_OUTPUT_MISMATCH",
+            CorrectnessGatePlan.evaluate(tooShort, expectedBackend = "CPU").reason
+        )
+        val wrongDigits = CorrectnessGatePlan.parse("322, 325, 326, 3", trace("wrong-cut", "CPU"))
+        assertEquals(
+            "EXPECTED_OUTPUT_MISMATCH",
+            CorrectnessGatePlan.evaluate(wrongDigits, expectedBackend = "CPU").reason
+        )
+        val empty = CorrectnessGatePlan.parse("", trace("empty", "CPU"))
+        assertEquals(
+            "EXPECTED_OUTPUT_MISMATCH",
+            CorrectnessGatePlan.evaluate(empty, expectedBackend = "CPU").reason
+        )
+    }
+
 }
