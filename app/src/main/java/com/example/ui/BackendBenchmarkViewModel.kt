@@ -1,5 +1,8 @@
 package com.example.ui
 
+import com.example.domain.BackendBenchmarkPlan
+import com.example.domain.CorrectnessGatePlan
+
 import android.app.ActivityManager
 import android.app.Application
 import android.net.Uri

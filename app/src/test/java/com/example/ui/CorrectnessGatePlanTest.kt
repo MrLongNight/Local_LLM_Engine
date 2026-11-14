@@ -1,5 +1,7 @@
 package com.example.ui
 
+import com.example.domain.CorrectnessGatePlan
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

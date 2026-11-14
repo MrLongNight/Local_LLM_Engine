@@ -1,5 +1,7 @@
 package com.example.ui
 
+import com.example.domain.InferenceConfigSmokePlan
+
 import android.app.ActivityManager
 import android.app.Application
 import android.net.Uri
