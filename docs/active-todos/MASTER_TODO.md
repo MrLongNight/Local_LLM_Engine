@@ -210,7 +210,7 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 - [x] Extract process-log storage, per-process rotation, deterministic cross-process log merge and verified URI export into `EngineDiagnosticsStorage`.
 - [x] Extract native/Kotlin token-step parsing, Vulkan operation parsing and timing/percentile helpers into `EngineDiagnosticsMetrics`.
 - [x] Add direct parser tests for current vs legacy sync fields, run correlation, Vulkan metrics and malformed rows. Existing Android process instrumentation continues to verify app-process file persistence.
-- [ ] Move the large compact report composer/resource aggregation out of `EngineDiagnostics`; keep the current `EngineDiagnostics` API as the facade.
+- [x] Move compact report composition, resource aggregation and UTF-8 export bounding into `EngineDiagnosticsReportBuilder`; `EngineDiagnostics` remains the API facade (143 lines after extraction).
 - [ ] Define bounded versioned events with run/request/PID correlation; keep legacy parsing only when required.
 
 **Acceptance:** Cohesive diagnostics components with bounded, privacy-safe exports and independent tests.
