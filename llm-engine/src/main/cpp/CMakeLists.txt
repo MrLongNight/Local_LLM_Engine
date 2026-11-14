@@ -282,6 +282,7 @@ extern "C" int local_llm_vulkan_dmmv_workgroup_override();
 extern "C" const char * local_llm_vulkan_profile_run_id();
 extern "C" bool local_llm_vulkan_logits_readback_timing_active();
 extern "C" void local_llm_vulkan_logits_readback_record(int phase, uint64_t duration_us);
+extern "C" void local_llm_vulkan_sync_phase_record(int phase, uint64_t duration_us);
 
 // Emit each selected Q4_K path once per native inference. This keeps the
 // diagnostic bounded and avoids allocating per-operation signature strings.
@@ -327,6 +328,54 @@ static void ggml_vk_get_physical_device_features2(
     endif()
     string(REPLACE "${_include_anchor}" "${_include_anchor}\n${_helper}" _vulkan_contents "${_vulkan_contents}")
     string(REPLACE "vkGetPhysicalDeviceFeatures2(" "ggml_vk_get_physical_device_features2(" _vulkan_contents "${_vulkan_contents}")
+
+    # Instrument Vulkan queue submission independently from fence completion.
+    set(_queue_submit_anchor [=[
+    ctx->p->q->handle->submit(submit_infos, fence);
+
+    ctx->seqs.clear();]=])
+    string(FIND "${_vulkan_contents}" "${_queue_submit_anchor}" _queue_submit_position)
+    if(_queue_submit_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan queue-submit anchor changed.")
+    endif()
+    set(_queue_submit_replacement [=[
+    const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+    const auto local_llm_submit_start = local_llm_sync_timing
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    ctx->p->q->handle->submit(submit_infos, fence);
+    if (local_llm_sync_timing) {
+        local_llm_vulkan_sync_phase_record(0, static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - local_llm_submit_start).count()));
+    }
+
+    ctx->seqs.clear();]=])
+    string(REPLACE "${_queue_submit_anchor}" "${_queue_submit_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    # The empty-sequence submit also reaches the driver and must be counted.
+    set(_empty_submit_anchor [=[
+        if (fence) {
+            ctx->p->q->handle->submit({}, fence);
+        }
+        return;]=])
+    string(FIND "${_vulkan_contents}" "${_empty_submit_anchor}" _empty_submit_position)
+    if(_empty_submit_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream empty queue-submit anchor changed.")
+    endif()
+    set(_empty_submit_replacement [=[
+        if (fence) {
+            const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+            const auto local_llm_submit_start = local_llm_sync_timing
+                ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            ctx->p->q->handle->submit({}, fence);
+            if (local_llm_sync_timing) {
+                local_llm_vulkan_sync_phase_record(0, static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - local_llm_submit_start).count()));
+            }
+        }
+        return;]=])
+    string(REPLACE "${_empty_submit_anchor}" "${_empty_submit_replacement}" _vulkan_contents "${_vulkan_contents}")
 
     # Diagnostic selectors: AUTO/SUBGROUP/LARGE compare workgroups; modes 3-5
     # select base-type MMV for Q4_K/Q5_K/Q6_K decode; mode 6 selects Q4_K F16 prefill.
@@ -886,6 +935,9 @@ static void ggml_vk_get_physical_device_features2(
         message(FATAL_ERROR "LocalLLM: upstream Vulkan fence-wait anchor changed; review the Mali wait strategy.")
     endif()
     set(_mali_fence_wait_replacement [=[
+    const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+    const auto local_llm_fence_wait_start = local_llm_sync_timing
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Mali-G57 shares system memory with the CPU. Repeatedly polling the final
     // fence can keep a CPU core busy for the full GPU decode interval.
     if (ctx->device->vendor_id == 0x13B5) {
@@ -932,6 +984,11 @@ static void ggml_vk_get_physical_device_features2(
         }
     }
     ctx->device->device.resetFences({ ctx->fence });
+    if (local_llm_sync_timing) {
+        local_llm_vulkan_sync_phase_record(1, static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - local_llm_fence_wait_start).count()));
+    }
 ]=])
     string(REPLACE "${_mali_fence_wait_anchor}" "${_mali_fence_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
     # Upstream writes GGML_VK_PERF_LOGGER output to std::cerr, which is not

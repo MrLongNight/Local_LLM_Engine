@@ -41,6 +41,8 @@ static std::atomic<uint64_t> g_vulkan_logits_readback_map_us{0};
 static std::atomic<uint64_t> g_vulkan_logits_readback_map_allocations{0};
 static std::atomic<uint64_t> g_vulkan_logits_readback_copy_us{0};
 static std::atomic<uint64_t> g_vulkan_logits_readback_sync_us{0};
+static std::atomic<uint64_t> g_vulkan_queue_submit_us{0};
+static std::atomic<uint64_t> g_vulkan_fence_wait_us{0};
 
 extern "C" bool local_llm_vulkan_logits_readback_timing_active() {
     return g_vulkan_logits_readback_timing_active.load(std::memory_order_relaxed);
@@ -62,11 +64,22 @@ extern "C" void local_llm_vulkan_logits_readback_record(int phase, uint64_t dura
     }
 }
 
+extern "C" void local_llm_vulkan_sync_phase_record(int phase, uint64_t duration_us) {
+    if (!local_llm_vulkan_logits_readback_timing_active()) return;
+    switch (phase) {
+        case 0: g_vulkan_queue_submit_us.fetch_add(duration_us, std::memory_order_relaxed); break;
+        case 1: g_vulkan_fence_wait_us.fetch_add(duration_us, std::memory_order_relaxed); break;
+        default: break;
+    }
+}
+
 class VulkanLogitsReadbackTimingScope {
 public:
     VulkanLogitsReadbackTimingScope() {
         g_vulkan_logits_readback_copy_us.store(0, std::memory_order_relaxed);
         g_vulkan_logits_readback_sync_us.store(0, std::memory_order_relaxed);
+        g_vulkan_queue_submit_us.store(0, std::memory_order_relaxed);
+        g_vulkan_fence_wait_us.store(0, std::memory_order_relaxed);
         g_vulkan_logits_readback_timing_active.store(true, std::memory_order_release);
     }
     ~VulkanLogitsReadbackTimingScope() {
@@ -1029,6 +1042,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     g_vulkan_logits_readback_map_allocations.store(0, std::memory_order_relaxed);
     g_vulkan_logits_readback_copy_us.store(0, std::memory_order_relaxed);
     g_vulkan_logits_readback_sync_us.store(0, std::memory_order_relaxed);
+    g_vulkan_queue_submit_us.store(0, std::memory_order_relaxed);
+    g_vulkan_fence_wait_us.store(0, std::memory_order_relaxed);
 
     if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 7) {
         LOGE("Invalid Vulkan matvec override mode: %d", vulkan_dmmv_workgroup);
@@ -2064,6 +2079,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return finish_native_generation(env, engine);
     }
     const int64_t decode_duration_us = decode_submit_duration_us + backend_sync_wait_us;
+    const uint64_t vulkan_queue_submit_us =
+        g_vulkan_queue_submit_us.exchange(0, std::memory_order_relaxed);
+    const uint64_t vulkan_fence_wait_us =
+        g_vulkan_fence_wait_us.exchange(0, std::memory_order_relaxed);
 
     engine->current_position++;
     engine->cached_tokens.push_back(new_token_id);
@@ -2103,6 +2122,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
                << ", decodeUs=" << decode_duration_us
                << ", decodeSubmitUs=" << decode_submit_duration_us
                << ", backendSyncWaitUs=" << backend_sync_wait_us
+               << ", vkQueueSubmitUs=" << vulkan_queue_submit_us
+               << ", vkFenceWaitUs=" << vulkan_fence_wait_us
                << ", pieceUs=" << piece_duration_us
                << ", totalUs=" << token_total_duration_us
                << ", pid=" << getpid()
