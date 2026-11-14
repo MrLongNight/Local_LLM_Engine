@@ -35,6 +35,9 @@ abstract class ChatViewModel(
     abstract val systemPrompt: StateFlow<String>
     abstract val isBenchmarking: StateFlow<Boolean>
 
+    protected abstract val _engineConfig: MutableStateFlow<EngineConfig>
+    protected abstract val _systemPrompt: MutableStateFlow<String>
+    protected abstract val _isBenchmarking: MutableStateFlow<Boolean>
     protected abstract val _statusMessage: MutableStateFlow<String?>
     protected abstract val _errorMessage: MutableStateFlow<String?>
 
@@ -50,7 +53,7 @@ abstract class ChatViewModel(
     private val _inputText = MutableStateFlow("")
     val inputText: StateFlow<String> = _inputText.asStateFlow()
 
-    private val _isGenerating = MutableStateFlow(false)
+    protected val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
     private val _currentStreamingText = MutableStateFlow("")
