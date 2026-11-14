@@ -11,7 +11,9 @@ internal object CorrectnessGatePlan {
      * "322, 324, 326, 328, 330", so the token budget cuts the answer mid-number. A budget-truncated
      * answer is accepted when it is a long enough prefix of the expected answer.
      */
-    private const val MIN_TRUNCATED_ANSWER_CHARS = 7
+    // Require at least three complete sequence values; a two-value prefix can
+    // otherwise hide an early EOS or a stalled/blank remainder of the token budget.
+    private const val MIN_TRUNCATED_ANSWER_CHARS = "322,324,326".length
 
     data class Candidate(val tokenId: Int, val logit: Double)
     data class TokenStep(val step: Int, val selectedId: Int, val top5: List<Candidate>)

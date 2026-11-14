@@ -224,6 +224,18 @@ class CorrectnessGatePlanTest {
     }
 
     @Test
+    fun rejectsTwoNumberPrefixAsInsufficientCorrectnessEvidence() {
+        val twoNumbers = CorrectnessGatePlan.parse(
+            "322, 324",
+            trace("two-numbers", "CPU")
+        )
+        val result = CorrectnessGatePlan.evaluate(twoNumbers, expectedBackend = "CPU")
+
+        assertFalse(result.passed)
+        assertEquals("EXPECTED_OUTPUT_MISMATCH", result.reason)
+    }
+
+    @Test
     fun rejectsTooShortOrWrongTruncatedAnswers() {
         val tooShort = CorrectnessGatePlan.parse("322,3", trace("stub", "CPU"))
         assertEquals(
