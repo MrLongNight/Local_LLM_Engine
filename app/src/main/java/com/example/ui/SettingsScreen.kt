@@ -1,38 +1,20 @@
 package com.example.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Divider
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
-import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ModelInfo
-import com.mydocanizer.llm.engine.ReloadAfterAbort
-import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
-import kotlin.math.roundToInt
+import com.example.ui.settings.sections.BackendSettingsSection
 import com.example.ui.settings.sections.SystemPromptSection
 
 @Composable
@@ -67,130 +49,11 @@ fun SettingsScreen(
 
         // Hardware Acceleration / Backend Selection Card
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Hardware-Beschleunigung & GPU",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Das Standardprofil erzwingt Vulkan-GPU-Offload. CPU wird nicht stillschweigend als Ersatz verwendet: Wenn Vulkan das Modell nicht laden kann, erscheint ein klarer Fehler statt eines möglicherweise speicherintensiven CPU-Ladeversuchs. AUTO und CPU können bei Bedarf manuell gewählt werden.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "Backend-, GPU-Layer-, Kontext-, Thread- und Sampler-Änderungen werden beim nächsten Modellladen übernommen. Temperatur, Top-P und Ausgabelimit gelten ab der nächsten Anfrage.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    BackendPreference.entries.forEach { pref ->
-                        FilterChip(
-                            selected = config.backendPreference == pref,
-                            onClick = { viewModel.updateConfig(config.copy(backendPreference = pref)) },
-                            label = { Text(pref.label) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp)
-                                .testTag("backend_chip_${pref.name}")
-                        )
-                    }
-
-                    if (config.backendPreference != BackendPreference.CPU) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "GPU-Layer-Offload angefordert: ${config.gpuLayers} (99 = maximal)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Slider(
-                            value = config.gpuLayers.toFloat(),
-                            onValueChange = { viewModel.updateConfig(config.copy(gpuLayers = it.roundToInt())) },
-                            valueRange = 1f..99f,
-                            steps = 98,
-                            modifier = Modifier.testTag("gpu_layers_slider")
-                        )
-                    }
-
-                    if (config.backendPreference != BackendPreference.CPU) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "Vulkan-DMMV-Workgroup (Diagnose)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "AUTO nutzt für Q4_K auf Mali den gemessenen Basis-MMV-Pfad; SUBGROUP und LARGE erzwingen nur die MatVec-Workgroup-Größe. Die Q4_K/Q5_K/Q6_K- und Prefill-Overrides bleiben interne A/B-Profile.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        VulkanMatvecWorkgroup.entries.filter { it.nativeId in 0..2 }.forEach { workgroup ->
-                            FilterChip(
-                                selected = config.vulkanMatvecWorkgroup == workgroup,
-                                onClick = {
-                                    viewModel.updateConfig(config.copy(vulkanMatvecWorkgroup = workgroup))
-                                },
-                                label = {
-                                    Text(
-                                        when (workgroup) {
-                                            VulkanMatvecWorkgroup.AUTO -> "AUTO – Upstream"
-                                            VulkanMatvecWorkgroup.SUBGROUP -> "SUBGROUP – Geräte-Subgroup (Mali-G57: 16)"
-                                            VulkanMatvecWorkgroup.LARGE -> "LARGE – 4× Subgroup"
-                                            VulkanMatvecWorkgroup.Q4K_BASE_DMMV -> "Q4_K Basis-DMMV (A/B, intern)"
-                                            VulkanMatvecWorkgroup.Q5K_BASE_DMMV -> "Q5_K Basis-DMMV (A/B, intern)"
-                                            VulkanMatvecWorkgroup.Q6K_BASE_DMMV -> "Q6_K Basis-DMMV (A/B, intern)"
-                                            VulkanMatvecWorkgroup.Q4K_PREFILL_F16 -> "Q4_K Prefill F16/F32 (A/B, intern)"
-                                            VulkanMatvecWorkgroup.MMVQ_FORCE -> "MMVQ Integer-Dot (A/B, intern)"
-                                        }
-                                    )
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp)
-                                    .testTag("vulkan_matvec_workgroup_${workgroup.name}")
-                            )
-                        }
-                    }
-
-                    Divider(modifier = Modifier.padding(vertical = 12.dp))
-                    Text(
-                        text = "Gated Delta Net (GDN)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        text = "ARCH_DEFAULT verwendet für Qwen3.5 die unfused Referenzpfade und lässt andere Architekturen bei den Upstream-Defaults. Die übrigen Modi sind für die CPU/Vulkan-Korrektheitsmatrix und werden beim nächsten Modellladen aktiv.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    GdnPolicy.entries.forEach { policy ->
-                        FilterChip(
-                            selected = config.gdnPolicy == policy,
-                            onClick = { viewModel.updateConfig(config.copy(gdnPolicy = policy)) },
-                            label = { Text(policy.label) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp)
-                                .testTag("gdn_policy_${policy.name.lowercase()}")
-                        )
-                    }
-
-                    val activeModel = currentModel
-                    if (activeModel != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Aktives Backend: ${activeModel.activeBackend}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
+            BackendSettingsSection(
+                config = config,
+                currentModel = currentModel,
+                viewModel = viewModel
+            )
         }
 
         // Inferenz- & Kontextparameter

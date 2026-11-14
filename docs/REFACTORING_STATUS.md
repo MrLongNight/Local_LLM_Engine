@@ -1,6 +1,8 @@
 # Refactoring Status — Local_LLM_Engine
 
-**Fokus: Task 2 – EngineViewModel vollständig aufteilen.**
+**Fokus: Task 3 – SettingsScreen in Sektionen zerlegen.**
+
+Task 2 ist strukturell umgesetzt; Unit Tests grün, APK und Instrumentation-APK gebaut. Emulator-Abnahme separat verfolgen.
 Repository: MrLongNight/Local_LLM_Engine · Branch: main
 Code-HEAD für die laufende Verifikation: c48090423ae985226f92e1c7d805d308023504cc
 
@@ -49,3 +51,19 @@ Alle Screens verwenden weiterhin dieselbe EngineViewModel-Instanz. Der Konstrukt
 - Use Cases/Repositories: optional; nur nach Task 2 auf echte, nicht bereits ausgelagerte Kandidaten prüfen.
 
 Status und Fehlerursachen werden hier aktualisiert. Keine getrennten Refactoring-Dokumente pro Untertask.
+
+## Task 3 — SettingsScreen
+
+**Status:** Backend/GPU-Sektion extrahiert; CI-Abnahme für diesen Schritt ausstehend. Die frühere Freigabe zur mechanischen Extraktion wird verwendet. Screen-Signatur, State-Sammlung, LaunchedEffect, LazyColumn-Reihenfolge und Card-/Column-Hierarchie bleiben erhalten.
+
+| Sektion | Datei | Status |
+|---|---|---|
+| System Prompt | `ui/settings/sections/SystemPromptSection.kt` | bereits extrahiert |
+| Backend + GPU-Layer | `ui/settings/sections/BackendSettingsSection.kt` | extrahiert |
+| Vulkan DMMV + GDN | `ui/settings/sections/VulkanTuningSection.kt` | gleiche Card/Column-Hierarchie |
+| Kontext / Inferenz | `ui/settings/sections/InferenceSettingsSection.kt` | offen |
+| Backend-Abnahmetest | `ui/settings/sections/BackendAcceptanceTestSection.kt` | offen |
+| Q4_K-Diagnose | `ui/settings/sections/VulkanQ4kDiagnosticsSection.kt` | offen |
+| Benchmark-Ergebnis / Diagnosehinweis | `ui/settings/sections/BenchmarkResultSection.kt` | offen |
+
+BackendSettingsSection hält die bestehende Card und Column; VulkanTuningSection ersetzt nur den inneren UI-Block an derselben Position. Keine State-Logik wurde verschoben. Nächster Schritt nach erfolgreicher Build-/Testprüfung.
