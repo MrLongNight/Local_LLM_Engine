@@ -44,7 +44,7 @@ abstract class BenchmarkDiagnosticsViewModel(
     protected override val _isBenchmarking = MutableStateFlow(false)
     override val isBenchmarking: StateFlow<Boolean> = _isBenchmarking.asStateFlow()
 
-    private val _benchmarkReport = MutableStateFlow<String?>(null)
+    protected val _benchmarkReport = MutableStateFlow<String?>(null)
     val benchmarkReport: StateFlow<String?> = _benchmarkReport.asStateFlow()
 
     protected fun configurationTestSafetyBlock(): String? {
