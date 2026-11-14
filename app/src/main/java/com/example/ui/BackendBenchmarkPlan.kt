@@ -20,11 +20,12 @@ internal object BackendBenchmarkPlan {
 
     val BACKENDS = listOf(BackendPreference.VULKAN, BackendPreference.CPU)
 
-    /** Full 2..320 sequence, fixed for every CPU/Vulkan comparison. */
+    /**
+     * Compact deterministic continuation prompt. The previous 2..320 enumeration
+     * exceeded small preflight-reduced contexts and invalidated otherwise usable gates.
+     */
     fun correctnessGatePrompt(): String =
-        "Setze diese Zahlenfolge fort. Gib genau die nächsten fünf geraden Zahlen aus, " +
-            "getrennt durch Komma und Leerzeichen. Keine Erklärung: " +
-            (2..320 step 2).joinToString(", ")
+        "Setze fort: 2, 4, 6, …, 320. Gib nur die nächsten fünf geraden Zahlen aus, getrennt durch Komma."
 
     data class FullMatrixProfile(
         val id: String,
