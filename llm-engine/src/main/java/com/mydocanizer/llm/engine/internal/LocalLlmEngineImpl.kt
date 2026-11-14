@@ -612,6 +612,20 @@ internal class LocalLlmEngineImpl(
                 }
             }
 
+            // Cancellation can arrive between two JNI token steps. In that case the
+            // while condition exits before nativeGenerateNextToken observes the cancel
+            // flag and flushes a pending UTF-8 suffix. Force one final native step; with
+            // native cancellation set it only finalizes the stream and cannot sample.
+            if (isCancelled.get()) {
+                NativeEngineHandle.nativeCancel(handle)
+                val finalPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
+                if (!finalPiece.isNullOrEmpty()) {
+                    outputBuilder.append(finalPiece)
+                    trySend(InferenceEvent.Token(finalPiece, tokenCount))
+                    tokenCount++
+                }
+            }
+
             val rawReason = NativeEngineHandle.nativeGetLastFinishReason(handle)
             val finishReason = when {
                 isCancelled.get() -> FinishReason.CANCELLED
