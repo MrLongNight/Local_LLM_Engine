@@ -1,3 +1,5 @@
+> **Dokumenttyp:** Historische technische Implementierungshistorie. Datierte CI- und Hardware-Statusblöcke dokumentieren jeweils ihren damaligen Snapshot. Für aktuelle offene Aufgaben und Freigaben ist `REFACTORING_ROADMAP.md` maßgeblich; für Agent-Regeln `AGENTS.md`. Technische Belege bleiben erhalten und dürfen nicht als Live-Status interpretiert werden.
+
 # Aktueller Stand 12.11.2026 – verifizierter CI-/APK-Stand
 
 **Repository:** `MrLongNight/Local_LLM_Engine` · Branch `main`  

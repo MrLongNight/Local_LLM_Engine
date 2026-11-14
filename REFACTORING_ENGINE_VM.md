@@ -1,6 +1,6 @@
 # EngineViewModel – Struktur-Analyse vor Refactoring
 
-**Status:** Refactoring läuft – Chat-Extraktion umgesetzt; Model-Management-Extraktion auf main; JVM-Tests für HEAD a6bcd532 grün, APK-Build läuft  
+**Status:** Chat- und Model-Management-Splits sind umgesetzt. Für Code-HEAD `a6bcd532be45bc7d08381ed802c388dd6219cf4e` sind JVM-Tests und APK-Build erfolgreich; beide APK-Artefakte wurden hochgeladen. Der verbleibende `EngineViewModel`-Rest ist weiterhin groß. Aktuelle offene Aufgaben stehen in `REFACTORING_ROADMAP.md`.  
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
 **Analyse-Commit:** `8947f76bf48e6553e8d62a3d8f93d19d8fb49645`  
@@ -169,7 +169,7 @@ Die folgende Zuordnung ist ein Vorschlag für die spätere Extraktion. Sie ände
 
 ### 6.1 Aktueller main-Stand
 
-- Aktueller HEAD bei dieser Aktualisierung: a6bcd532be45bc7d08381ed802c388dd6219cf4e.
+- Code-Snapshot für die letzten ViewModel-Strukturänderungen: `a6bcd532be45bc7d08381ed802c388dd6219cf4e`. Der spätere Settings-Code-HEAD `4492dc3ec7a281cd64640f0186482f98fc07fca8` ändert `EngineViewModel.kt` nicht.
 - EngineViewModel.kt: 1.750 Zeilen, 94.792 Bytes (vorher 2.156 Zeilen, 113.109 Bytes).
 - ChatViewModel.kt: neu, 201 Zeilen, 8.862 Bytes.
 - ModelManagementViewModel.kt: neu, 276 Zeilen, 11.943 Bytes.
@@ -199,15 +199,20 @@ Commits auf main:
 
 Aktuelle CI für HEAD a6bcd532:
 - Unit Tests: Run 43556762677, **completed / success** (14.11.2026); der Lauf für HEAD a6bcd532 ist grün.
-- Android APK Build: Run 43556762673, bei letzter Abfrage weiterhin **in_progress**.
-- Damit ist die JVM-Testprüfung für Model Management bestanden; die vollständige Abnahme bleibt bis zum erfolgreichen APK-Build offen. Abgebrochene ältere Läufe auf Zwischen-Commits gelten nicht als Fehlernachweis und nicht als erfolgreiche Verifikation.
+- Android APK Build: Run `43556762673`, **completed / success**; APK und Instrumentation-APK wurden hochgeladen (Artifact IDs `14098818101` und `14098788021`).
+- Damit sind JVM-Test- und APK-Build-Prüfung für Code-HEAD `a6bcd532` bestanden. Das ist keine echte Zielgeräteabnahme. Abgebrochene ältere Läufe auf Zwischen-Commits gelten weder als Fehlernachweis noch als erfolgreiche Verifikation.
 
 ### 6.4 Nächste Schritte und Verifikationsregeln
 
-1. Zuerst die beiden laufenden CI-Runs für HEAD a6bcd532 abschließen und dokumentieren. Bei Fehlern nur den konkret belegten Fehler beheben und neue CI abwarten.
-2. Erst nach erfolgreicher JVM-Test- und APK-Build-Verifikation mit dem nächsten Cluster beginnen.
+1. Chat- und Model-Management-Splits sind für ihren damaligen Code-HEAD CI-verifiziert; keine erneute Verifikation behaupten, ohne den jeweiligen Commit und Run zu nennen.
+2. Der nächste separate ViewModel-Kandidat muss vor Codeänderung analysiert und freigegeben werden. Die `ModelImportScreen`-UI-Extraktion ändert nicht automatisch die ViewModel-Importorchestrierung.
 3. Nach jedem Cluster die verschobenen Blöcke, Engine-/ViewModel-Wiring, Dateigrößen, Commit-SHAs und GitHub-Actions-Ergebnisse hier aktualisieren.
 4. Emulator-/CI-Instrumentation separat von echten Geräte-Funktionstests ausweisen. Echte Geräte-Funktionstests werden vom Nutzer durchgeführt und nicht durch diesen Arbeitsablauf behauptet.
 5. Abschlussprüfung nach allen Clustern: assembleDebug und test in CI; finaler Diff muss aus reinen Verschiebungen plus dokumentierter minimaler Verdrahtung bestehen. Keine neuen Tests oder Dependencies.
 
 **Wichtig:** Statusangaben in dieser Datei sind ein fortlaufendes Protokoll und müssen nach jedem Cluster sowie bei jedem wesentlichen CI-Ergebnis aktualisiert werden.
+
+
+## 7. Agenten-Hinweis zur Statuspflege
+
+Diese Datei enthält historische Analysezeilen und Status-Snapshots. Frühere HEAD-Angaben in Abschnitt 6 dürfen nicht als aktueller Repository-HEAD gelesen werden. Für den aktuellen Gesamtstatus gilt ausschließlich `REFACTORING_ROADMAP.md`; für Agent-Arbeitsregeln gilt `AGENTS.md`. Die Code-Inventare dieser Datei bleiben als Analyse des ViewModel-Splits nützlich, müssen aber vor jeder weiteren Verschiebung mit dem aktuellen Quellstand abgeglichen werden.

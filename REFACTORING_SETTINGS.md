@@ -1,11 +1,11 @@
 # SettingsScreen – Analyse vor der Sektionsextraktion
 
-**Status:** SCHRITT 2 läuft – Freigabe erteilt; SystemPromptSection extrahiert, CI-Abnahme ausstehend  
+**Status:** SCHRITT 2 läuft – Freigabe erteilt; SystemPromptSection extrahiert; Unit Tests grün; APK-Build erfolgreich, Emulator-Instrumentation fehlgeschlagen; Retry läuft  
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
 **Analyse-HEAD:** `98cbaf367ba8661e2377c09cf3ca0514bcb5ec18`
 **Aktueller Code-HEAD:** `4492dc3ec7a281cd64640f0186482f98fc07fca8`
-**Aktueller Extraktionsstand:** SystemPromptSection extrahiert; Unit Tests und APK-Build laufen
+**Aktueller Extraktionsstand:** SystemPromptSection extrahiert; Unit Tests Run `43557763450` completed/success; APK- und Test-APK-Build erfolgreich; Emulator-Test `realGgufIsReloadedAndFollowupInferenceSucceedsAfterTimeoutKill` schlug in Run `43557763490` fehl; Retry Attempt 2 läuft
 **Mermaid-Diagramm:** [SettingsScreen-Struktur live öffnen](https://mermaid.ai/app/projects/d7b9e612-2e4e-4eba-ac5b-098c4d58b067/diagrams/4583f977-9047-4e7c-bf08-18105680eae0/version/v0.1/edit?utm_source=mermaid_app_widget&utm_medium=mermaid-chatgpt-app)  
 **Mermaid documentID:** `4583f977-9047-4e7c-bf08-18105680eae0` (bestehendes Diagramm wird aktualisiert, keine Duplikate)  
 **Datei:** `app/src/main/java/com/example/ui/SettingsScreen.kt`  
@@ -106,7 +106,7 @@ Die einfachste verhaltensneutrale Übergabe ist, die bereits vorhandene `EngineV
 
 | Sektion | Status | Code-Commit | Build |
 |---|---|---|---|
-| SystemPromptSection | Extrahiert | `0600cdd903170d7e439c8621095868afc045e9d3`; Importkorrektur `4492dc3ec7a281cd64640f0186482f98fc07fca8` | APK-Build Run `43557763490` läuft; Unit Tests Run `43557763450` laufen |
+| SystemPromptSection | Extrahiert | `0600cdd903170d7e439c8621095868afc045e9d3`; Importkorrektur `4492dc3ec7a281cd64640f0186482f98fc07fca8` | Unit Tests Run `43557763450` **success**; APK + Instrumentation-APK gebaut/hochgeladen; Emulator-Test in Run `43557763490` **failure**; Retry Attempt 2 läuft |
 | BackendSettingsSection | Offen | – | – |
 | VulkanTuningSection | Offen | – | – |
 | InferenceSettingsSection | Offen | – | – |
@@ -133,3 +133,13 @@ Das gespeicherte Mermaid-Diagramm ist Teil der Refactoring-Dokumentation. Es wir
 - `SettingsScreen.kt`: 21.750 Zeichen nach der ersten Extraktion; Ziel < 5 KB wird erst nach Abschluss aller Sektionen bewertet.
 - Vergleichsbereich: Baseline `98cbaf367ba8661e2377c09cf3ca0514bcb5ec18` bis Code-HEAD `4492dc3ec7a281cd64640f0186482f98fc07fca8`.
 - CI-Abnahme ist noch offen; die laufenden Actions müssen erfolgreich abgeschlossen sein, bevor die nächste Sektion begonnen wird.
+
+
+### 8.2 CI-Update – 14.11.2026
+
+- Unit Tests Run `43557763450`, Code-HEAD `4492dc3ec7a281cd64640f0186482f98fc07fca8`: **completed / success**.
+- APK-Workflow Run `43557763490`, derselbe Code-HEAD: Gradle-Schritt `Build APK and process-isolation test APK`, APK-/Test-APK-Verifikation, Manifestprüfung und Upload waren erfolgreich. Beide Artefakte wurden angelegt.
+- Der Gesamtworkflow schlug im nachgelagerten Emulator-Test fehl: `realGgufIsReloadedAndFollowupInferenceSucceedsAfterTimeoutKill`, `InferenceServiceProcessTest.kt:393`. Erwartet: `DEBUG_NATIVE_INFERENCE_BLOCKED`; beobachtet: `MODEL_LOADED`. Gradle meldete deshalb `:llm-engine:connectedDebugAndroidTest FAILED`.
+- Der einzelne Test, `InferenceService.kt`, `InferenceClient.kt`, `LocalLlmEngineImpl.kt`, `local_llm_engine_jni.cpp`, `CMakeLists.txt`, `llm-engine/build.gradle.kts` und der APK-Workflow besitzen dieselben Git-Blob-SHAs wie beim vorherigen grünen APK-Workflow für Code-HEAD `a6bcd532be45bc7d08381ed802c388dd6219cf4e`. Der Unterschied ist daher bisher nicht als Regression durch die Settings-Extraktion belegt.
+- Das fehlgeschlagene Job wurde als **Retry Attempt 2** erneut gestartet. Bis zur erfolgreichen Wiederholung bleibt die Emulator-Abnahme offen.
+- Die verfügbare GitHub-only Ausführung committet Code direkt auf `main`; Actions startet nach dem Commit. Für folgende Sektionen gilt: ein Code-Commit pro Sektion, danach exakten Code-HEAD und alle zugehörigen Unit-/APK-/Emulator-Ergebnisse abwarten. Keine weiteren Sektionen stapeln, solange ein Gate fehlschlägt oder läuft.

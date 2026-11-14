@@ -1,6 +1,8 @@
 # Refactoring Baseline
 
-**Status: PARTIAL — STOP before structural refactoring**
+**Dokumenttyp:** Historischer Baseline-Snapshot vom 14.11.2026; kein Live-Status.
+
+**Status zum damaligen Snapshot:** PARTIAL — STOP vor strukturellen Änderungen.
 
 This document records the verifiable baseline before any structure-only moves. It does not mark the full baseline green because the requested wrapper commands could not be executed as written and a clean root build is not covered by the available CI runs.
 
@@ -48,6 +50,8 @@ This document records the verifiable baseline before any structure-only moves. I
 - Preserve CMake relative paths, generated overlay paths, submodule locations, include directories and Android ABI filters.
 - Re-run JVM tests, host C++ tests, Android Lint and the Debug APK/instrumentation build after each structural move batch.
 
-## Baseline gate decision
+## Historical baseline gate decision
 
-**STOP — do not begin structural refactoring yet.** The existing CI JVM tests, instrumentation tests and Debug APK build are green, but the required `./gradlew clean build` and literal `./gradlew test` commands have not been run. The repository also lacks the Gradle Wrapper required by those exact commands. Re-open this gate only after the project has an agreed, reproducible Gradle invocation and a successful clean root build plus full test run are recorded.
+At baseline commit `68660746716655fe8135bed3500e2a16430054d1`, the gate was **STOP**: the wrapper scripts were absent and a clean root `build` had not been verified. This describes that historical snapshot only; it is not a live status and does not override the later explicit approval for the `SettingsScreen` mechanical extraction.
+
+The limitation remains factual: no `./gradlew` launcher is checked in, so agents must use the actual Gradle 9.3.1 CI workflows or an explicitly prepared local Gradle installation. Never report `clean build` as green unless that exact lifecycle task has actually run. For current task approval and status, use `AGENTS.md` and `REFACTORING_ROADMAP.md`.

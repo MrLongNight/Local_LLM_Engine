@@ -2,7 +2,9 @@
 
 An Android demo application and reusable Android library for running local GGUF language models with llama.cpp.
 
-> **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. Successful Kotlin unit tests and APK compilation do not prove real-device model loading, inference, cancellation, hardware offload or performance.
+> **Development status:** Work in progress. The repository is not yet a verified production-ready inference engine. Successful Kotlin unit tests, emulator instrumentation and APK compilation do not prove target-device model loading, inference, cancellation, hardware offload or performance.
+>
+> **For coding agents:** Start with [AGENTS.md](AGENTS.md), then read the live [refactoring roadmap](REFACTORING_ROADMAP.md) and the task-specific plan it links. Timestamped status sections in older documents are historical evidence, not the live task register.
 
 ## Project layout
 
@@ -13,7 +15,7 @@ An Android demo application and reusable Android library for running local GGUF 
 
 ## Requirements
 
-- JDK 17 for the Android/Native APK build; JDK 21 for the Robolectric SDK 36 unit-test workflow
+- JDK 21 in both current GitHub Actions workflows; Java source/target bytecode compatibility remains Java 17
 - Gradle 9.3.1
 - Git with recursive submodule checkout (`git clone --recurse-submodules`)
 - Android SDK platform 36
@@ -29,13 +31,14 @@ The repository currently keeps the Gradle distribution configuration in `gradle/
 
 Workflow: `.github/workflows/unit-tests.yml`
 
-Runs automatically for every pushed commit and pull request. It executes:
+Runs for matching pushes to `main` and for pull requests. It executes the app and engine JVM test tasks, followed by a host-only C++ prompt-cache/truncation test. The Gradle invocation is:
 
 ```bash
-gradle --no-daemon :app:testDebugUnitTest :llm-engine:testDebugUnitTest
+gradle --no-daemon --continue --build-cache \\
+  :llm-engine:testDebugUnitTest :app:testDebugUnitTest
 ```
 
-This is a JVM/unit-test job. It does not build the native C++ libraries and does not prove that an APK can be installed or that inference works on a device.
+This workflow does not build the Android native libraries or an installable APK. It does not prove that inference works on an Android device.
 
 ### Android APK Build
 
@@ -43,7 +46,7 @@ Workflow: `.github/workflows/manual-apk.yml`
 
 The workflow runs automatically on pushes to `main` when Android app/engine source, Gradle/toolchain configuration, or the workflow changes. It can also be started manually through **Actions → Android APK Build → Run workflow** (Debug only).
 
-The workflow builds `:app:assembleDebug`, including the native C++ build and the configured ARM64 Vulkan path, verifies `app-debug.apk` exists, and uploads it as the `Local-LMM-Engine-debug-apk` artifact. If the repository Actions secret `LOCAL_LLM_DEBUG_KEYSTORE_BASE64` is configured, CI uses that persistent debug keystore; otherwise it generates a temporary key and warns that a later APK signed with a different key cannot update the same installed package. The Debug variant uses the separate application ID `com.aistudio.localllm.mdoanx.dmmv` and launcher label `Local LLM Engine – DMMV-Test`, so it can be installed beside the original app without uninstalling it. SAF document grants are package-specific, so select the GGUF again in the DMMV-Test app. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
+The workflow builds `:app:assembleDebug` and `:llm-engine:assembleDebugAndroidTest`, including the native C++ build and configured ARM64 Vulkan path. It verifies APK and merged-manifest outputs, uploads both APK artifacts, then runs the configured process-isolation instrumentation suite (currently eight tests) on an Android 36 emulator. A green emulator run is not a target-phone acceptance result. If the repository Actions secret `LOCAL_LLM_DEBUG_KEYSTORE_BASE64` is configured, CI uses that persistent debug keystore; otherwise it generates a temporary key and warns that a later APK signed with a different key cannot update the same installed package. The Debug variant uses the separate application ID `com.aistudio.localllm.mdoanx.dmmv` and launcher label `Local LLM Engine – DMMV-Test`, so it can be installed beside the original app without uninstalling it. SAF document grants are package-specific, so select the GGUF again in the DMMV-Test app. Artifacts are retained for 14 days. A successful unit-test workflow is not a substitute for this native APK build.
 
 ## Last-model restore
 
@@ -269,15 +272,16 @@ change again.
 After cloning with `git clone --recurse-submodules` (or running `git submodule update --init --recursive` in an existing clone), and with Gradle 9.3.1 plus the Android SDK/NDK/CMake versions above available:
 
 ```bash
-gradle :app:assembleDebug
-gradle :app:testDebugUnitTest :llm-engine:testDebugUnitTest
+gradle --no-daemon :app:assembleDebug :llm-engine:assembleDebugAndroidTest
+gradle --no-daemon --continue --build-cache \\
+  :llm-engine:testDebugUnitTest :app:testDebugUnitTest
 ```
 
 ## Current limitations
 
 - The supported native ABIs are currently 64-bit `arm64-v8a` and `x86_64`; 32-bit ARM is not included.
 - A SAF-selected local GGUF is opened as a `ParcelFileDescriptor` and passed to `:inference`; the service-side loader opens the retained descriptor through `/proc/self/fd/<n>`. Before native loading, the resolver checks that it is a regular file, tests seeking and positional GGUF-header reads, and probes read-only `mmap`. Pipe/non-regular sources are rejected with a no-copy diagnostic. The current instrumentation tests exercise this resolver with a regular file and a pipe in the test process; they do not yet verify a real SAF provider descriptor after the Binder handoff into `:inference` on the target device. APK assets and HTTPS remote sources are still materialized in app-private storage, validated for the GGUF magic header, SHA-256 hashed, and atomically published under a SHA-256-addressed filename. HTTPS redirects are limited and cannot downgrade to HTTP. Downloads are not resumable yet.
-- The emulator suite currently runs seven Android instrumentation tests. Its recovery test loads the pinned tiny GGUF fixture, blocks a real JNI inference call, verifies persisted `PROCESS_ABORT_CONFIRMED`, reloads the same `FilePath` into the replacement service and completes a token-producing follow-up inference. Robolectric tests cover the timeout's cooperative-first branch and grace-period escalation. Real SAF-provider/Binder descriptor handoff, the user's large GGUF, five-cycle external resource checks and target-device acceptance remain open.
+- The emulator suite currently declares eight Android instrumentation tests. Its recovery test loads the pinned tiny GGUF fixture, blocks a real JNI inference call, verifies persisted `PROCESS_ABORT_CONFIRMED`, reloads the same `FilePath` into the replacement service and completes a token-producing follow-up inference. Robolectric tests cover the timeout's cooperative-first branch and grace-period escalation. Real SAF-provider/Binder descriptor handoff, the user's large GGUF, five-cycle external resource checks and target-device acceptance remain open.
 - No real-device performance result is implied by CI success.
 
 ## Implementation plan
