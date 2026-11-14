@@ -555,6 +555,27 @@ internal class LocalLlmEngineImpl(
         var tokenCount = 0
         var nativeTokenSteps = 0
         var firstVisibleTokenRecorded = false
+        var nativeOutputFinalizationAttempted = false
+
+        // Stop native sampling before asking JNI for one final step. With the
+        // cancellation flag set, nativeGenerateNextToken only drains a retained
+        // incomplete UTF-8 suffix and never samples another model token.
+        fun finalizePendingNativeOutput() {
+            if (nativeOutputFinalizationAttempted) return
+            nativeOutputFinalizationAttempted = true
+            runCatching {
+                NativeEngineHandle.nativeCancel(handle)
+                NativeEngineHandle.nativeGenerateNextToken(handle)
+            }.onSuccess { finalPiece ->
+                if (!finalPiece.isNullOrEmpty()) {
+                    outputBuilder.append(finalPiece)
+                    trySend(InferenceEvent.Token(finalPiece, tokenCount))
+                    tokenCount++
+                }
+            }.onFailure { error ->
+                EngineDiagnostics.error("inference", "NATIVE_UTF8_FINALIZATION_FAILED", error)
+            }
+        }
 
         try {
             while (!isCancelled.get()) {
@@ -617,13 +638,7 @@ internal class LocalLlmEngineImpl(
             // flag and flushes a pending UTF-8 suffix. Force one final native step; with
             // native cancellation set it only finalizes the stream and cannot sample.
             if (isCancelled.get()) {
-                NativeEngineHandle.nativeCancel(handle)
-                val finalPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
-                if (!finalPiece.isNullOrEmpty()) {
-                    outputBuilder.append(finalPiece)
-                    trySend(InferenceEvent.Token(finalPiece, tokenCount))
-                    tokenCount++
-                }
+                finalizePendingNativeOutput()
             }
 
             val rawReason = NativeEngineHandle.nativeGetLastFinishReason(handle)
@@ -672,14 +687,15 @@ internal class LocalLlmEngineImpl(
                 }
             }
         } catch (e: CancellationException) {
-            Log.i(TAG, "streamChat coroutine cancelled, notifying native engine")
-            NativeEngineHandle.nativeCancel(handle)
+            Log.i(TAG, "streamChat coroutine cancelled, finalizing pending native UTF-8 output")
+            finalizePendingNativeOutput()
             val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
             trySend(InferenceEvent.Cancelled(outputBuilder.toString(), actualTokens))
             throw e
         } catch (t: Throwable) {
             Log.e(TAG, "Error during generation loop", t)
             EngineDiagnostics.error("inference", "GENERATION_LOOP_FAILED", t)
+            finalizePendingNativeOutput()
             trySend(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
             nativeWorkActive.set(false)
