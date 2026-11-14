@@ -1,5 +1,6 @@
 package com.mydocanizer.llm.engine
 
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -358,7 +359,7 @@ internal object EngineDiagnosticsReportBuilder {
                     val gflops = metrics.mapNotNull { it.gflops }
                     appendLine(
                         "pid=${key.first} runId=${key.second} op=${key.third} snapshots=$uniqueSnapshots samples=$totalSamples " +
-                            doubleTimingSummary("gpuAvg", metrics.map { it.averageUs }) +
+                            EngineDiagnosticsMetrics.doubleTimingSummary("gpuAvg", metrics.map { it.averageUs }) +
                             " gpuPerGraphUs=${String.format(Locale.US, "%.3f", perGraphTotalUs)}" +
                             " gpuSumUs=${String.format(Locale.US, "%.3f", summedUs)}" +
                             (if (gflops.isNotEmpty()) {
