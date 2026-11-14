@@ -2009,6 +2009,21 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 #endif
     common_sampler_accept(engine->sampler, new_token_id, true);
 
+    // EOG is a control token, not an assistant token to evaluate into the KV cache.
+    // Stop before llama_decode(), matching llama.cpp's reference generation loop.
+    // Decoding EOG needlessly advances recurrent/cache state and performs a full
+    // backend step after the model has already decided to finish.
+    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
+    if (llama_vocab_is_eog(vocab, new_token_id)) {
+        const int64_t stop_step_duration_us = llama_time_us() - token_step_start_us;
+        LOGI("Generated EOG token: %d (excluded from decode and visible token count; stop_step_ms=%.3f)",
+             new_token_id,
+             static_cast<double>(stop_step_duration_us) / 1000.0);
+        engine->last_finish_reason = 0; // STOP
+        engine->generation_finished = true;
+        return finish_native_generation(env, engine);
+    }
+
     const int64_t sample_duration_us = llama_time_us() - sample_start_us;
     const int sample_metric_index = engine->tokens_generated + 1;
     if (engine->active_backend.find("Vulkan") != std::string::npos &&
@@ -2087,18 +2102,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     engine->current_position++;
     engine->cached_tokens.push_back(new_token_id);
 
-    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
-    if (llama_vocab_is_eog(vocab, new_token_id)) {
-        const int64_t stop_step_duration_us = llama_time_us() - token_step_start_us;
-        LOGI("Generated EOG token: %d (excluded from visible token count; stop_step_ms=%.3f)",
-             new_token_id,
-             static_cast<double>(stop_step_duration_us) / 1000.0);
-        engine->last_finish_reason = 0; // STOP
-        engine->generation_finished = true;
-        return finish_native_generation(env, engine);
-    }
-
-    // The EOG token is decoded into the native context but is not returned to the UI.
     // Count only ordinary model-output tokens in results and tokens-per-second metrics.
     engine->tokens_generated++;
     const int64_t token_step_duration_us = llama_time_us() - token_step_start_us;
