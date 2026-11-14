@@ -1,6 +1,6 @@
 # Refactoring status — Local_LLM_Engine
 
-**Live tracker:** ModelImportScreen extraction (Task 4).
+**Live tracker:** InferenceServiceProcessTest split (Task 5).
 **Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `main`
 **Latest inspected code SHA:** `5c6caea4c508a073ff245dd118bd3b1844066575` (2026-11-14).
 
@@ -70,12 +70,37 @@ Code commits: extraction `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`; import corr
 
 Detailed mapping and file sizes: [ModelImportScreen extraction report](../REFACTORING_MODEL_IMPORT.md).
 
+## Task 5 — InferenceServiceProcessTest split
+
+<badge color="warning">Code split complete; unit CI green; Android instrumentation build pending</badge>
+
+The 30,405-byte, 629-line `InferenceServiceProcessTest.kt` has been split into five concrete instrumentation test classes:
+
+| Test class | Tests | Bytes |
+|---|---:|---:|
+| `NativeBoundaryAndIpcTest.kt` | 2 | 2,248 |
+| `ModelSourceDescriptorTest.kt` | 2 | 2,820 |
+| `ProcessLifecycleTest.kt` | 2 | 4,769 |
+| `InferenceCancellationTest.kt` | 1 | 7,338 |
+| `GgufRecoveryTest.kt` | 1 | 11,360 |
+| `InferenceServiceProcessTestBase.kt` | 0 | 4,868 |
+
+All eight original method names and complete test blocks are byte-identical to the baseline. Count before/after: **8 = 8**. There were no JUnit `@Before`/`@After` lifecycle hooks. The base class only shares the original binding type, four process helpers and four timeout constants; helper visibility changed from private to protected, constant names/values stayed identical.
+
+The one >10 KB class is unavoidable under the 1:1 rule: the complete GGUF recovery method alone is 10,034 bytes. It was not split or modified.
+
+Commits: `319ff84`, `3988702`, `f2d3947`, `2b6b5d2`, `b526616`.
+
+Final Unit Tests run `43572193823` on code SHA `b526616ab54c7fa75ac552eef04502c3404650e8`: completed / success, including host-only native tests. Android APK Build run `43572193817` on the same SHA was still running at this update, before APK upload and emulator instrumentation.
+
+Detailed method map, byte comparisons and class sizes: [InferenceServiceProcessTest split report](../REFACTORING_TESTS.md).
+
 ## Remaining refactoring work
 
 - ModelImportScreen sections have been extracted; Unit Tests run `43567003341` on code SHA `5c6caea4c508a073ff245dd118bd3b1844066575` completed successfully. Android APK Build run `43567003311` for that SHA is in progress at this update; artifact and emulator conclusions are not yet claimed.
 - Complete the APK build / emulator instrumentation and record the artifact IDs for `5c6caea`.
 - Keep physical-device smoke testing separate from CI: Model Import success, picker cancellation and error handling still require a target Android device.
-- `InferenceServiceProcessTest` class split and `:app` package moves remain deferred.
+- The `InferenceServiceProcessTest` split is complete at code level; final Android APK/emulator verification is pending. `:app` package moves remain deferred.
 - Use-case/repository extraction remains optional; do not add abstractions without a concrete reuse/ownership reason.
 
 Update this document in place after each verified task/CI transition. It is the only live refactoring status tracker.
