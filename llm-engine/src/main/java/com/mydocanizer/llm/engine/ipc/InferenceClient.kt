@@ -555,6 +555,7 @@ internal class InferenceClient(
         val startNano = System.nanoTime()
         var registeredPendingLoad: PendingModelLoad? = null
         var modelDescriptor: ParcelFileDescriptor? = null
+        val previousModel = _currentModel.value
 
         try {
             _state.value = EngineState.LoadingModel(source)
@@ -710,6 +711,42 @@ internal class InferenceClient(
             } finally {
                 pendingModelLoad.compareAndSet(pending, null)
             }
+        } catch (cancelled: CancellationException) {
+            val pending = registeredPendingLoad
+            pending?.let { pendingModelLoad.compareAndSet(it, null) }
+            runCatching { modelDescriptor?.close() }
+            _modelLoadProgress.value = null
+
+            if (pending != null) {
+                // The service accepted the asynchronous load request, so simply clearing
+                // the client callback would leave native loading/mmap work running with
+                // no owner. Abort only the immutable PID captured for this load.
+                _currentModel.value = null
+                val targetPid = pending.processId
+                if (targetPid != null) {
+                    _state.value = EngineState.Reconnecting
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "MODEL_LOAD_CANCELLED",
+                        "remotePid=$targetPid,action=abort_original_service"
+                    )
+                    abortRemoteProcess(
+                        requestId = null,
+                        reason = "model_load_cancelled",
+                        targetPidOverride = targetPid
+                    )
+                } else {
+                    val error = IllegalStateException(
+                        "Model loading was cancelled, but the original inference PID was unavailable for safe abort"
+                    )
+                    _state.value = EngineState.Error(error.message ?: "Model load cancellation could not be isolated", error)
+                    EngineDiagnostics.error("ipc_client", "MODEL_LOAD_CANCEL_ABORT_UNAVAILABLE", error)
+                }
+            } else {
+                // Cancellation before Binder dispatch must not disturb an existing model.
+                _state.value = previousModel?.let(EngineState::ModelLoaded) ?: EngineState.Ready
+            }
+            throw cancelled
         } catch (t: Throwable) {
             registeredPendingLoad?.let { pendingModelLoad.compareAndSet(it, null) }
             runCatching { modelDescriptor?.close() }

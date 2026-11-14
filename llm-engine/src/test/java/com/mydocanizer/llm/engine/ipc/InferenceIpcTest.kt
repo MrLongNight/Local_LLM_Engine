@@ -572,6 +572,58 @@ class InferenceIpcTest {
 
 
     @Test
+    fun callerCancellationDuringModelLoadAbortsOriginalServiceAndRethrows() = runBlocking {
+        val fakeService = FakeInferenceService().apply { hangModelLoad.set(true) }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 5_000L,
+            prefillMs = 500L,
+            firstTokenMs = 1_000L,
+            interTokenMs = 500L,
+            totalInferenceMs = 2_000L,
+            abortGracePeriodMs = 50L,
+            reconnectMs = 1_000L
+        )
+        val modelFile = File.createTempFile("cancelled_model_load", ".gguf").apply {
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46))
+            deleteOnExit()
+        }
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig,
+            processLivenessCheck = { false }
+        )
+        client.initialize()
+
+        val loadJob = async(kotlinx.coroutines.Dispatchers.IO) {
+            client.loadModel(
+                ModelSource.FilePath(modelFile.absolutePath),
+                EngineConfig(timeoutConfig = timeoutConfig)
+            )
+        }
+        withTimeout(1_000L) {
+            while (fakeService.modelLoadCalls.get() == 0) delay(5L)
+        }
+
+        loadJob.cancel()
+        withTimeout(1_000L) { loadJob.join() }
+
+        assertTrue(
+            "Caller cancellation must propagate as coroutine cancellation, not Result.failure",
+            loadJob.isCancelled
+        )
+        assertTrue(
+            "A dispatched but abandoned model load must abort its original inference process",
+            fakeService.isKilled.get()
+        )
+        assertTrue("No unconfirmed model may remain visible after the load process is aborted",
+            client.currentModel.value == null)
+
+        client.close()
+    }
+
+    @Test
     fun modelLoadTimeoutNeverKillsReplacementInferenceProcess() = runBlocking {
         val fakeService = FakeInferenceService().apply {
             hangModelLoad.set(true)
