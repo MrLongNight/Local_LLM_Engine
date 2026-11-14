@@ -587,8 +587,8 @@ static void ggml_vk_get_physical_device_features2(
     }]=])
     string(REPLACE "${_q4_prefill_anchor}" "${_q4_prefill_replacement}" _vulkan_contents "${_vulkan_contents}")
 
-    # Prefer integer-dot MMVQ for Q4_K decode at batch 1 when the device supports it.
-    # The explicit BASE A/B override, prefill, and non-Q4_K types remain isolated.
+    # Prefer integer-dot MMVQ for Q4_K decode at batch 1 only on the measured Mali path.
+    # Other vendors retain the pinned upstream AUTO heuristic; explicit A/B overrides remain isolated.
     set(_q4k_base_dmmv_anchor [=[
     // Check for mmq first
     vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
@@ -620,12 +620,13 @@ static void ggml_vk_get_physical_device_features2(
         (ne11 * ne10) % 4 != 0 ? "alignment_not_multiple_of_four" :
         !(swap_inputs || ggml_vk_src1_prec_allows_q8(dst)) ? "precision_disallows_q8" :
         "eligible";
+    const bool local_llm_mali_q4k_auto =
+        local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;
+    // LOCAL_LLM_Q4K_AUTO_VENDOR_SCOPE: only Mali overrides AUTO; other vendors keep upstream quantize_y.
     const bool local_llm_q4k_integer_dot_batch1 =
         local_llm_q4k_q8_1_eligible &&
         ctx->device->integer_dot_product &&
-        local_llm_quant_override != 3;
-    const bool local_llm_mali_q4k_auto =
-        local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;
+        local_llm_mali_q4k_auto;
     const char * local_llm_q4k_decode_reason = "upstream";
     if (local_llm_q4k_integer_dot_batch1) {
         // Expected log evidence: selected=MMVQ_INTEGER_DOT,reason=intDot_q4k_batch1,yKernelType=q8_1.
@@ -1270,6 +1271,8 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH" OR
        NOT _vulkan_contents MATCHES "local_llm_q4k_integer_dot_batch1" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_AUTO_VENDOR_SCOPE" OR
+       NOT _vulkan_contents MATCHES "local_llm_mali_q4k_auto" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_Q8_1_ELIGIBILITY" OR
        NOT _vulkan_contents MATCHES "src1->type == GGML_TYPE_F32" OR
        NOT _vulkan_contents MATCHES "ggml_is_contiguous\\(src1\\)" OR
