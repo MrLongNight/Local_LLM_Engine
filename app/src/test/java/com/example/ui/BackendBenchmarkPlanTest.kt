@@ -57,13 +57,15 @@ class BackendBenchmarkPlanTest {
 
         assertEquals(
             listOf(
-                VulkanMatvecWorkgroup.AUTO,
+                VulkanMatvecWorkgroup.MMVQ_FORCE,
                 VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
                 VulkanMatvecWorkgroup.Q4K_BASE_DMMV,
-                VulkanMatvecWorkgroup.AUTO
+                VulkanMatvecWorkgroup.MMVQ_FORCE
             ),
             profiles.map { it.vulkanMatvecWorkgroup }
         )
+        assertEquals(7, profiles.first().vulkanMatvecWorkgroup.nativeId)
+        assertEquals(7, profiles.last().vulkanMatvecWorkgroup.nativeId)
         profiles.forEach { profile ->
             assertEquals(BackendPreference.VULKAN, profile.backendPreference)
             assertEquals(99, profile.gpuLayers)
