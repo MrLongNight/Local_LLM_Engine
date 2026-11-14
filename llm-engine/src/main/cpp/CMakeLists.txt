@@ -153,6 +153,18 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
             }
         }
         if (should_log_graph_distribution) {
+            // Keep the existing compact report marker intact for downstream parsers.
+            LLAMA_LOG_INFO(
+                "llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - runId=%s,graphNodes=%d,graphSplits=%d,cpuNodes=%d,vulkanNodes=%d,otherNodes=%d,unassignedNodes=%d,backendIdsChanged=%d,graphSizeChanged=%d\\n",
+                run_id,
+                graph_nodes,
+                ggml_backend_sched_get_n_splits(sched),
+                cpu_nodes,
+                vulkan_nodes,
+                other_nodes,
+                unassigned_nodes,
+                backend_ids_changed ? 1 : 0,
+                graph_size_changed ? 1 : 0);
             LLAMA_LOG_INFO(
                 "llama_context: LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION - runId=%s,graphNodes=%d,graphSplits=%d,cpuNodes=%d,vulkanNodes=%d,otherNodes=%d,unassignedNodes=%d,gdnCpuNodes=%d,gdnVulkanNodes=%d,gdnOtherNodes=%d,gdnUnassignedNodes=%d,ssmScanCpuNodes=%d,ssmScanVulkanNodes=%d,ssmScanOtherNodes=%d,ssmScanUnassignedNodes=%d,ssmConvCpuNodes=%d,ssmConvVulkanNodes=%d,ssmConvOtherNodes=%d,ssmConvUnassignedNodes=%d,backendIdsChanged=%d,graphSizeChanged=%d\n",
                 run_id,
@@ -219,7 +231,8 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
     file(MAKE_DIRECTORY "${_patched_dir}")
     set(_patched_context "${_patched_dir}/llama-context.cpp")
     file(WRITE "${_patched_context}" "${_context_contents}")
-    if(NOT _context_contents MATCHES "LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION" OR
+    if(NOT _context_contents MATCHES "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" OR
+       NOT _context_contents MATCHES "LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION" OR
        NOT _context_contents MATCHES "ggml_backend_sched_get_tensor_backend" OR
        NOT _context_contents MATCHES "ssmScanVulkanNodes" OR
        NOT _context_contents MATCHES "ssmConvVulkanNodes")
