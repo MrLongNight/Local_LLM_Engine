@@ -56,15 +56,26 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 ### P0-03 — Root-cause the Vulkan throughput and synchronization regression
 
-**Problem:** Current Mali-G57 measurements show Vulkan decode/prefill is not delivering the expected benefit and can be close to or slower than CPU. The existing measurements show substantial backend synchronization wait; changing threads, batch sizes or layer counts at random is not an acceptable fix.
+**Problem:** Current Mali-G57 measurements show Vulkan decode/prefill is not delivering the expected benefit and can be close to or slower than CPU. The source already contains more diagnosis and one Mali-specific wait-strategy change than the earlier checklist reflected. These are implementation facts, not proof that the change improves this device.
 
-- [ ] Establish a reproducible on-device baseline for the current pinned build and Qwen3-4B-Instruct Q4_K_M at fixed context/batch/microbatch/generation settings. Record CPU and Vulkan separately.
-- [ ] Separate prompt prefill, first-token latency, per-token decode, logits readback, queue submit, fence wait and JNI/client wall time. Identify whether the dominant cost is shader execution, dispatch shape, readback/synchronization or CPU scheduling.
-- [ ] Inspect Mali-G57 capabilities and actual driver reports: integer-dot, fp16, subgroup size/features, extension support and Vulkan memory budget. Do not infer capability from a device label.
+**Implemented in source (not yet device-accepted):**
+- [x] Add run-correlated scheduler graph-node accounting for CPU/Vulkan/other/unassigned backends, including GDN/SSM op classes. The generated `llama-context.cpp` overlay records distinct graph layouts.
+- [x] Preserve compact Vulkan capability output (FP16, integer-dot, subgroup and related device features) and query Vulkan memory heap/budget information.
+- [x] Add run-correlated Q4_K prefill/decode path evidence, including Q8_1 eligibility, `quantizeY`, selected kernel family and explicit pipeline-unavailable fallback reason.
+- [x] Separate prompt template/tokenization/prefill metrics from per-token sampling, decode-submit and `llama_synchronize()` envelope metrics. The sync envelope is explicitly not labeled as pure GPU execution.
+- [x] Add decode logits-readback map/copy/sync timing and opt-in per-operation GPU timestamp profiling. The GPU profiler is build/runtime opt-in and must remain separate from profiler-free throughput.
+- [x] Replace the upstream Mali vendor-ID fence busy-poll loop with blocking `waitForFences` in the generated Android overlay; retain upstream polling for non-Mali devices. This is a candidate fix only; no speedup or correctness acceptance is claimed until device A/B.
+
+**Still open — evidence and remaining instrumentation:**
+- [ ] Establish a reproducible on-device baseline for the current pinned build and Qwen3-4B-Instruct Q4_K_M at fixed context/batch/microbatch/generation settings. Record CPU and Vulkan separately, profiler disabled, with warmup and thermal state recorded.
+- [ ] Split the existing `llama_synchronize()` envelope into queue-submit time, fence-wait time (including whether the Mali blocking path was taken), deferred host-copy time and other synchronization overhead. Correlate every sample to the inference run ID and token index.
+- [ ] Measure prompt prefill, first-token latency, steady-state decode and client/JNI wall time in the same controlled run; report distributions rather than one best sample.
+- [ ] Verify the logged Mali-G57 capabilities and memory budget on the target device, including integer-dot, fp16, subgroup features and extension support. Do not infer capability from a device label.
 - [ ] Verify Q4_K batch-1 MMVQ versus base DMMV using actual selected-path logs and identical output correctness. Determine whether the integer-dot path is slower, unavailable or incorrectly dispatched.
-- [ ] Inspect the Android fence-wait implementation and queue/readback synchronization against the pinned upstream version. Any wait-strategy change must preserve completion ordering and pass stress/correctness tests.
-- [ ] Verify actual CPU/Vulkan graph node assignment and offloaded layers, then measure graphics/native memory before and after inference.
-- [ ] Keep profiler-enabled diagnosis separate from profiler-free throughput runs. Do not change production defaults until a controlled A/B result demonstrates both correctness and repeatable improvement.
+- [ ] Validate the Mali blocking-fence change against the prior wait strategy on-device. Check CPU utilization, decode latency, thermal behavior, cancellation and repeated-run stability; revert or revise if it does not improve the controlled result.
+- [ ] Verify actual CPU/Vulkan graph node assignment and offloaded layers from the same benchmark run, then measure graphics/native memory before and after inference.
+- [ ] Inspect all synchronization paths in the pinned upstream revision, including serialized submissions and logits readback; ensure the instrumentation covers the path actually used by the target device.
+- [ ] Keep profiler-enabled diagnosis separate from profiler-free throughput. Do not change production defaults beyond a candidate explicitly scoped to Mali until controlled A/B results demonstrate both correctness and repeatable improvement.
 
 **Acceptance:** A measured root cause explains the regression. Any fix is backed by repeatable profiler-free on-device CPU/Vulkan measurements and unchanged output correctness; otherwise retain the safe behavior and document the unresolved driver/backend limit.
 
