@@ -316,7 +316,7 @@ jobs:
                       "Qwen3.5 GDN CPU fallback":
                           "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK",
                       "Forced MMVQ selection":
-                          "LOCAL_LLM_VULKAN_MMVQ_FORCE",,
+                          "LOCAL_LLM_VULKAN_MMVQ_FORCE",
                       "Mali blocking Vulkan fence wait":
                           "LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT"
                   }

@@ -603,14 +603,14 @@ static void ggml_vk_get_physical_device_features2(
             result = ctx->device->device.getFenceStatus(ctx->fence);
         } catch (vk::DeviceLostError &) {
             ggml_vk_print_device_lost_info(ctx->device);
-            GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\\n", __FILE__, __LINE__);
+            GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\n", __FILE__, __LINE__);
             throw;
         }
         if (result == vk::Result::eSuccess) {
             break;
         }
         if (result != vk::Result::eNotReady) {
-            GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\\n", to_string(result).c_str(), __FILE__, __LINE__);
+            GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\n", to_string(result).c_str(), __FILE__, __LINE__);
             throw vk::SystemError(vk::make_error_code(result), "ggml_vulkan: getFenceStatus");
         }
         for (uint32_t i = 0; i < 100; ++i) {
@@ -639,7 +639,7 @@ static void ggml_vk_get_physical_device_features2(
         static std::atomic<bool> local_llm_mali_fence_wait_logged{false};
         if (!local_llm_mali_fence_wait_logged.exchange(true, std::memory_order_relaxed)) {
             GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT - device=%s,mode=waitForFences\\n",
+                "ggml_vulkan: LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT - device=%s,mode=waitForFences\n",
                 ctx->device->name.c_str());
         }
         VK_CHECK(
@@ -654,14 +654,14 @@ static void ggml_vk_get_physical_device_features2(
                 result = ctx->device->device.getFenceStatus(ctx->fence);
             } catch (vk::DeviceLostError &) {
                 ggml_vk_print_device_lost_info(ctx->device);
-                GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\\n", __FILE__, __LINE__);
+                GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\n", __FILE__, __LINE__);
                 throw;
             }
             if (result == vk::Result::eSuccess) {
                 break;
             }
             if (result != vk::Result::eNotReady) {
-                GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\\n", to_string(result).c_str(), __FILE__, __LINE__);
+                GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\n", to_string(result).c_str(), __FILE__, __LINE__);
                 throw vk::SystemError(vk::make_error_code(result), "ggml_vulkan: getFenceStatus");
             }
             for (uint32_t i = 0; i < 100; ++i) {
