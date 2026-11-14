@@ -592,6 +592,95 @@ static void ggml_vk_get_physical_device_features2(
             }]=])
     string(REPLACE "${_memory_heap_anchor}" "${_memory_heap_replacement}" _vulkan_contents "${_vulkan_contents}")
 
+    # Mali-G57 fence wait: avoid spinning on getFenceStatus for the full GPU
+    # execution interval. Blocking on the same fence preserves completion ordering
+    # while allowing Android CPU/driver work to be scheduled.
+    set(_mali_fence_wait_anchor [=[
+    // Spin (w/pause) waiting for the graph to finish executing.
+    vk::Result result;
+    for (;;) {
+        try {
+            result = ctx->device->device.getFenceStatus(ctx->fence);
+        } catch (vk::DeviceLostError &) {
+            ggml_vk_print_device_lost_info(ctx->device);
+            GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\\n", __FILE__, __LINE__);
+            throw;
+        }
+        if (result == vk::Result::eSuccess) {
+            break;
+        }
+        if (result != vk::Result::eNotReady) {
+            GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\\n", to_string(result).c_str(), __FILE__, __LINE__);
+            throw vk::SystemError(vk::make_error_code(result), "ggml_vulkan: getFenceStatus");
+        }
+        for (uint32_t i = 0; i < 100; ++i) {
+            YIELD();
+            YIELD();
+            YIELD();
+            YIELD();
+            YIELD();
+            YIELD();
+            YIELD();
+            YIELD();
+            YIELD();
+            YIELD();
+        }
+    }
+    ctx->device->device.resetFences({ ctx->fence });
+]=])
+    string(FIND "${_vulkan_contents}" "${_mali_fence_wait_anchor}" _mali_fence_wait_position)
+    if(_mali_fence_wait_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan fence-wait anchor changed; review the Mali wait strategy.")
+    endif()
+    set(_mali_fence_wait_replacement [=[
+    // Mali-G57 shares system memory with the CPU. Repeatedly polling the final
+    // fence can keep a CPU core busy for the full GPU decode interval.
+    if (ctx->device->vendor_id == 0x13B5) {
+        static std::atomic<bool> local_llm_mali_fence_wait_logged{false};
+        if (!local_llm_mali_fence_wait_logged.exchange(true, std::memory_order_relaxed)) {
+            GGML_LOG_INFO(
+                "ggml_vulkan: LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT - device=%s,mode=waitForFences\\n",
+                ctx->device->name.c_str());
+        }
+        VK_CHECK(
+            ctx->device->device.waitForFences({ ctx->fence }, true, UINT64_MAX),
+            "Mali blocking fence wait",
+            ctx->device);
+    } else {
+        // Preserve upstream low-latency polling for every non-Mali GPU.
+        vk::Result result;
+        for (;;) {
+            try {
+                result = ctx->device->device.getFenceStatus(ctx->fence);
+            } catch (vk::DeviceLostError &) {
+                ggml_vk_print_device_lost_info(ctx->device);
+                GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\\n", __FILE__, __LINE__);
+                throw;
+            }
+            if (result == vk::Result::eSuccess) {
+                break;
+            }
+            if (result != vk::Result::eNotReady) {
+                GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\\n", to_string(result).c_str(), __FILE__, __LINE__);
+                throw vk::SystemError(vk::make_error_code(result), "ggml_vulkan: getFenceStatus");
+            }
+            for (uint32_t i = 0; i < 100; ++i) {
+                YIELD();
+                YIELD();
+                YIELD();
+                YIELD();
+                YIELD();
+                YIELD();
+                YIELD();
+                YIELD();
+                YIELD();
+                YIELD();
+            }
+        }
+    }
+    ctx->device->device.resetFences({ ctx->fence });
+]=])
+    string(REPLACE "${_mali_fence_wait_anchor}" "${_mali_fence_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
     # Upstream writes GGML_VK_PERF_LOGGER output to std::cerr, which is not
     # persisted by the engine's llama/ggml log callback. Replace only this
     # function in the generated Android source so each GPU timestamp sample
@@ -719,6 +808,7 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_MMVQ_FORCE" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
