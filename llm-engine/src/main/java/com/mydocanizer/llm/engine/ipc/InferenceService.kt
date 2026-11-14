@@ -425,10 +425,15 @@ class InferenceService : Service() {
                                 }
                             }
                             is InferenceEvent.Completed -> {
-                                // The IPC request ID is also the resource-monitor phase suffix.
-                                // Carry it with the result so matrix rows can be joined to
-                                // INFERENCE_<runId> Peak-PSS/RAM/thermal summaries.
-                                val result = event.result.copy(diagnosticRunId = currentReqId)
+                                // Keep the native llama.cpp ID separate from the IPC/resource ID:
+                                // token traces and Vulkan profiler rows use nativeRunId, while
+                                // INFERENCE_<requestId> RAM/thermal samples use diagnosticRunId.
+                                val nativeRunId = event.result.nativeRunId
+                                    .ifBlank { event.result.diagnosticRunId }
+                                val result = event.result.copy(
+                                    diagnosticRunId = currentReqId,
+                                    nativeRunId = nativeRunId
+                                )
                                 terminalCallback = { callback?.onCompleted(currentReqId, result) }
                             }
                             is InferenceEvent.Cancelled -> {
