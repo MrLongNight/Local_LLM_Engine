@@ -5,7 +5,6 @@ import android.app.Application
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mydocanizer.llm.engine.BackendInfo
 import com.mydocanizer.llm.engine.BackendPreference
@@ -75,7 +74,7 @@ class EngineViewModel(
     val backendInfo: StateFlow<BackendInfo> = engine.backendInfo
     val modelLoadProgress: StateFlow<Int?> = engine.modelLoadProgress
 
-    private val _engineConfig = MutableStateFlow(
+    protected override val _engineConfig = MutableStateFlow(
         EngineConfig(
             contextSize = 2048,
             batchSize = 128,
@@ -92,7 +91,7 @@ class EngineViewModel(
     )
     override val engineConfig: StateFlow<EngineConfig> = _engineConfig.asStateFlow()
 
-    private val _systemPrompt = MutableStateFlow(DEFAULT_SYSTEM_PROMPT)
+    protected override val _systemPrompt = MutableStateFlow(DEFAULT_SYSTEM_PROMPT)
     override val systemPrompt: StateFlow<String> = _systemPrompt.asStateFlow()
 
     private val _importedModelEntries = MutableStateFlow<List<ImportedModelEntry>>(emptyList())
@@ -111,7 +110,7 @@ class EngineViewModel(
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
 
-    private val _isBenchmarking = MutableStateFlow(false)
+    protected override val _isBenchmarking = MutableStateFlow(false)
     override val isBenchmarking: StateFlow<Boolean> = _isBenchmarking.asStateFlow()
 
     private val _benchmarkReport = MutableStateFlow<String?>(null)
