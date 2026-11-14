@@ -568,10 +568,10 @@ internal class LocalLlmEngineImpl(
                 if (BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
                     val tokenTrace = NativeEngineHandle.nativeGetLastTokenSelectionTrace(handle)
                     if (tokenTrace.isNotBlank()) {
-                        EngineDiagnostics.testText(
-                            "inference",
-                            "TOKEN_SELECTION_TRACE",
-                            "runId=$inferenceRunId,backend=${modelInfo.activeBackend},$tokenTrace"
+                        EngineDiagnostics.recordSyntheticTokenSelectionTrace(
+                            nativeRunId = inferenceRunId,
+                            backend = modelInfo.activeBackend,
+                            numericTrace = tokenTrace
                         )
                     }
                 }
