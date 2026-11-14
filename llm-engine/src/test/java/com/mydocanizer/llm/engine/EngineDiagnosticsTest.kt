@@ -501,6 +501,22 @@ class EngineDiagnosticsTest {
         assertFalse(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
     }
 
+    @Test
+    fun compactReportRetainsRunCorrelatedEffectiveTimeoutPolicy() {
+        val line =
+            "2026-11-15 00:00:00.000 [INFO] [ipc_client] INFERENCE_TIMEOUT_POLICY - " +
+                "request=timeout-run,source=last_loaded_model,serviceBindMs=5000," +
+                "modelLoadMs=120000,prefillMs=120000,firstTokenMs=30000," +
+                "interTokenMs=15000,totalInferenceMs=300000,abortGracePeriodMs=3000,reconnectMs=10000"
+
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(line))
+
+        assertTrue(report.contains("INFERENCE_TIMEOUT_POLICY"))
+        assertTrue(report.contains("request=timeout-run"))
+        assertTrue(report.contains("source=last_loaded_model"))
+        assertTrue(report.contains("abortGracePeriodMs=3000"))
+    }
+
     private fun vulkanOperationMetric(
         pid: Int,
         runId: String,
