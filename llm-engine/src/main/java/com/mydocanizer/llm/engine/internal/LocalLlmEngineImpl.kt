@@ -650,7 +650,8 @@ internal class LocalLlmEngineImpl(
                         tokensPerSecond = tokensPerSec,
                         finishReason = finishReason,
                         graphSplits = graphSplits,
-                        diagnosticRunId = inferenceRunId
+                        diagnosticRunId = inferenceRunId,
+                        nativeRunId = inferenceRunId
                     )
                     trySend(InferenceEvent.Completed(result))
                 }
