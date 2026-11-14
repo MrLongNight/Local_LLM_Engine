@@ -105,14 +105,14 @@ int main() {
     {
         // A stream terminated while a valid UTF-8 sequence is pending must emit
         // one replacement character, then clear the pending bytes.
-        const std::string replacement("\\xEF\\xBF\\xBD", 3);
+        const std::string replacement("\xEF\xBF\xBD", 3);
         const std::vector<std::string> incomplete_sequences = {
-            std::string("\\xC2", 1),
-            std::string("\\xE2", 1),
-            std::string("\\xE2\\x82", 2),
-            std::string("\\xF0", 1),
-            std::string("\\xF0\\x9F", 2),
-            std::string("\\xF0\\x9F\\x98", 3),
+            std::string("\xC2", 1),
+            std::string("\xE2", 1),
+            std::string("\xE2\x82", 2),
+            std::string("\xF0", 1),
+            std::string("\xF0\x9F", 2),
+            std::string("\xF0\x9F\x98", 3),
         };
         for (const auto& sequence : incomplete_sequences) {
             std::string pending = sequence;
