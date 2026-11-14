@@ -206,10 +206,12 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 **Evidence:** `EngineDiagnostics.kt` is approximately 904 lines / 45 KB and combines storage, rotation, multi-process reading, parsers, aggregation and export.
 
-- [ ] Establish the privacy-safe event contract from P1 before moving implementation.
-- [ ] Extract process-log storage/rotation, structured parsing, metric aggregation and compact report/export composition behind a small facade.
+- [x] Keep the privacy-safe event contract established in P1: raw prompt/document/token-piece/response text is discarded; numeric token traces remain opt-in and validated.
+- [x] Extract process-log storage, per-process rotation, deterministic cross-process log merge and verified URI export into `EngineDiagnosticsStorage`.
+- [x] Extract native/Kotlin token-step parsing, Vulkan operation parsing and timing/percentile helpers into `EngineDiagnosticsMetrics`.
+- [x] Add direct parser tests for current vs legacy sync fields, run correlation, Vulkan metrics and malformed rows. Existing Android process instrumentation continues to verify app-process file persistence.
+- [ ] Move the large compact report composer/resource aggregation out of `EngineDiagnostics`; keep the current `EngineDiagnostics` API as the facade.
 - [ ] Define bounded versioned events with run/request/PID correlation; keep legacy parsing only when required.
-- [ ] Make multi-process merging deterministic and bounded; add focused parser, aggregation, export and privacy tests.
 
 **Acceptance:** Cohesive diagnostics components with bounded, privacy-safe exports and independent tests.
 
