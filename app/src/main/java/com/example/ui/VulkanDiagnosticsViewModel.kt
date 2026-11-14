@@ -553,22 +553,23 @@ abstract class VulkanDiagnosticsViewModel(
                                 "intDot=$intDotAvailable,q8_1Eligible=$q8Eligible,reason=$selectedReason"
                         )
                     }
-                    if (q8PipelineFallback &&
-                        (!intDotAvailable || !q8Eligible || q8EligibilityReason != "eligible" ||
-                            observedQuantizeY.single() != "0" ||
-                            observedYKernelTypes.single() == "q8_1")
+                    if (!Q4kPipelineFallbackPolicy.isValid(
+                            selectedKernelPath = selectedKernelPath,
+                            selectedReason = selectedReason,
+                            intDotAvailable = intDotAvailable,
+                            q8Eligible = q8Eligible,
+                            q8EligibilityReason = q8EligibilityReason,
+                            quantizeY = observedQuantizeY.single(),
+                            yKernelType = observedYKernelTypes.single()
+                        )
                     ) {
                         throw IllegalStateException(
                             "Q8_1-Pipeline-Fallback ist nicht durch einen tatsächlich geeigneten, " +
                                 "aber nicht verfügbaren Q8_1-Pipeline-Pfad belegt: " +
+                                "selected=$selectedKernelPath,reason=$selectedReason," +
                                 "intDot=$intDotAvailable,q8_1Eligible=$q8Eligible," +
                                 "q8_1Eligibility=$q8EligibilityReason,quantizeY=$observedQuantizeY," +
                                 "yKernelType=$observedYKernelTypes"
-                        )
-                    }
-                    if (selectedReason == "q8_1_pipeline_unavailable_fallback" && !q8PipelineFallback) {
-                        throw IllegalStateException(
-                            "Q8_1-Pipeline-Fallback meldet einen widersprüchlichen tatsächlich gewählten Kernelpfad."
                         )
                     }
                     if (autoPath && loaded.activeBackend.contains("Mali", ignoreCase = true) &&
