@@ -452,6 +452,23 @@ class EngineDiagnosticsTest {
 
 
     @Test
+    fun legacyTextDiagnosticsNeverPersistCallerSuppliedContent() {
+        val sentinel = "SYNTHETIC_PRIVATE_RESPONSE_SENTINEL_7f32a9"
+
+        EngineDiagnostics.testText(
+            tag = "privacy_test",
+            event = "RAW_TEXT_MUST_NOT_BE_PERSISTED",
+            details = sentinel
+        )
+
+        assertFalse(EngineDiagnostics.getLogs().any { it.contains(sentinel) })
+        assertFalse(
+            EngineDiagnostics.buildCompactReportForTest(EngineDiagnostics.getLogs())
+                .contains(sentinel)
+        )
+    }
+
+    @Test
     fun compactExportShowsGdnGraphAndGateHeadersButNeverPromptOrTokenText() {
         val lines = listOf(
             "2026-11-13 09:00:00.000 [NATIVE] llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused,vulkanGdn=cpu-fallback\\n",
