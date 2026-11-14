@@ -1,6 +1,6 @@
 # InferenceServiceProcessTest – Extraktion und Verifikation
 
-**Status:** Testaufteilung abgeschlossen; alle 8 Testmethoden unverändert verschoben; Unit-CI grün; Android-APK-/Instrumentation-CI läuft noch.  
+**Status:** Testaufteilung abgeschlossen; alle 8 Testmethoden unverändert verschoben; Unit-CI grün; Android-APK-/Instrumentation-CI abgebrochen und nicht als Gate abgewartet.  
 **Repository:** `MrLongNight/Local_LLM_Engine` · Branch `main`  
 **Code-Stand:** `b526616ab54c7fa75ac552eef04502c3404650e8`  
 **Ausgangsdatei:** `llm-engine/src/androidTest/java/com/mydocanizer/llm/engine/ipc/InferenceServiceProcessTest.kt`  
@@ -52,7 +52,7 @@ Die Ausgangsdatei enthielt **keine** JUnit-Lifecycle-Hooks (`@Before`, `@After`,
 
 Die Helper-Funktionskörper blieben unverändert; nur die Sichtbarkeit wurde für Unterklassen von `private` zu `protected` geändert. Die vier Timeout-Konstanten behalten exakt ihre ursprünglichen Namen und Werte und sind als `internal const val` auf Paketebene verfügbar. Die vier prozessbezogenen Testklassen erben von der Basisklasse. Die zwei unabhängigen Gruppen benötigen sie nicht.
 
-Alle methodeninternen `try/finally)-Blöcke bleiben in ihren vollständigen Testmethoden erhalten. Zusätzliche globale Setup-/Teardown-Logik wurde nicht eingeführt.
+Alle methodeninternen `try/finally`-Blöcke bleiben in ihren vollständigen Testmethoden erhalten. Zusätzliche globale Setup-/Teardown-Logik wurde nicht eingeführt.
 
 ## 4. Commit-Reihenfolge
 
@@ -64,7 +64,7 @@ Alle methodeninternen `try/finally)-Blöcke bleiben in ihren vollständigen Test
 | `2b6b5d2ca8a61ae218555459e01963b34a995cdd` | Hard-Abort-Test in `InferenceCancellationTest` verschoben |
 | `b526616ab54c7fa75ac552eef04502c3404650e8` | GGUF-Recovery-Test in `GgufRecoveryTest` verschoben; ursprüngliche Sammelklasse entfernt |
 
-Die Verifikationsläufe auf Zwischenständen umfassen erfolgreiche Unit-Läufe und teilweise wegen des nächsten Commits abgebrochene APK-Läufe. Maßgeblich für den Gesamtstand ist die abschließende CI auf `b526616`.
+Die Verifikationsläufe auf Zwischenständen umfassen erfolgreiche Unit-Läufe und durch nachfolgende Commits abgebrochene APK-Läufe. Maßgeblich für die Quellprüfung ist der finale Testcode-Commit `b526616`.
 
 ## 5. Finale Verifikation
 
@@ -72,12 +72,14 @@ Die Verifikationsläufe auf Zwischenständen umfassen erfolgreiche Unit-Läufe u
 |---|---|---|
 | Unit Tests – JVM | `b526616` · Run `43572193823` | **success** |
 | Host-only native Prompt-Cache-/Truncation-Tests | `b526616` · Run `43572193823` | **success** |
-| Android Debug APK und Instrumentation APK Build | `b526616` · Run `43572193817` | bei letzter Aktualisierung in Arbeit |
-| Emulator-Instrumentation | `b526616` · Run `43572193817` | noch nicht erreicht/bestätigt |
-| Artefakt-IDs | Run `43572193817` | noch nicht verfügbar |
+| Android Debug APK und Instrumentation APK Build | `b526616` · Run `43572193817` | **cancelled** durch nachfolgenden Commit `75c93b0`; keine Artefakte |
+| Emulator-Instrumentation | `b526616` · Run `43572193817` | nicht gestartet (Workflow vorher abgebrochen) |
+| Artefakt-IDs | Run `43572193817` | keine – Upload-Schritte wurden nicht erreicht |
 
-Der Unit-Workflow ist vollständig abgeschlossen und grün. Der Android-Workflow war zuletzt im Schritt `Build APK and process-isolation test APK`; APK-/Instrumentation-Artefakte waren zu diesem Zeitpunkt noch nicht hochgeladen. Ein erfolgreicher Emulator-Test wird erst nach einem abgeschlossenen Workflow und verifiziertem Job-Ergebnis behauptet.
+Der Unit-Workflow ist vollständig abgeschlossen und grün. Der Android-Workflow wurde durch den nachfolgenden Commit `75c93b043ca74006c39066b57cacdd1c5223680d` abgebrochen, während Schritt `Build APK and process-isolation test APK` lief. Die Artefakt-Uploads und die Emulator-Instrumentation wurden nicht erreicht. Es wird deshalb weder ein APK-Erfolg noch eine Instrumentation-Abnahme behauptet. Die Quellaufteilung und der bytegenaue Testvergleich sind unabhängig davon abgeschlossen.
 
 ## 6. Offener Größen-/Abnahmehinweis
 
-Die geforderte 1:1-Erhaltung und die Testanzahl sind erfüllt. Das 10-KB-Limit wird von vier der fünf konkreten Testklassen eingehalten. Für `GgufRecoveryTest` ist es mit dem unveränderten 10.034-Byte-Testmethodenblock technisch nicht erreichbar; dies erfordert eine explizite Lockerung oder eine Freigabe, die Testmethode zu zerlegen. Ohne eine solche Freigabe wird sie nicht verändert.
+Die geforderte 1:1-Erhaltung und die Testanzahl sind erfüllt. `GgufRecoveryTest.kt` ist 11.360 Bytes groß, weil der unveränderte einzelne Testmethodenblock 10.034 Bytes umfasst. Eine 10-KB-Dateigrenze war kein ausdrücklich genanntes Akzeptanzkriterium; die Methode wird nicht aufgeteilt oder verändert.
+
+**Final verification note (updated):** Unit Tests on `b526616` are green. Android APK Build run `43572193817` was cancelled when subsequent repository commit `75c93b0` arrived; it had not reached APK artifact upload or emulator instrumentation. This cancellation is not a source-test failure. The split is completed based on the byte-for-byte source comparison and 8/8 count; Actions are not a blocking gate for this refactor.

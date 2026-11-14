@@ -2,7 +2,7 @@
 
 **Live tracker:** InferenceServiceProcessTest split (Task 5).
 **Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `main`
-**Latest inspected code SHA:** `5c6caea4c508a073ff245dd118bd3b1844066575` (2026-11-14).
+**Latest inspected code SHA:** `75c93b043ca74006c39066b57cacdd1c5223680d` (2026-11-14; test split remains at `b526616`).
 
 ## Task 2 — EngineViewModel split
 
@@ -56,7 +56,7 @@ At `af594b8`, the existing `SettingsScreen.kt` UI sections have been mechanicall
 
 ## Task 4 — ModelImportScreen sections
 
-<badge color="warning">Code extraction complete; Android build / emulator verification in progress</badge>
+<badge color="warning">Code extraction complete; APK workflow cancelled before Android instrumentation</badge>
 
 The public `ModelImportScreen(viewModel, modifier)` signature, six StateFlow collections, three SAF launchers and LazyColumn remain in the main file. The new files under `ui/modelimport/` are:
 
@@ -66,13 +66,13 @@ The public `ModelImportScreen(viewModel, modifier)` signature, six StateFlow col
 
 Sizes: main screen 3,957 bytes; every new section below 4.4 KB. No `@Preview` existed in the original screen. Existing shared `ModelLoadProgressIndicator` and `ImportedModelEntry` remain in place.
 
-Code commits: extraction `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`; import correction `5c6caea4c508a073ff245dd118bd3b1844066575`. Unit Tests run `43567003341` on `5c6caea`: completed / success, including host-only native tests. Android APK Build run `43567003311` for `5c6caea` is in progress at this update.
+Code commits: extraction `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`; import correction `5c6caea4c508a073ff245dd118bd3b1844066575`. Unit Tests run `43567003341` on `5c6caea`: completed / success, including host-only native tests. Android APK Build run `43567003311` for `5c6caea` was cancelled by a later push before artifact upload / emulator instrumentation.
 
 Detailed mapping and file sizes: [ModelImportScreen extraction report](../REFACTORING_MODEL_IMPORT.md).
 
 ## Task 5 — InferenceServiceProcessTest split
 
-<badge color="warning">Code split complete; unit CI green; Android instrumentation build pending</badge>
+<badge color="warning">Code split complete; unit CI green; Android build cancelled before instrumentation</badge>
 
 The 30,405-byte, 629-line `InferenceServiceProcessTest.kt` has been split into five concrete instrumentation test classes:
 
@@ -91,14 +91,14 @@ The one >10 KB class is unavoidable under the 1:1 rule: the complete GGUF recove
 
 Commits: `319ff84`, `3988702`, `f2d3947`, `2b6b5d2`, `b526616`.
 
-Final Unit Tests run `43572193823` on code SHA `b526616ab54c7fa75ac552eef04502c3404650e8`: completed / success, including host-only native tests. Android APK Build run `43572193817` on the same SHA was still running at this update, before APK upload and emulator instrumentation.
+Final Unit Tests run `43572193823` on code SHA `b526616ab54c7fa75ac552eef04502c3404650e8`: completed / success, including host-only native tests. Android APK Build run `43572193817` on the same SHA was cancelled by the later code commit `75c93b043ca74006c39066b57cacdd1c5223680d` while step `Build APK and process-isolation test APK` was running. Artifact upload and emulator instrumentation were skipped; there is no APK/instrumentation build claim.
 
 Detailed method map, byte comparisons and class sizes: [InferenceServiceProcessTest split report](../REFACTORING_TESTS.md).
 
 ## Remaining refactoring work
 
 - ModelImportScreen sections have been extracted; Unit Tests run `43567003341` on code SHA `5c6caea4c508a073ff245dd118bd3b1844066575` completed successfully. Android APK Build run `43567003311` for that SHA is in progress at this update; artifact and emulator conclusions are not yet claimed.
-- Complete the APK build / emulator instrumentation and record the artifact IDs for `5c6caea`.
+- APK / emulator verification for Task 4 was not completed: run `43567003311` was cancelled by a later push before artifact upload. It is not being used as a gate for the source refactor.
 - Keep physical-device smoke testing separate from CI: Model Import success, picker cancellation and error handling still require a target Android device.
 - The `InferenceServiceProcessTest` split is complete at code level; final Android APK/emulator verification is pending. `:app` package moves remain deferred.
 - Use-case/repository extraction remains optional; do not add abstractions without a concrete reuse/ownership reason.
