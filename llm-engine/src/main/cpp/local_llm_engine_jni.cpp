@@ -285,6 +285,161 @@ static void log_native_info_message(const std::string& message) {
     local_llm_native_log_callback(GGML_LOG_LEVEL_INFO, message.c_str(), nullptr);
 }
 
+static constexpr int OVERFLOW_HEADROOM = 8;
+static constexpr int BATCH_SIZE = 512;
+static constexpr float DEFAULT_TEMP = 0.7f;
+
+enum BackendMode {
+    BACKEND_AUTO = 0,
+    BACKEND_VULKAN = 1,
+    BACKEND_CPU = 2
+};
+
+struct EngineInstance {
+    llama_model* model = nullptr;
+    llama_context* context = nullptr;
+    // Non-owning in llama.cpp's llama_file(FILE*) wrapper. Keep this FILE* alive
+    // for the full model lifetime; it wraps a dup() of the borrowed SAF descriptor.
+    FILE* model_file_stream = nullptr;
+    llama_batch batch;
+    common_sampler* sampler = nullptr;
+    common_chat_templates_ptr chat_templates;
+
+    int32_t context_size = 4096;
+    int32_t batch_size = BATCH_SIZE;
+    int32_t n_threads = 4;
+    int32_t n_threads_batch = 4;
+    int32_t micro_batch_size = BATCH_SIZE;
+    float default_temperature = DEFAULT_TEMP;
+    float default_top_p = 0.9f;
+    int32_t default_top_k = 20;
+    float default_min_p = 0.05f;
+    std::string active_backend = "CPU";
+    // Correlates native prompt and decode timings with the Kotlin request diagnostics.
+    std::string inference_run_id;
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    std::string last_token_selection_trace;
+#endif
+    std::atomic<bool> cancel_requested{false};
+#if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
+    // Debug-only fault injection used to prove PID-level abort while JNI is blocked.
+    std::atomic<bool> block_next_inference_for_test{false};
+    std::atomic<bool> native_inference_block_entered_for_test{false};
+#endif
+    std::mutex mtx;
+
+    // Chat session state
+    std::vector<common_chat_msg> chat_msgs;
+    // Mirrors sequence 0 KV exactly: prompt prefix plus every successfully decoded output token.
+    std::vector<llama_token> cached_tokens;
+    bool supports_incremental_memory_ops = false;
+    llama_pos system_prompt_position = 0;
+    llama_pos current_position = 0;
+    llama_pos stop_generation_position = 0;
+    std::string cached_token_chars;
+    std::ostringstream assistant_ss;
+    bool is_batch_allocated = false;
+    bool generation_finished = false;
+
+    // Inference tracking
+    int32_t last_finish_reason = 0; // 0=STOP, 1=MAX_TOKENS, 2=CANCELLED, 3=ERROR
+    int64_t inference_start_us = 0;
+    int32_t tokens_generated = 0;
+
+    // Last prompt-stage timings are kept on the existing EngineInstance so Kotlin can
+    // persist them to the normal exportable diagnostics log without parsing logcat.
+    int64_t last_prompt_template_us = 0;
+    int64_t last_prompt_tokenization_us = 0;
+    int64_t last_prompt_decode_us = 0;
+    int32_t last_prompt_tokens = 0;
+    int32_t last_prompt_batch_size = 0;
+    int32_t last_prompt_threads = 0;
+
+    void reset_short_term() {
+        stop_generation_position = 0;
+        cached_token_chars.clear();
+        generation_finished = false;
+        assistant_ss.str("");
+        last_finish_reason = 0;
+        tokens_generated = 0;
+        inference_start_us = 0;
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+        last_token_selection_trace.clear();
+#endif
+    }
+
+    void reset_long_term(bool clear_kv = true) {
+        chat_msgs.clear();
+        cached_tokens.clear();
+        system_prompt_position = 0;
+        current_position = 0;
+        if (clear_kv && context != nullptr) {
+            llama_memory_clear(llama_get_memory(context), false);
+        }
+    }
+
+    bool shift_context() {
+        if (!context || !supports_incremental_memory_ops) return false;
+        llama_memory_t memory = llama_get_memory(context);
+        if (!llama_memory_can_shift(memory)) return false;
+        const int n_discard = (current_position - system_prompt_position) / 2;
+        if (n_discard <= 0 || cached_tokens.size() < static_cast<size_t>(current_position)) return false;
+        LOGI("Controlled context shift: discarding %d non-system tokens starting at %d",
+             n_discard, system_prompt_position);
+        if (!llama_memory_seq_rm(memory, 0, system_prompt_position, system_prompt_position + n_discard)) {
+            LOGW("Context shift refused by llama memory backend; keeping current cache unchanged");
+            return false;
+        }
+        llama_memory_seq_add(memory, 0, system_prompt_position + n_discard, current_position, -n_discard);
+        cached_tokens.erase(cached_tokens.begin() + system_prompt_position,
+                            cached_tokens.begin() + system_prompt_position + n_discard);
+        current_position -= n_discard;
+        // The generation limit is an absolute KV position too. Move it by the
+        // same amount as the retained sequence or a context shift can extend
+        // generation beyond the caller's maxPredictTokens.
+        if (stop_generation_position > system_prompt_position) {
+            stop_generation_position = std::max(
+                system_prompt_position, stop_generation_position - n_discard);
+        }
+        return true;
+    }
+
+    // Caller must hold mtx.
+    void unload_unlocked() {
+        reset_short_term();
+        reset_long_term(false);
+        if (sampler) {
+            common_sampler_free(sampler);
+            sampler = nullptr;
+        }
+        chat_templates.reset();
+        if (is_batch_allocated) {
+            llama_batch_free(batch);
+            is_batch_allocated = false;
+        }
+        if (context) {
+            llama_free(context);
+            context = nullptr;
+        }
+        if (model) {
+            llama_model_free(model);
+            model = nullptr;
+        }
+        if (model_file_stream != nullptr) {
+            std::fclose(model_file_stream);
+            model_file_stream = nullptr;
+        }
+        active_backend = "None";
+        inference_run_id.clear();
+    }
+
+    void unload() {
+        std::lock_guard<std::mutex> lock(mtx);
+        unload_unlocked();
+    }
+};
+
+
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
 // Diagnostic prompt metadata is deliberately content-free. Never persist the
 // rendered prompt, chat-template source, detokenized prompt or token-piece text.
