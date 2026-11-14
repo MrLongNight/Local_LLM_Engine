@@ -1347,6 +1347,26 @@ class EngineViewModel(
                         systemPromptSnapshot = systemPromptSnapshot,
                         benchmarkPrompt = prompt
                     )
+                    val nativeRunId = measured.result.nativeRunId
+                    if (nativeRunId.isBlank()) {
+                        throw IllegalStateException(
+                            "Native Inferenz-Run-ID fehlt; der Kernelpfad kann diesem A/B-Lauf nicht zugeordnet werden."
+                        )
+                    }
+                    val pathEvidence = EngineDiagnostics.vulkanQ4kDecodePathLines(
+                        getApplication(), nativeRunId
+                    )
+                    val observedKernelPaths = pathEvidence.mapNotNull { line ->
+                        Regex("selected=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    val expectedKernelPath = if (baseDmmv) "BASE_TYPE_MMV" else "Q8_1_INTEGER_DOT_MMVQ"
+                    if (observedKernelPaths != setOf(expectedKernelPath)) {
+                        throw IllegalStateException(
+                            "Q4_K-Kernelpfad nicht bestätigt: erwartet=$expectedKernelPath, " +
+                                "beobachtet=${observedKernelPaths.ifEmpty { setOf("keine native Pfadmeldung") }.joinToString()} " +
+                                "(nativeRunId=$nativeRunId). Der Lauf wird nicht als gültiger A/B-Wert gewertet."
+                        )
+                    }
                     if (measured.measuredTokens < 8) {
                         throw IllegalStateException(
                             "Zu wenige Mess-Tokens nach dem Warm-up bei gpuLayers=$gpuLayers: " +
@@ -1456,6 +1476,10 @@ class EngineViewModel(
         val model = currentModel.value
         if (model == null) {
             _errorMessage.value = "Bitte zuerst ein GGUF-Modell laden."
+            return
+        }
+        if (!model.name.contains("Q4_K", ignoreCase = true)) {
+            _errorMessage.value = "Der Q4_K-Decodepfad-Test benötigt ein Q4_K-GGUF-Modell."
             return
         }
 
@@ -1625,6 +1649,8 @@ class EngineViewModel(
                             "nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
                             "generationMs=${measured.result.durationMs}," +
                             "finishReason=${measured.result.finishReason.name}," +
+                            "nativeRunId=$nativeRunId,nativePathVerified=true," +
+                            "observedKernelPaths=${observedKernelPaths.joinToString("|")}," +
                             "context=${profileConfig.contextSize},batch=${profileConfig.batchSize}," +
                             "threads=${profileConfig.threads},batchThreads=${profileConfig.effectiveBatchThreads}," +
                             "microBatch=${profileConfig.effectiveMicroBatchSize},backend=${loaded.activeBackend}"
