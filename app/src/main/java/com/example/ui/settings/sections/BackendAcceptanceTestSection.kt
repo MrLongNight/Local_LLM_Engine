@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ui.EngineViewModel
 import com.mydocanizer.llm.engine.ModelInfo
+import com.example.BuildConfig as AppBuildConfig
+import com.mydocanizer.llm.engine.BuildConfig as EngineBuildConfig
 @Composable
 internal fun BackendAcceptanceTestSection(
     currentModel: ModelInfo?,
@@ -24,7 +26,9 @@ internal fun BackendAcceptanceTestSection(
     isImporting: Boolean,
     viewModel: EngineViewModel
 ) {
-                Card(modifier = Modifier.fillMaxWidth()) {
+    val correctnessTraceAvailable =
+        AppBuildConfig.DEBUG && EngineBuildConfig.DEBUG && EngineBuildConfig.TEXT_DIAGNOSTICS_ENABLED
+    Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
                             text = "1. Engine-Abnahmetest: Korrektheit + Leistung",
@@ -43,10 +47,20 @@ internal fun BackendAcceptanceTestSection(
                         Spacer(modifier = Modifier.height(10.dp))
                         Button(
                             onClick = { viewModel.runBackendAcceptanceTest() },
-                            enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                            enabled = correctnessTraceAvailable && currentModel != null &&
+                                !isBenchmarking && !isGenerating && !isImporting,
                             modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
                         ) {
                             Text(if (isBenchmarking) "Abnahmetest läuft…" else "CPU + Vulkan gemeinsam prüfen")
+                        }
+                        if (!correctnessTraceAvailable) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Dieses APK enthält die für den Korrektheitsvergleich benötigte Token-Diagnostik nicht. " +
+                                    "Bitte das aktuelle Diagnose-APK aus dem Manual-APK-Workflow installieren.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }

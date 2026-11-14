@@ -51,7 +51,12 @@ abstract class BackendBenchmarkViewModel(
         if (!com.example.BuildConfig.DEBUG ||
             !com.mydocanizer.llm.engine.BuildConfig.TEXT_DIAGNOSTICS_ENABLED
         ) {
-            _errorMessage.value = "Das Korrektheits-Gate benötigt einen Debug-Build mit TEXT_DIAGNOSTICS."
+            val message =
+                "CPU/Vulkan-Abnahmetest nicht verfügbar: Dieses Debug-APK wurde ohne TEXT_DIAGNOSTICS gebaut. " +
+                    "Bitte das aktuelle Diagnose-APK aus dem Manual-APK-Workflow installieren."
+            _errorMessage.value = message
+            _statusMessage.value = message
+            EngineDiagnostics.error("benchmark", "BACKEND_ACCEPTANCE_BLOCKED", IllegalStateException(message))
             return
         }
         if (_isBenchmarking.value) return

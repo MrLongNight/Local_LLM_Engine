@@ -90,7 +90,7 @@ fun MainScreen(
                     IconButton(
                         onClick = {
                             EngineDiagnostics.info("ui", "DIAGNOSTICS_EXPORT_REQUESTED_FROM_APP_BAR")
-                            diagnosticsExportLauncher.launch("local-llm-engine-diagnostics.log")
+                            diagnosticsExportLauncher.launch("local-llm-engine-diagnostics-summary.txt")
                         },
                         modifier = Modifier.testTag("top_app_bar_diagnostics_button")
                     ) {

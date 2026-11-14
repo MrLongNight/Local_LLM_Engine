@@ -204,7 +204,9 @@ jobs:
           ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
         run: |
           set -euo pipefail
-          gradle_args=()
+          # The CPU/Vulkan acceptance gate requires numeric token-selection traces.
+          # They are restricted to synthetic benchmark runs and remain disabled in release builds.
+          gradle_args=("-PlocalLlmSyntheticTokenDiagnostics=true")
           if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
             echo "Building separate Vulkan per-operation profiler APK."
             gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
