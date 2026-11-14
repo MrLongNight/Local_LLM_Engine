@@ -69,6 +69,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [ ] Verify the effective `abortGracePeriodMs` from the actual run configuration (the current source default is 3,000 ms; older diagnostic runs may override it). Do not tune it based on a single token timing.
 - [ ] Confirm cooperative cancellation is attempted first, then hard-kill targets only the original inference-service PID after the configured grace period; never kill a replacement process.
 - [ ] Verify terminal events are emitted exactly once, streams close, timeouts remain timeouts, and client calls cannot hang after process death or stale Binder callbacks.
+- [x] Treat `streamChat` collector cancellation as a real native cancellation: retain the request ID through cooperative unwind and escalate to the original service PID after the configured grace period; add a non-cooperative fake-service regression test.
 - [ ] Verify reconnect, same-model reload and a successful follow-up inference after cancellation, timeout, native crash and process kill.
 - [ ] Add regression coverage for cancellation during model load, prefill, decode, stream collection and reconnect; include repeated abort/reconnect cycles.
 

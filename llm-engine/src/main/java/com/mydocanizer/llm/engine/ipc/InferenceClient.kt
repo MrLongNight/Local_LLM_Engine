@@ -855,6 +855,12 @@ internal class InferenceClient(
             watchdogJob?.cancel()
             activeRequestId.compareAndSet(requestId, null)
             streamControl?.let { activeStreamControl.compareAndSet(it, null) }
+            // Keep the lifecycle state aligned with the terminal callback. In particular,
+            // collector cancellation leaves this as Inferring until cooperative unwind
+            // or process-abort escalation actually completes.
+            if (_state.value is EngineState.Inferring) {
+                _state.value = currentModelInfo?.let { EngineState.ModelLoaded(it) } ?: EngineState.Ready
+            }
 
             // Close the progress channel and let its forwarder drain every queued
             // phase/update before publishing the terminal event. Without this barrier,
@@ -1247,21 +1253,27 @@ internal class InferenceClient(
             progressEvents.close()
             progressForwarder.cancel()
             watchdogJob?.cancel()
-            streamControl?.let { activeStreamControl.compareAndSet(it, null) }
-            if (activeRequestId.compareAndSet(requestId, null)) {
-                val service = remoteService
-                clientScope.launch(Dispatchers.IO) {
-                    runCatching { service?.cancelInference(requestId) }
-                }
-            }
-            // A disconnect/abort may already have moved the state to Reconnecting or Error.
-            // Never overwrite that newer lifecycle state with the model snapshot captured
-            // when this stream began.
-            if (_state.value is EngineState.Inferring) {
-                if (currentModelInfo != null) {
-                    _state.value = EngineState.ModelLoaded(currentModelInfo)
-                } else {
-                    _state.value = EngineState.Ready
+
+            // Closing/cancelling the Flow collector is itself a cancellation request.
+            // Keep the request ID and ActiveStreamControl alive until the service
+            // acknowledges native unwind or the original inference PID is killed.
+            if (activeRequestId.get() == requestId) {
+                val targetPid = _remotePid.value
+                val graceMs = effectiveTimeout.abortGracePeriodMs
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "STREAM_COLLECTOR_CLOSED",
+                    "request=$requestId,remotePid=$targetPid; cooperative cancellation requested"
+                )
+                requestCooperativeCancellation(
+                    requestId = requestId,
+                    reason = "stream_collector_closed",
+                    targetPid = targetPid,
+                    graceMs = graceMs
+                ) {
+                    activeStreamControl.get()
+                        ?.takeIf { it.requestId == requestId }
+                        ?.cancelAfterAbort?.invoke()
                 }
             }
         }
@@ -1293,6 +1305,68 @@ internal class InferenceClient(
         }
     }
 
+    /**
+     * Request cooperative native cancellation first, then escalate against only the
+     * original service PID if the matching request has not emitted a terminal callback.
+     * Used by both explicit cancellation and callbackFlow collector cancellation.
+     */
+    private fun requestCooperativeCancellation(
+        requestId: String,
+        reason: String,
+        targetPid: Int?,
+        graceMs: Long,
+        onEscalated: (() -> Unit)? = null
+    ) {
+        val service = remoteService
+        clientScope.launch {
+            withContext(Dispatchers.IO) {
+                val serviceMatchesTarget = service != null &&
+                    (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
+                if (serviceMatchesTarget) {
+                    runCatching { service?.cancelInference(requestId) }
+                        .onSuccess {
+                            EngineDiagnostics.info(
+                                "ipc_client",
+                                "COOPERATIVE_CANCEL_SENT",
+                                "reason=$reason,request=$requestId,remotePid=$targetPid"
+                            )
+                        }
+                        .onFailure {
+                            EngineDiagnostics.error("ipc_client", "COOPERATIVE_CANCEL_FAILED", it)
+                        }
+                } else {
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "COOPERATIVE_CANCEL_SKIPPED_SERVICE_MISMATCH",
+                        "reason=$reason,request=$requestId,targetPid=$targetPid"
+                    )
+                }
+            }
+
+            delay(graceMs.coerceAtLeast(0L))
+            if (activeRequestId.compareAndSet(requestId, null)) {
+                _state.value = EngineState.Reconnecting
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "COOPERATIVE_CANCEL_ESCALATED",
+                    "reason=$reason,request=$requestId did not unwind within ${graceMs}ms; aborting original PID=$targetPid"
+                )
+                abortRemoteProcess(
+                    requestId = requestId,
+                    reason = reason,
+                    targetPidOverride = targetPid
+                )
+                onEscalated?.invoke()
+            } else {
+                EngineDiagnostics.info(
+                    "ipc_client",
+                    "COOPERATIVE_CANCEL_ACKNOWLEDGED",
+                    "reason=$reason,request=$requestId completed cooperative unwind within ${graceMs}ms"
+                )
+            }
+        }
+    }
+
     override fun cancelInference() {
         val requestId = activeRequestId.get()
         if (requestId == null) {
@@ -1311,41 +1385,16 @@ internal class InferenceClient(
             "CANCEL_REQUESTED",
             "Cooperative cancellation requested for request=$requestId, remotePid=$targetPid"
         )
-        val service = remoteService
-        // Binder calls (including processId) are never made on the caller/UI thread.
-        clientScope.launch(Dispatchers.IO) {
-            val matchingService = service != null &&
-                (targetPid == null || runCatching { service.processId == targetPid }.getOrDefault(false))
-            if (matchingService) {
-                runCatching { service?.cancelInference(requestId) }
-                    .onFailure { EngineDiagnostics.error("ipc_client", "COOPERATIVE_CANCEL_FAILED", it) }
-            }
-        }
-
-        // If the service acknowledges cancellation, its onCancelled callback completes
-        // the stream with the partial text. Otherwise the client kills the original PID
-        // and also completes the local stream so generateChat cannot wait forever.
         val graceMs = (lastLoadedConfig?.timeoutConfig ?: timeoutConfig).abortGracePeriodMs
-        clientScope.launch {
-            delay(graceMs)
-            if (activeRequestId.compareAndSet(requestId, null)) {
-                _state.value = EngineState.Reconnecting
-                EngineDiagnostics.info(
-                    "ipc_client",
-                    "COOPERATIVE_CANCEL_ESCALATED",
-                    "request=$requestId did not finish within ${graceMs}ms; aborting original PID=$targetPid"
-                )
-                // Send the hard-abort request before closing the local stream. Otherwise
-                // collectors can resume and observe completion before the kill is issued.
-                abortRemoteProcess(
-                    requestId = requestId,
-                    reason = "cooperative_cancel_timeout",
-                    targetPidOverride = targetPid
-                )
-                activeStreamControl.get()
-                    ?.takeIf { it.requestId == requestId }
-                    ?.cancelAfterAbort?.invoke()
-            }
+        requestCooperativeCancellation(
+            requestId = requestId,
+            reason = "explicit_cancel",
+            targetPid = targetPid,
+            graceMs = graceMs
+        ) {
+            activeStreamControl.get()
+                ?.takeIf { it.requestId == requestId }
+                ?.cancelAfterAbort?.invoke()
         }
     }
 

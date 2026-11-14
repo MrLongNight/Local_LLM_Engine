@@ -308,6 +308,51 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun cancellingStreamCollectorEscalatesWhenServiceIgnoresCooperativeCancel() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterFirstToken.set(true)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 500L,
+            firstTokenMs = 1_000L,
+            interTokenMs = 500L,
+            totalInferenceMs = 2_000L,
+            abortGracePeriodMs = 100L,
+            reconnectMs = 1_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig,
+            processLivenessCheck = { !fakeService.isKilled.get() }
+        )
+        client.initialize()
+
+        val collector = launch {
+            client.streamChat(InferenceRequest.single("collector cancellation")).collect {}
+        }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) delay(5L)
+        }
+
+        // Cancelling the Flow collector must still cancel native work and retain
+        // the active request until the service acknowledges or the grace expires.
+        collector.cancel()
+        collector.join()
+
+        withTimeout(2_000L) {
+            while (!fakeService.isKilled.get()) delay(5L)
+        }
+        assertEquals(fakeService.lastRequestId.get(), fakeService.cancelledRequestId.get())
+        assertTrue(fakeService.cancelRequestedAtNanos.get() > 0L)
+        assertTrue(fakeService.killRequestedAtNanos.get() >= fakeService.cancelRequestedAtNanos.get())
+        assertTrue("Non-cooperative collector cancellation must kill the original service process", fakeService.isKilled.get())
+        client.close()
+    }
+
+    @Test
     fun cooperativeCancelCompletesStreamWithoutKillingAndKeepsPartialText() = runBlocking {
         val fakeService = FakeInferenceService().apply {
             hangAfterFirstToken.set(true)
