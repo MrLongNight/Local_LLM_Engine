@@ -162,13 +162,28 @@ object EngineDiagnostics {
         }
     }
 
-    private fun readAllProcessLogs(context: Context): List<String> {
-        val directory = File(context.applicationContext.filesDir, "diagnostics")
-        val persisted = directory.listFiles { file ->
+    private fun diagnosticsDirectory(context: Context): File =
+        File(context.applicationContext.filesDir, "diagnostics")
+
+    private fun processLogFiles(context: Context): List<File> {
+        val directory = diagnosticsDirectory(context)
+        if (!directory.exists()) return emptyList()
+        val files = directory.listFiles { file ->
             file.isFile && file.name.startsWith("engine-") && file.name.endsWith(".log")
-        }?.sortedBy { it.name }?.flatMap { file ->
-            runCatching { file.readLines(Charsets.UTF_8) }.getOrDefault(emptyList())
-        }.orEmpty()
+        }
+        if (files == null) {
+            Log.e(TAG, "Could not enumerate diagnostic source directory: ${directory.absolutePath}")
+            return emptyList()
+        }
+        return files.sortedBy { it.name }
+    }
+
+    private fun readAllProcessLogs(context: Context): List<String> {
+        val persisted = processLogFiles(context).flatMap { file ->
+            runCatching { file.readLines(Charsets.UTF_8) }
+                .onFailure { Log.e(TAG, "Could not read diagnostic source file: ${file.name}", it) }
+                .getOrDefault(emptyList())
+        }
         val persistedEntries = persisted.toHashSet()
         val inMemoryOnly = getLogs().filterNot { it in persistedEntries }
         return (persisted + inMemoryOnly).asSequence()
@@ -176,6 +191,46 @@ object EngineDiagnostics {
             .distinct()
             .sorted()
             .toList()
+    }
+
+    /**
+     * Writes with explicit truncate semantics and reads the provider URI back.
+     * A successful export must never be reported for a zero-byte or partial file.
+     */
+    private fun writeAndVerifyExport(context: Context, destination: Uri, bytes: ByteArray) {
+        require(bytes.isNotEmpty()) { "Es wurden keine Diagnosebytes zum Export übergeben." }
+        val resolver = context.contentResolver
+        val descriptor = runCatching {
+            resolver.openFileDescriptor(destination, "rwt")
+        }.getOrNull()
+
+        if (descriptor != null) {
+            android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { stream ->
+                stream.write(bytes)
+                stream.flush()
+            }
+        } else {
+            val outputStream = resolver.openOutputStream(destination, "wt")
+                ?: throw IllegalStateException(
+                    "Der Android-Dokumentanbieter hat keinen Schreibstream für das ausgewählte Ziel geöffnet."
+                )
+            outputStream.use { stream ->
+                stream.write(bytes)
+                stream.flush()
+            }
+        }
+
+        val writtenBytes = resolver.openInputStream(destination)?.use { it.readBytes() }
+            ?: throw IllegalStateException(
+                "Der Android-Dokumentanbieter konnte die exportierte Datei nicht zur Prüfung zurücklesen."
+            )
+        check(writtenBytes.isNotEmpty()) {
+            "Der Android-Dokumentanbieter hat eine leere Exportdatei zurückgegeben."
+        }
+        check(writtenBytes.contentEquals(bytes)) {
+            "Die Exportdatei ist unvollständig oder wurde vom Dokumentanbieter verändert " +
+                "(erwartet=${bytes.size} Bytes, gelesen=${writtenBytes.size} Bytes)."
+        }
     }
 
     private data class NativeTokenStepMetric(
@@ -903,28 +958,31 @@ object EngineDiagnostics {
                 "EXPORT_REQUESTED",
                 "destinationScheme=${destination.scheme ?: "unknown"}"
             )
+            val sourceFiles = processLogFiles(context)
+            val sourceInventory = sourceFiles.joinToString(";") { file ->
+                "${file.name}:${file.length()}B"
+            }.ifBlank { "none" }
+            info(
+                "diagnostics",
+                "EXPORT_SOURCE_SCAN",
+                "directoryExists=${diagnosticsDirectory(context).isDirectory},files=$sourceInventory"
+            )
             val sourceLines = readAllProcessLogs(context)
             val content = buildCompactReport(sourceLines)
             val bytes = content.toByteArray(Charsets.UTF_8)
             check(bytes.isNotEmpty()) { "Der Diagnosebericht ist leer; es wurden keine Exportdaten erzeugt." }
 
-            // CreateDocument returns a provider URI. Use explicit truncate-or-create
-            // mode so repeated exports cannot append to a stale, partially written file.
-            val outputStream = context.contentResolver.openOutputStream(destination, "wt")
-                ?: throw IllegalStateException(
-                    "Der Android-Dokumentanbieter hat keinen Schreibstream für das ausgewählte Ziel geöffnet."
-                )
-            outputStream.use { stream ->
-                stream.write(bytes)
-                stream.flush()
-            }
+            writeAndVerifyExport(context, destination, bytes)
 
             info(
                 "diagnostics",
                 "EXPORT_COMPLETED",
                 "bytes=${bytes.size},sourceLines=${sourceLines.size}"
             )
-            Log.i(TAG, "Diagnostic export completed: bytes=${bytes.size}, sourceLines=${sourceLines.size}")
+            Log.i(
+                TAG,
+                "Diagnostic export verified: bytes=${bytes.size}, sourceLines=${sourceLines.size}, sourceFiles=${sourceFiles.size}"
+            )
             bytes.size.toLong()
         }.onFailure { error ->
             Log.e(TAG, "Diagnostic export failed", error)
