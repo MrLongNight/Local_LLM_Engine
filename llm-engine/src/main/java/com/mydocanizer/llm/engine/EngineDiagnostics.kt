@@ -64,6 +64,29 @@ object EngineDiagnostics {
     fun testText(tag: String, event: String, details: String) {
         // Intentionally empty: never forward caller-controlled text to info(), Log or disk.
     }
+ 
+    /**
+     * Persist only numeric token-ID/logit rows for the explicitly enabled synthetic
+     * correctness gate. The native producer must not include token pieces or text.
+     */
+    internal fun recordSyntheticTokenSelectionTrace(
+        nativeRunId: String,
+        backend: String,
+        numericTrace: String
+    ) {
+        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
+        if (!nativeRunId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return
+        if (backend !in setOf("CPU", "Vulkan")) return
+        val numericTracePattern = Regex(
+            """step=[0-9]+,selectedId=-?[0-9]+,top5=(?:-?[0-9]+:-?[0-9]+(?:\\.[0-9]+)?(?:\\|-?[0-9]+:-?[0-9]+(?:\\.[0-9]+)?)*)?"""
+        )
+        if (!numericTracePattern.matches(numericTrace)) return
+        info(
+            "inference",
+            "TOKEN_SELECTION_TRACE",
+            "runId=$nativeRunId,backend=$backend,$numericTrace"
+        )
+    }
 
     fun error(tag: String, event: String, throwable: Throwable? = null) {
         val details = throwable?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: ""
