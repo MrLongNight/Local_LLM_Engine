@@ -374,16 +374,8 @@ internal object ModelSourceResolver {
         }
     }
 
-    private fun safeModelFileName(candidate: String): String {
-        val leaf = candidate.replace('\\', '/').substringAfterLast('/').trim()
-        val cleaned = leaf
-            .replace(Regex("[^A-Za-z0-9._() -]"), "_")
-            .replace(Regex("\\s+"), "_")
-            .trim('.', '_', ' ')
-            .take(120)
-            .ifBlank { "model" }
-        return if (cleaned.endsWith(".gguf", ignoreCase = true)) cleaned else "$cleaned.gguf"
-    }
+    private fun safeModelFileName(candidate: String): String =
+        ModelFileNamePolicy.safeOriginalName(candidate)
 
     private fun queryContentMetadata(context: Context, uri: Uri): ContentMetadata? {
         if (uri.scheme != "content") return null

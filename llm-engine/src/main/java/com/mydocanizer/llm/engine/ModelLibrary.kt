@@ -10,6 +10,13 @@ import java.io.File
  */
 object ModelLibrary {
     /**
+     * Converts an internal content-addressed filename to the original model filename
+     * for user-facing lists. Legacy imports are kept on disk so remembered paths remain valid.
+     */
+    fun displayName(storedFileName: String): String =
+        com.mydocanizer.llm.engine.internal.ModelFileNamePolicy.displayName(storedFileName)
+
+    /**
      * Streams one SAF document into the verified private model store.
      * Existing content-addressed imports are reused when provider metadata permits.
      */

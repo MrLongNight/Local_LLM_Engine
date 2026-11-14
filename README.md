@@ -62,6 +62,11 @@ The source path and settings are stored locally in app-private SharedPreferences
 GGUF is not uploaded or synced by this feature. Manually unloading a model does not
 clear the remembered selection.
 
+The private filename remains content-addressed with a SHA-256 prefix so identical
+content can be stored safely and the remembered file path remains stable. The model
+list removes this internal prefix and displays the original GGUF filename, preserving
+spaces and Unicode characters. Existing imports are not renamed on disk.
+
 ## Model compatibility catalogue
 
 See [`docs/MODEL_COMPATIBILITY.md`](docs/MODEL_COMPATIBILITY.md) for the model-family catalogue and the distinction between upstream architecture support, backend operator coverage and verified Android-device inference. Qwen3.5 and Gemma 4 are recognized by the pinned llama.cpp source, but neither is marked device-verified for the Mali-G57 until an actual GGUF load, chat-template, inference and backend-offload test has passed.

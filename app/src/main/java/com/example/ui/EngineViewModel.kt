@@ -218,7 +218,7 @@ class EngineViewModel(
                     val entries = files.map { file ->
                         ImportedModelEntry(
                             file = file,
-                            name = file.name,
+                            name = ModelLibrary.displayName(file.name),
                             sizeBytes = file.length()
                         )
                     }
