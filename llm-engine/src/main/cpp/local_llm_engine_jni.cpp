@@ -32,6 +32,48 @@
 
 // Internal llama.cpp scheduler metric bridge compiled into the pinned llama target.
 extern "C" int local_llm_get_graph_splits(struct llama_context* context);
+// Vulkan logits readback timing is enabled only while common_sampler_sample()
+// requests the already-computed logits. It does not instrument prompt prefill.
+static std::atomic<bool> g_vulkan_logits_readback_timing_active{false};
+static std::atomic<uint64_t> g_vulkan_logits_readback_map_us{0};
+static std::atomic<uint64_t> g_vulkan_logits_readback_map_allocations{0};
+static std::atomic<uint64_t> g_vulkan_logits_readback_copy_us{0};
+static std::atomic<uint64_t> g_vulkan_logits_readback_sync_us{0};
+
+extern "C" bool local_llm_vulkan_logits_readback_timing_active() {
+    return g_vulkan_logits_readback_timing_active.load(std::memory_order_relaxed);
+}
+
+extern "C" void local_llm_vulkan_logits_readback_record(int phase, uint64_t duration_us) {
+    // Buffer-map timing is a one-time allocation event and can occur during
+    // initial prompt output. Copy/sync metrics remain limited to token decode.
+    if (phase == 0) {
+        g_vulkan_logits_readback_map_us.fetch_add(duration_us, std::memory_order_relaxed);
+        g_vulkan_logits_readback_map_allocations.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    if (!local_llm_vulkan_logits_readback_timing_active()) return;
+    switch (phase) {
+        case 1: g_vulkan_logits_readback_copy_us.fetch_add(duration_us, std::memory_order_relaxed); break;
+        case 2: g_vulkan_logits_readback_sync_us.fetch_add(duration_us, std::memory_order_relaxed); break;
+        default: break;
+    }
+}
+
+class VulkanLogitsReadbackTimingScope {
+public:
+    VulkanLogitsReadbackTimingScope() {
+        g_vulkan_logits_readback_copy_us.store(0, std::memory_order_relaxed);
+        g_vulkan_logits_readback_sync_us.store(0, std::memory_order_relaxed);
+        g_vulkan_logits_readback_timing_active.store(true, std::memory_order_release);
+    }
+    ~VulkanLogitsReadbackTimingScope() {
+        g_vulkan_logits_readback_timing_active.store(false, std::memory_order_release);
+    }
+    VulkanLogitsReadbackTimingScope(const VulkanLogitsReadbackTimingScope&) = delete;
+    VulkanLogitsReadbackTimingScope& operator=(const VulkanLogitsReadbackTimingScope&) = delete;
+};
+
 
 #define TAG "LocalLlmEngineNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
@@ -1077,6 +1119,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     std::lock_guard<std::mutex> lock(engine->mtx);
     engine->unload_unlocked();
+    // Reset the one-time staging-map sample when a new model/context is loaded.
+    g_vulkan_logits_readback_map_us.store(0, std::memory_order_relaxed);
+    g_vulkan_logits_readback_map_allocations.store(0, std::memory_order_relaxed);
+    g_vulkan_logits_readback_copy_us.store(0, std::memory_order_relaxed);
+    g_vulkan_logits_readback_sync_us.store(0, std::memory_order_relaxed);
 
     if (vulkan_dmmv_workgroup < 0 || vulkan_dmmv_workgroup > 7) {
         LOGE("Invalid Vulkan matvec override mode: %d", vulkan_dmmv_workgroup);
@@ -1572,6 +1619,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     VulkanProfileRunScope profile_run_scope(inference_run_id);
     std::lock_guard<std::mutex> lock(engine->mtx);
     engine->inference_run_id = inference_run_id;
+    // Copy/sync phase samples are scoped per token decode; map is retained
+    // from model setup or the first logits output readback.
     // The request's cancellation flag is cleared by nativeResetCancellation()
     // before entering JNI. Never clear it here: a Binder cancel racing with
     // nativeProcessChat must not be lost.
@@ -2011,13 +2060,45 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     VulkanProfileRunScope profile_run_scope(engine->inference_run_id);
     const int64_t token_step_start_us = llama_time_us();
     const int64_t sample_start_us = llama_time_us();
-    const llama_token new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
+    llama_token new_token_id;
+    // Readback phase samples collected during the preceding token decode belong
+    // to the logits consumed by this sampling step. Prompt prefill is not timed.
+    new_token_id = common_sampler_sample(engine->sampler, engine->context, -1);
+    const uint64_t logits_readback_map_us =
+        g_vulkan_logits_readback_map_us.exchange(0, std::memory_order_relaxed);
+    const uint64_t logits_readback_map_allocations =
+        g_vulkan_logits_readback_map_allocations.exchange(0, std::memory_order_relaxed);
+    const uint64_t logits_readback_copy_us =
+        g_vulkan_logits_readback_copy_us.exchange(0, std::memory_order_relaxed);
+    const uint64_t logits_readback_sync_us =
+        g_vulkan_logits_readback_sync_us.exchange(0, std::memory_order_relaxed);
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     // Capture logits before the selected token is decoded and overwrites the output slot.
     log_token_selection_trace(engine, engine->tokens_generated + 1, new_token_id);
 #endif
     common_sampler_accept(engine->sampler, new_token_id, true);
+
     const int64_t sample_duration_us = llama_time_us() - sample_start_us;
+    const int sample_metric_index = engine->tokens_generated + 1;
+    if (engine->active_backend.find("Vulkan") != std::string::npos &&
+        (sample_metric_index <= 4 || sample_metric_index % 8 == 0)) {
+        const char* phase_names[] = {"map", "copy", "sync"};
+        const uint64_t phase_durations[] = {
+            logits_readback_map_us, logits_readback_copy_us, logits_readback_sync_us
+        };
+        for (size_t phase = 0; phase < 3; ++phase) {
+            std::ostringstream metric;
+            metric << "TOKEN_SAMPLE_PHASE_METRIC - index=" << sample_metric_index
+                   << ",sampleUs=" << sample_duration_us
+                   << ",phase=" << phase_names[phase]
+                   << ",durationUs=" << phase_durations[phase]
+                   << ",mapAllocations=" << logits_readback_map_allocations
+                   << ",readbackForToken=" << (sample_metric_index - 1)
+                   << ",runId=" << engine->inference_run_id
+                   << ",backend=" << engine->active_backend;
+            log_native_info_message(metric.str());
+        }
+    }
 
     engine->batch.n_tokens = 0;
     if (!append_token_to_batch(engine->batch, new_token_id, engine->current_position, 0, true, engine->batch_size)) {
@@ -2025,9 +2106,26 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return nullptr;
     }
 
-    const int64_t decode_start_us = llama_time_us();
-    const int decode_result = llama_decode(engine->context, engine->batch);
-    const int64_t decode_submit_duration_us = llama_time_us() - decode_start_us;
+    int decode_result = 0;
+    int64_t decode_submit_duration_us = 0;
+    int64_t backend_sync_wait_us = 0;
+    {
+        // Vulkan emits the next token's logits during decode. Time only this
+        // token-generation path; nativeProcessChat() prompt prefill stays untouched.
+        VulkanLogitsReadbackTimingScope readback_timing_scope;
+        const int64_t decode_start_us = llama_time_us();
+        decode_result = llama_decode(engine->context, engine->batch);
+        decode_submit_duration_us = llama_time_us() - decode_start_us;
+        if (decode_result == 0) {
+            // llama_decode can return after asynchronous backend work has been submitted.
+            // Measure the full llama_synchronize() envelope separately: for Vulkan this may
+            // include queue submission, fence polling/wait, and deferred host/device copies.
+            // It is not a pure GPU-kernel timer; per-operation GPU timestamps are separate.
+            const int64_t backend_sync_start_us = llama_time_us();
+            llama_synchronize(engine->context);
+            backend_sync_wait_us = llama_time_us() - backend_sync_start_us;
+        }
+    }
     if (decode_result == 2) {
         LOGI("Token decode aborted by native cancellation callback; invalidating partially evaluated KV state");
         llama_memory_clear(llama_get_memory(engine->context), false);
@@ -2047,13 +2145,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->last_finish_reason = 3; // ERROR
         return nullptr;
     }
-    // llama_decode can return after asynchronous backend work has been submitted.
-    // Measure the full llama_synchronize() envelope separately: for Vulkan this may
-    // include queue submission, fence polling/wait, and deferred host/device copies.
-    // It is not a pure GPU-kernel timer; per-operation GPU timestamps are separate.
-    const int64_t backend_sync_start_us = llama_time_us();
-    llama_synchronize(engine->context);
-    const int64_t backend_sync_wait_us = llama_time_us() - backend_sync_start_us;
     const int64_t decode_duration_us = decode_submit_duration_us + backend_sync_wait_us;
 
     engine->current_position++;

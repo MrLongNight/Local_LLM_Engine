@@ -223,10 +223,14 @@ function(local_llm_prepare_android_vulkan source_dir)
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <chrono>
+#include <cstdint>
 #include <unistd.h>
 
 extern "C" int local_llm_vulkan_dmmv_workgroup_override();
 extern "C" const char * local_llm_vulkan_profile_run_id();
+extern "C" bool local_llm_vulkan_logits_readback_timing_active();
+extern "C" void local_llm_vulkan_logits_readback_record(int phase, uint64_t duration_us);
 
 // Emit each selected Q4_K path once per native inference. This keeps the
 // diagnostic bounded and avoids allocating per-operation signature strings.
@@ -580,6 +584,119 @@ static void ggml_vk_get_physical_device_features2(
     }]=])
     string(REPLACE "${_q4_decode_anchor}" "${_q4_decode_replacement}" _vulkan_contents "${_vulkan_contents}")
 
+    # Track the shared logits readback: map is measured only when the persistent
+    # HOST_VISIBLE|HOST_COHERENT staging buffer is allocated; copy/sync are gated
+    # to token decode so prompt-prefill execution is not timed or changed.
+    set(_logits_readback_anchor [=[
+        const size_t staging_size = size * n_copies;
+        ggml_vk_ensure_sync_staging_buffer(ctx, staging_size);
+        ggml_vk_sync_buffers(nullptr, compute_ctx);
+
+        std::vector<vk::BufferCopy> slices(1);
+        if (size == stride_tensor) {
+            slices[0].srcOffset = src_offset;
+            slices[0].dstOffset = 0;
+            slices[0].size = staging_size;
+        } else {
+            slices.resize(n_copies);
+            for (size_t i = 0; i < n_copies; i++) {
+                slices[i].srcOffset = src_offset + i * stride_tensor;
+                slices[i].dstOffset = i * size;
+                slices[i].size = size;
+            }
+        }
+
+        compute_ctx->s->buffer->buf.copyBuffer(buf->buffer, ctx->sync_staging->buffer, slices);
+
+        if (size == stride_data) {
+            deferred_memcpy(data, ctx->sync_staging->ptr, staging_size, &compute_ctx->out_memcpys);
+        } else {
+            for (size_t i = 0; i < n_copies; i++) {
+                deferred_memcpy((uint8_t *)data + i * stride_data, (const uint8_t *)ctx->sync_staging->ptr + i * size, size, &compute_ctx->out_memcpys);
+            }
+        }
+        ggml_vk_synchronize(ctx);
+    }]=])
+    string(FIND "${_vulkan_contents}" "${_logits_readback_anchor}" _logits_readback_position)
+    if(_logits_readback_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan logits-readback anchor changed.")
+    endif()
+    set(_logits_readback_replacement [=[
+        const size_t staging_size = size * n_copies;
+        const bool local_llm_readback_timing = local_llm_vulkan_logits_readback_timing_active();
+        const bool local_llm_staging_needs_map =
+            ctx->sync_staging == nullptr || ctx->sync_staging->size < staging_size;
+        const auto local_llm_map_start = local_llm_staging_needs_map
+            ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        ggml_vk_ensure_sync_staging_buffer(ctx, staging_size);
+        if (local_llm_staging_needs_map) {
+            // ggml_vk_create_buffer maps HOST_VISIBLE allocations once; the
+            // persistent vk_buffer::ptr is reused by subsequent token readbacks.
+            GGML_ASSERT(ctx->sync_staging != nullptr);
+            GGML_ASSERT(ctx->sync_staging->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible);
+            GGML_ASSERT(ctx->sync_staging->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent);
+            GGML_ASSERT(ctx->sync_staging->ptr != nullptr);
+            const uint64_t local_llm_map_us = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - local_llm_map_start).count());
+            local_llm_vulkan_logits_readback_record(0, local_llm_map_us);
+        } else if (local_llm_readback_timing) {
+            // Cached mapped buffer: no vkMapMemory call is performed for this token.
+            GGML_ASSERT(ctx->sync_staging != nullptr);
+            GGML_ASSERT(ctx->sync_staging->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible);
+            GGML_ASSERT(ctx->sync_staging->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent);
+            GGML_ASSERT(ctx->sync_staging->ptr != nullptr);
+        }
+
+        uint64_t local_llm_sync_us = 0;
+        auto local_llm_sync_start = local_llm_readback_timing
+            ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        ggml_vk_sync_buffers(nullptr, compute_ctx);
+        if (local_llm_readback_timing) {
+            local_llm_sync_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - local_llm_sync_start).count());
+        }
+
+        std::vector<vk::BufferCopy> slices(1);
+        if (size == stride_tensor) {
+            slices[0].srcOffset = src_offset;
+            slices[0].dstOffset = 0;
+            slices[0].size = staging_size;
+        } else {
+            slices.resize(n_copies);
+            for (size_t i = 0; i < n_copies; i++) {
+                slices[i].srcOffset = src_offset + i * stride_tensor;
+                slices[i].dstOffset = i * size;
+                slices[i].size = size;
+            }
+        }
+
+        const auto local_llm_copy_start = local_llm_readback_timing
+            ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        compute_ctx->s->buffer->buf.copyBuffer(buf->buffer, ctx->sync_staging->buffer, slices);
+        if (local_llm_readback_timing) {
+            const uint64_t local_llm_copy_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - local_llm_copy_start).count());
+            local_llm_vulkan_logits_readback_record(1, local_llm_copy_us);
+        }
+
+        if (size == stride_data) {
+            deferred_memcpy(data, ctx->sync_staging->ptr, staging_size, &compute_ctx->out_memcpys);
+        } else {
+            for (size_t i = 0; i < n_copies; i++) {
+                deferred_memcpy((uint8_t *)data + i * stride_data, (const uint8_t *)ctx->sync_staging->ptr + i * size, size, &compute_ctx->out_memcpys);
+            }
+        }
+        local_llm_sync_start = local_llm_readback_timing
+            ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        ggml_vk_synchronize(ctx);
+        if (local_llm_readback_timing) {
+            local_llm_sync_us += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - local_llm_sync_start).count());
+            local_llm_vulkan_logits_readback_record(2, local_llm_sync_us);
+        }
+    }]=])
+    string(REPLACE "${_logits_readback_anchor}" "${_logits_readback_replacement}" _vulkan_contents "${_vulkan_contents}")
     set(_memory_properties_anchor [=[
     vkdev.getMemoryProperties2(&memprops);
 
@@ -862,6 +979,8 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_MMVQ_FORCE" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT" OR
+       NOT _vulkan_contents MATCHES "local_llm_vulkan_logits_readback_record" OR
+       NOT _vulkan_contents MATCHES "eHostCoherent" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
