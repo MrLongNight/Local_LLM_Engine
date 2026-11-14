@@ -84,6 +84,7 @@ class InferenceIpcTest {
         val slowStreaming = AtomicBoolean(false)
         val delayedPrefillMs = AtomicLong(0L)
         val delayedFirstTokenMs = AtomicLong(0L)
+        val emitDuplicateTerminalCallbacks = AtomicBoolean(false)
 
         override fun initialize() {
             initialized.set(true)
@@ -199,6 +200,13 @@ class InferenceIpcTest {
                 finishReason = FinishReason.STOP
             )
             callback?.onCompleted(requestId, result)
+            if (emitDuplicateTerminalCallbacks.get()) {
+                // Simulate Binder callbacks arriving after a terminal callback has already
+                // closed the stream. They must not create a second terminal event.
+                callback?.onError(requestId, "late error after completion", "late partial")
+                callback?.onCancelled(requestId, "late cancellation", 99)
+                callback?.onCompleted(requestId, result)
+            }
         }
 
         override fun cancelInference(requestId: String?) {
@@ -824,6 +832,36 @@ class InferenceIpcTest {
 
         client.close()
         assertTrue(fakeService.isShutdown.get())
+    }
+
+    @Test
+    fun duplicateAndLateTerminalCallbacksAreIgnoredAfterCompletion() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            emitDuplicateTerminalCallbacks.set(true)
+        }
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = TimeoutConfig.fast()
+        )
+
+        try {
+            val events = withTimeout(1_000L) {
+                client.streamChat(InferenceRequest.single("exactly once")).toList()
+            }
+            val terminalEvents = events.filter {
+                it is InferenceEvent.Completed ||
+                    it is InferenceEvent.Error ||
+                    it is InferenceEvent.Cancelled
+            }
+
+            assertEquals("Exactly one terminal event must be emitted", 1, terminalEvents.size)
+            assertTrue("The first terminal callback is the successful completion", terminalEvents.single() is InferenceEvent.Completed)
+            assertEquals("Hallo Welt", (terminalEvents.single() as InferenceEvent.Completed).result.text)
+            assertTrue("The stream must finish without leaving inference active", client.state.value !is com.mydocanizer.llm.engine.EngineState.Inferring)
+        } finally {
+            client.close()
+        }
     }
 
     @Test
