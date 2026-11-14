@@ -4,7 +4,8 @@
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
 **Analyse-HEAD:** `98cbaf367ba8661e2377c09cf3ca0514bcb5ec18`
-**Aktueller Extraktionsstand:** SystemPromptSection extrahiert; GitHub Actions laufen
+**Aktueller Code-HEAD:** `4492dc3ec7a281cd64640f0186482f98fc07fca8`
+**Aktueller Extraktionsstand:** SystemPromptSection extrahiert; Unit Tests und APK-Build laufen
 **Mermaid-Diagramm:** [SettingsScreen-Struktur live öffnen](https://mermaid.ai/app/projects/d7b9e612-2e4e-4eba-ac5b-098c4d58b067/diagrams/4583f977-9047-4e7c-bf08-18105680eae0/version/v0.1/edit?utm_source=mermaid_app_widget&utm_medium=mermaid-chatgpt-app)  
 **Mermaid documentID:** `4583f977-9047-4e7c-bf08-18105680eae0` (bestehendes Diagramm wird aktualisiert, keine Duplikate)  
 **Datei:** `app/src/main/java/com/example/ui/SettingsScreen.kt`  
@@ -105,7 +106,7 @@ Die einfachste verhaltensneutrale Übergabe ist, die bereits vorhandene `EngineV
 
 | Sektion | Status | Code-Commit | Build |
 |---|---|---|---|
-| SystemPromptSection | Extrahiert | `0600cdd903170d7e439c8621095868afc045e9d3` (Korrekturcommit folgt: fehlender Compose-testTag-Import ergänzt) | APK + Unit Tests laufen (Runs `43557624968`, `43557624991`) |
+| SystemPromptSection | Extrahiert | `0600cdd903170d7e439c8621095868afc045e9d3`; Importkorrektur `4492dc3ec7a281cd64640f0186482f98fc07fca8` | APK-Build Run `43557763490` läuft; Unit Tests Run `43557763450` laufen |
 | BackendSettingsSection | Offen | – | – |
 | VulkanTuningSection | Offen | – | – |
 | InferenceSettingsSection | Offen | – | – |
@@ -121,3 +122,14 @@ Die einfachste verhaltensneutrale Übergabe ist, die bereits vorhandene `EngineV
 ### Strukturdiagramm – Pflegepflicht
 
 Das gespeicherte Mermaid-Diagramm ist Teil der Refactoring-Dokumentation. Es wird nach **jedem** Sektion-Commit und jeder strukturellen Abweichung aktualisiert. Die `documentID` bleibt stabil; es wird das bestehende Diagramm aktualisiert, kein neues angelegt. Statusfarben und Dateigrößen müssen dem tatsächlich verifizierten Repository-Stand entsprechen.
+
+
+### 8.1 1:1-Prüfung – SystemPromptSection
+
+- Originaler Card-Block aus dem freigegebenen Baseline-Commit: 1.215 Zeichen.
+- Extrahierter Funktionsinhalt nach Entfernen der zusätzlichen Funktions-Einrückung: **byte-/zeichenidentisch** zum Originalblock (`bodyExact = true`).
+- Öffentliche `SettingsScreen`-Signatur: **unverändert**.
+- Neue Datei: 2.142 Zeichen, deutlich unter 8 KB.
+- `SettingsScreen.kt`: 21.750 Zeichen nach der ersten Extraktion; Ziel < 5 KB wird erst nach Abschluss aller Sektionen bewertet.
+- Vergleichsbereich: Baseline `98cbaf367ba8661e2377c09cf3ca0514bcb5ec18` bis Code-HEAD `4492dc3ec7a281cd64640f0186482f98fc07fca8`.
+- CI-Abnahme ist noch offen; die laufenden Actions müssen erfolgreich abgeschlossen sein, bevor die nächste Sektion begonnen wird.
