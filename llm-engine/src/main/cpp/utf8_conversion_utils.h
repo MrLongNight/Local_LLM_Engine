@@ -136,7 +136,7 @@ inline std::string normalize_utf8_incremental(
 inline std::string finalize_utf8_incremental(std::string& pending) {
     if (pending.empty()) return {};
     pending.clear();
-    return std::string("\\xEF\\xBF\\xBD", 3);
+    return std::string("\xEF\xBF\xBD", 3);
 }
 
 } // namespace local_llm
