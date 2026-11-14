@@ -5,7 +5,6 @@ import android.app.Application
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mydocanizer.llm.engine.BackendInfo
@@ -55,8 +54,8 @@ data class ImportedModelEntry(
 
 class EngineViewModel(
     application: Application,
-    val engine: LocalLlmEngine
-) : AndroidViewModel(application) {
+    engine: LocalLlmEngine
+) : ChatViewModel(application, engine) {
 
     constructor(application: Application) : this(
         application,
@@ -64,7 +63,6 @@ class EngineViewModel(
     )
 
     companion object {
-        private const val TAG = "EngineViewModel"
         const val DEFAULT_SYSTEM_PROMPT =
             "Du bist ein hilfreicher, präziser KI-Assistent."
     }
@@ -73,26 +71,9 @@ class EngineViewModel(
     val currentTab: StateFlow<AppTab> = _currentTab.asStateFlow()
 
     val engineState: StateFlow<EngineState> = engine.state
-    val currentModel: StateFlow<ModelInfo?> = engine.currentModel
+    override val currentModel: StateFlow<ModelInfo?> = engine.currentModel
     val backendInfo: StateFlow<BackendInfo> = engine.backendInfo
     val modelLoadProgress: StateFlow<Int?> = engine.modelLoadProgress
-
-    // UI welcome copy is rendered by ChatScreen while this list is empty.
-    // It must never be sent to the model as a synthetic assistant turn.
-    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
-
-    private val _inputText = MutableStateFlow("")
-    val inputText: StateFlow<String> = _inputText.asStateFlow()
-
-    private val _isGenerating = MutableStateFlow(false)
-    val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
-
-    private val _currentStreamingText = MutableStateFlow("")
-    val currentStreamingText: StateFlow<String> = _currentStreamingText.asStateFlow()
-
-    private val _inferenceProgress = MutableStateFlow<InferenceEvent.Progress?>(null)
-    val inferenceProgress: StateFlow<InferenceEvent.Progress?> = _inferenceProgress.asStateFlow()
 
     private val _engineConfig = MutableStateFlow(
         EngineConfig(
@@ -109,18 +90,18 @@ class EngineViewModel(
             gpuLayers = 99
         )
     )
-    val engineConfig: StateFlow<EngineConfig> = _engineConfig.asStateFlow()
+    override val engineConfig: StateFlow<EngineConfig> = _engineConfig.asStateFlow()
 
     private val _systemPrompt = MutableStateFlow(DEFAULT_SYSTEM_PROMPT)
-    val systemPrompt: StateFlow<String> = _systemPrompt.asStateFlow()
+    override val systemPrompt: StateFlow<String> = _systemPrompt.asStateFlow()
 
     private val _importedModelEntries = MutableStateFlow<List<ImportedModelEntry>>(emptyList())
     val importedModelEntries: StateFlow<List<ImportedModelEntry>> = _importedModelEntries.asStateFlow()
 
-    private val _statusMessage = MutableStateFlow<String?>(null)
+    protected override val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
-    private val _errorMessage = MutableStateFlow<String?>(null)
+    protected override val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private val _memoryOverrideAvailable = MutableStateFlow(false)
@@ -131,7 +112,7 @@ class EngineViewModel(
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
 
     private val _isBenchmarking = MutableStateFlow(false)
-    val isBenchmarking: StateFlow<Boolean> = _isBenchmarking.asStateFlow()
+    override val isBenchmarking: StateFlow<Boolean> = _isBenchmarking.asStateFlow()
 
     private val _benchmarkReport = MutableStateFlow<String?>(null)
     val benchmarkReport: StateFlow<String?> = _benchmarkReport.asStateFlow()
@@ -143,8 +124,6 @@ class EngineViewModel(
     val configSmokeReport: StateFlow<String?> = _configSmokeReport.asStateFlow()
 
     private var configurationSmokeJob: Job? = null
-    private var inferenceJob: Job? = null
-    private var generationSequence: Long = 0L
     private val lastModelStore = LastModelStore(application)
 
     init {
@@ -155,10 +134,6 @@ class EngineViewModel(
     fun selectTab(tab: AppTab) {
         _currentTab.value = tab
         EngineDiagnostics.info("ui", "TAB_SELECTED", "tab=$tab")
-    }
-
-    fun updateInputText(text: String) {
-        _inputText.value = text
     }
 
     fun updateSystemPrompt(prompt: String) {
@@ -1998,135 +1973,6 @@ class EngineViewModel(
         value.contains("Vulkan", ignoreCase = true) -> "VULKAN"
         value.contains("CPU", ignoreCase = true) -> "CPU"
         else -> "UNKNOWN"
-    }
-
-    fun restartConversation() {
-        // Invalidate queued events before cancelling the coroutine. A late native
-        // completion from the old conversation must never repopulate the reset chat.
-        generationSequence++
-        engine.cancelInference()
-        inferenceJob?.cancel()
-        inferenceJob = null
-
-        _chatMessages.value = emptyList()
-        _currentStreamingText.value = ""
-        _inferenceProgress.value = null
-        _inputText.value = ""
-        _isGenerating.value = false
-        _statusMessage.value = "Gespräch wurde zurückgesetzt"
-    }
-
-    fun sendMessage() {
-        if (_isBenchmarking.value) {
-            _errorMessage.value = "Bitte den laufenden Benchmark erst abschließen."
-            return
-        }
-        val prompt = _inputText.value.trim()
-        if (prompt.isEmpty() || _isGenerating.value) return
-
-        if (currentModel.value == null) {
-            _errorMessage.value = "Kein Modell geladen! Bitte wähle oder importiere zuerst eine GGUF-Modelldatei."
-            return
-        }
-
-        val userMsg = ChatMessage.user(prompt)
-        val currentList = _chatMessages.value.toMutableList().apply { add(userMsg) }
-        _chatMessages.value = currentList
-        _inputText.value = ""
-        _isGenerating.value = true
-        _currentStreamingText.value = ""
-        _inferenceProgress.value = null
-        _errorMessage.value = null
-
-        val messagesWithSystem = mutableListOf<ChatMessage>()
-        if (_systemPrompt.value.isNotBlank()) {
-            messagesWithSystem.add(ChatMessage.system(_systemPrompt.value))
-        }
-        messagesWithSystem.addAll(currentList)
-
-        val request = InferenceRequest(
-            messages = messagesWithSystem,
-            maxPredictTokens = _engineConfig.value.maxPredictTokens,
-            temperature = _engineConfig.value.temperature,
-            topP = _engineConfig.value.topP
-        )
-
-        val thisGeneration = ++generationSequence
-        inferenceJob = viewModelScope.launch {
-            val streamBuilder = StringBuilder()
-            try {
-                engine.streamChat(request).collect { event ->
-                    if (thisGeneration != generationSequence) return@collect
-                    when (event) {
-                    is InferenceEvent.Started -> {
-                        Log.d(TAG, "Inference started with ${event.promptMessageCount} messages")
-                    }
-                    is InferenceEvent.Token -> {
-                        streamBuilder.append(event.token)
-                        _currentStreamingText.value = streamBuilder.toString()
-                    }
-                    is InferenceEvent.Progress -> {
-                        _inferenceProgress.value = event
-                    }
-                    is InferenceEvent.Completed -> {
-                        val assistantMsg = ChatMessage.assistant(event.result.text)
-                        _chatMessages.value = _chatMessages.value + assistantMsg
-                        _currentStreamingText.value = ""
-                        _inferenceProgress.value = null
-                        _isGenerating.value = false
-                        Log.i(TAG, "Completed: ${event.result.tokensGenerated} tokens @ ${event.result.tokensPerSecond} t/s")
-                    }
-                    is InferenceEvent.Cancelled -> {
-                        val partialText = event.partialText.ifBlank { streamBuilder.toString() }
-                        val partial = if (partialText.isNotBlank()) {
-                            partialText + " [Abgebrochen]"
-                        } else {
-                            "[Generierung abgebrochen]"
-                        }
-                        _chatMessages.value = _chatMessages.value + ChatMessage.assistant(partial)
-                        _currentStreamingText.value = ""
-                        _inferenceProgress.value = null
-                        _isGenerating.value = false
-                    }
-                    is InferenceEvent.Error -> {
-                        // Keep generated text in the conversation; the streaming bubble is transient.
-                        val partialText = event.partialText.ifBlank { streamBuilder.toString() }
-                        if (partialText.isNotBlank()) {
-                            _chatMessages.value = _chatMessages.value + ChatMessage.assistant(
-                                "$partialText\n\n[Teilantwort – Inferenzfehler]"
-                            )
-                        }
-                        val reason = event.throwable.message ?: event.throwable.javaClass.simpleName
-                        EngineDiagnostics.error("chat", "VIEWMODEL_RECEIVED_INFERENCE_ERROR", event.throwable)
-                        _errorMessage.value = "Inferenz-Fehler: $reason"
-                        _currentStreamingText.value = ""
-                        _inferenceProgress.value = null
-                        _isGenerating.value = false
-                    }
-                }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                if (thisGeneration == generationSequence) {
-                    Log.e(TAG, "Chat inference failed", error)
-                    _errorMessage.value = "Inferenz-Fehler: ${error.message ?: error.javaClass.simpleName}"
-                }
-            } finally {
-                if (thisGeneration == generationSequence) {
-                    _isGenerating.value = false
-                    _currentStreamingText.value = ""
-                    _inferenceProgress.value = null
-                    inferenceJob = null
-                }
-            }
-        }
-    }
-
-    fun cancelGeneration() {
-        // Keep the UI in its generating state until the native engine confirms cancellation.
-        engine.cancelInference()
-        _statusMessage.value = "Abbruch angefordert..."
     }
 
     fun exportDiagnostics(destination: Uri) {
