@@ -42,8 +42,9 @@
 
 - `README.md` is the concise repository entry page; `docs/README.md` is the documentation index.
 - Keep technical references in `docs/technical/`, active task trackers in `docs/active-todos/`, and broader plans/integration strategy in `docs/planning/`.
-- `docs/active-todos/REFACTORING_STATUS.md` is the only live refactoring status register. Do not create a second status/roadmap document for the same work.
-- `docs/planning/IMPLEMENTATION_PLAN.md` owns the overall engine implementation plan and dated technical history.
+- `docs/active-todos/MASTER_TODO.md` is the only active task register for the entire repository. Sort every new measure by priority, merge duplicates, and do not create another active TODO, roadmap, status or cache checklist.
+- `docs/planning/IMPLEMENTATION_PLAN.md` owns technical decisions and dated historical evidence; it is not a second active task queue.
+- Completed refactoring evidence belongs in `docs/history/`; do not treat archived checklists as currently planned work.
 - `docs/planning/INTEGRATION_MYDOCANIZER.md` is an important downstream integration plan. Maintain it against the current public library API; do not remove it because the engine prototype is a separate repository.
 - Update the canonical document in place. Do not duplicate content across README, changelog, planning and status documents; use links to the canonical location.
 - Keep links relative to the final file location and update all inbound references when moving a document.
