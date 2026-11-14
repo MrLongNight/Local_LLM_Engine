@@ -168,6 +168,8 @@ abstract class ModelImportViewModel(
                         imported++
                         _statusMessage.value =
                             "Importiere Modelle: ${index + 1}/${uris.size} – $displayName"
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (error: Exception) {
                         skipped++
                         failures += "$displayName: ${error.message ?: error.javaClass.simpleName}"
