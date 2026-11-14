@@ -113,6 +113,7 @@ internal object EngineDiagnosticsReportBuilder {
             "INFERENCE_COMPLETED",
             "INFERENCE_CANCELLED",
             "INFERENCE_TIMEOUT",
+            "INFERENCE_TIMEOUT_POLICY",
             "BACKEND_SELECTED",
             "BACKEND_INITIALIZED",
             "RESOURCE_PHASE",
