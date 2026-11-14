@@ -1,63 +1,37 @@
 package com.mydocanizer.llm.engine.ipc
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.content.ServiceConnection
-import android.os.IBinder
-import android.os.Parcel
 import android.os.Process
-import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.mydocanizer.llm.engine.BackendPreference
+import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.EngineState
+import com.mydocanizer.llm.engine.InferenceEvent
+import com.mydocanizer.llm.engine.InferenceRequest
+import com.mydocanizer.llm.engine.InferenceTimeoutException
+import com.mydocanizer.llm.engine.ModelSource
+import com.mydocanizer.llm.engine.ReloadAfterAbort
+import com.mydocanizer.llm.engine.TimeoutConfig
+import java.io.File
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.runBlocking
-import com.mydocanizer.llm.engine.EngineDiagnostics
-import com.mydocanizer.llm.engine.BackendPreference
-import com.mydocanizer.llm.engine.EngineConfig
-import com.mydocanizer.llm.engine.EngineState
-import com.mydocanizer.llm.engine.InferenceRequest
-import com.mydocanizer.llm.engine.InferenceEvent
-import com.mydocanizer.llm.engine.InferenceTimeoutException
-import com.mydocanizer.llm.engine.TimeoutConfig
-import com.mydocanizer.llm.engine.ModelSource
-import com.mydocanizer.llm.engine.ReloadAfterAbort
-import com.mydocanizer.llm.engine.internal.ModelSourceResolver
-import com.mydocanizer.llm.engine.internal.NativeEngineHandle
-import kotlinx.coroutines.async
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.flow.toList
 
 @RunWith(AndroidJUnit4::class)
-class InferenceServiceProcessTest : InferenceServiceProcessTestBase() {
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+class GgufRecoveryTest : InferenceServiceProcessTestBase() {
 
     @Test
     fun realGgufIsReloadedAndFollowupInferenceSucceedsAfterTimeoutKill() = runBlocking {
@@ -243,16 +217,4 @@ class InferenceServiceProcessTest : InferenceServiceProcessTestBase() {
             modelFile.delete()
         }
     }
-
-
-
-    
-
-
-
-
-
-
-
-
 }
