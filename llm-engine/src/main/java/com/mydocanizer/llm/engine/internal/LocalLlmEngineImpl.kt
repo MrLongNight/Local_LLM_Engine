@@ -605,9 +605,10 @@ internal class LocalLlmEngineImpl(
                         throw CancellationException("Token collector is no longer active")
                     }
                     tokenCount++
-                    if (tokenCount >= request.maxPredictTokens) {
-                        break
-                    }
+                    // The native engine enforces maxPredictTokens using generated token IDs.
+                    // Do not stop by counting visible chunks here: one native token may emit
+                    // no text while completing a split UTF-8 code point. Let the next native
+                    // step set MAX_TOKENS and flush any pending UTF-8 suffix before returning null.
                 }
             }
 
