@@ -104,6 +104,20 @@ object EngineDiagnostics {
         }
     }
 
+    /**
+     * Returns the Q4_K decode path evidence emitted by the native Vulkan backend
+     * for one inference. The run ID prevents a prior model/profile's selection
+     * from being attributed to the current A/B sample.
+     */
+    fun vulkanQ4kDecodePathLines(context: Context, nativeRunId: String): List<String> {
+        if (nativeRunId.isBlank()) return emptyList()
+        val marker = "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - "
+        return readAllProcessLogs(context).filter { line ->
+            if (!line.contains(marker)) return@filter false
+            line.substringAfter(marker).startsWith("runId=$nativeRunId,")
+        }
+    }
+
     private fun persist(entry: String) {
         val file = processLogFile ?: return
         synchronized(persistLock) {
