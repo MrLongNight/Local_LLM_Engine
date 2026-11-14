@@ -658,80 +658,6 @@ static std::string collectBackendDiagnostics() {
 
 static constexpr const char* UTF8_REPLACEMENT_CHARACTER = "\xEF\xBF\xBD";
 
-static std::string normalize_utf8_incremental(
-        const std::string& incoming,
-        std::string& pending) {
-    std::string input = pending;
-    input.append(incoming);
-    pending.clear();
-
-    std::string output;
-    output.reserve(input.size());
-    size_t offset = 0;
-
-    while (offset < input.size()) {
-        const auto lead = static_cast<unsigned char>(input[offset]);
-        if (lead <= 0x7F) {
-            output.push_back(static_cast<char>(lead));
-            ++offset;
-            continue;
-        }
-
-        size_t sequence_length = 0;
-        if (lead >= 0xC2 && lead <= 0xDF) {
-            sequence_length = 2;
-        } else if (lead >= 0xE0 && lead <= 0xEF) {
-            sequence_length = 3;
-        } else if (lead >= 0xF0 && lead <= 0xF4) {
-            sequence_length = 4;
-        } else {
-            output.append(UTF8_REPLACEMENT_CHARACTER);
-            ++offset;
-            continue;
-        }
-
-        const size_t available = input.size() - offset;
-        const size_t checked = std::min(sequence_length, available);
-        bool malformed = false;
-        for (size_t index = 1; index < checked; ++index) {
-            const auto continuation =
-                static_cast<unsigned char>(input[offset + index]);
-            if ((continuation & 0xC0) != 0x80) {
-                malformed = true;
-                break;
-            }
-
-            // Reject overlong encodings, UTF-16 surrogate code points and
-            // code points above U+10FFFF, not merely malformed continuation bytes.
-            if (index == 1 &&
-                ((lead == 0xE0 && continuation < 0xA0) ||
-                 (lead == 0xED && continuation > 0x9F) ||
-                 (lead == 0xF0 && continuation < 0x90) ||
-                 (lead == 0xF4 && continuation > 0x8F))) {
-                malformed = true;
-                break;
-            }
-        }
-
-        if (malformed) {
-            output.append(UTF8_REPLACEMENT_CHARACTER);
-            ++offset;
-            continue;
-        }
-
-        if (available < sequence_length) {
-            // Only a valid, incomplete trailing code point is retained.
-            // Its maximum size is three bytes, regardless of output length.
-            pending.assign(input, offset, available);
-            break;
-        }
-
-        output.append(input, offset, sequence_length);
-        offset += sequence_length;
-    }
-    return output;
-}
-
 // JNI GetStringUTFChars() exposes Modified UTF-8, not standard UTF-8.
 // Convert the Java UTF-16 code units through the shared host-tested helper so
 // supplementary characters, embedded NULs and malformed surrogates are handled
@@ -2117,7 +2043,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const int64_t piece_start_us = llama_time_us();
     auto token_piece = common_token_to_piece(engine->context, new_token_id);
     const std::string valid_output =
-        normalize_utf8_incremental(token_piece, engine->cached_token_chars);
+        local_llm::normalize_utf8_incremental(token_piece, engine->cached_token_chars);
     const int64_t piece_duration_us = llama_time_us() - piece_start_us;
     const int64_t token_total_duration_us = llama_time_us() - token_step_start_us;
     if (engine->tokens_generated <= 4 || engine->tokens_generated % 8 == 0) {

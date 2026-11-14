@@ -47,5 +47,60 @@ int main() {
         const char16_t* input = nullptr;
         assert(local_llm::utf16_to_utf8(input, 0).empty());
     }
+    {
+        // A four-byte code point split over two model tokens must remain pending,
+        // then be emitted once the final continuation bytes arrive.
+        std::string pending;
+        const std::string first("\xF0\x9F", 2);
+        assert(local_llm::normalize_utf8_incremental(first, pending).empty());
+        assert(pending == first);
+        const std::string second("\x98\x80", 2);
+        const std::string expected("\xF0\x9F\x98\x80", 4);
+        assert(local_llm::normalize_utf8_incremental(second, pending) == expected);
+        assert(pending.empty());
+    }
+    {
+        // A valid ASCII prefix is returned immediately while an incomplete
+        // three-byte suffix is retained for the next token callback.
+        std::string pending;
+        const std::string piece("A\xE2\x82", 3);
+        assert(local_llm::normalize_utf8_incremental(piece, pending) == "A");
+        assert(pending == std::string("\xE2\x82", 2));
+        const std::string continuation("\xAC", 1);
+        assert(local_llm::normalize_utf8_incremental(continuation, pending) ==
+               std::string("\xE2\x82\xAC", 3));
+        assert(pending.empty());
+    }
+    {
+        // A non-continuation after a pending lead byte emits U+FFFD and
+        // preserves the ordinary following byte.
+        std::string pending("\xE2", 1);
+        const auto output = local_llm::normalize_utf8_incremental("A", pending);
+        assert(output == std::string("\xEF\xBF\xBD" "A", 4));
+        assert(pending.empty());
+    }
+    {
+        // Reject UTF-8 encodings of surrogate values and code points > U+10FFFF.
+        std::string pending;
+        const std::string invalidSurrogate("\xED\xA0\x80", 3);
+        const auto surrogateOutput =
+            local_llm::normalize_utf8_incremental(invalidSurrogate, pending);
+        assert(surrogateOutput == std::string("\xEF\xBF\xBD", 3) +
+                                  std::string("\xEF\xBF\xBD", 3) +
+                                  std::string("\xEF\xBF\xBD", 3));
+        const std::string invalidRange("\xF4\x90\x80\x80", 4);
+        const auto rangeOutput =
+            local_llm::normalize_utf8_incremental(invalidRange, pending);
+        assert(rangeOutput.size() == 12);
+        assert(pending.empty());
+    }
+    {
+        // A lone invalid lead byte is replaced instead of leaking malformed UTF-8.
+        std::string pending;
+        const std::string invalid("\xC0", 1);
+        assert(local_llm::normalize_utf8_incremental(invalid, pending) ==
+               std::string("\xEF\xBF\xBD", 3));
+        assert(pending.empty());
+    }
     return 0;
 }

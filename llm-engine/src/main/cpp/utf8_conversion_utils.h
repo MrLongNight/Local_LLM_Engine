@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -51,6 +52,81 @@ inline std::string utf16_to_utf8(const CodeUnit* data, std::size_t length) {
             code_point = 0xFFFD;
         }
         append_utf8_code_point(output, code_point);
+    }
+    return output;
+}
+
+
+// Normalize token-piece bytes while retaining only a valid incomplete UTF-8 suffix.
+// This prevents a multi-byte code point split across successive llama tokens from
+// being replaced prematurely, and rejects overlong/surrogate/out-of-range sequences.
+inline std::string normalize_utf8_incremental(
+        const std::string& incoming,
+        std::string& pending) {
+    static constexpr char replacement[] = "\xEF\xBF\xBD";
+    std::string input = pending;
+    input.append(incoming);
+    pending.clear();
+
+    std::string output;
+    output.reserve(input.size());
+    std::size_t offset = 0;
+
+    while (offset < input.size()) {
+        const auto lead = static_cast<unsigned char>(input[offset]);
+        if (lead <= 0x7F) {
+            output.push_back(static_cast<char>(lead));
+            ++offset;
+            continue;
+        }
+
+        std::size_t sequence_length = 0;
+        if (lead >= 0xC2 && lead <= 0xDF) {
+            sequence_length = 2;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            sequence_length = 3;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            sequence_length = 4;
+        } else {
+            output.append(replacement, sizeof(replacement) - 1);
+            ++offset;
+            continue;
+        }
+
+        const std::size_t available = input.size() - offset;
+        const std::size_t checked = std::min(sequence_length, available);
+        bool malformed = false;
+        for (std::size_t index = 1; index < checked; ++index) {
+            const auto continuation =
+                static_cast<unsigned char>(input[offset + index]);
+            if ((continuation & 0xC0) != 0x80) {
+                malformed = true;
+                break;
+            }
+
+            if (index == 1 &&
+                ((lead == 0xE0 && continuation < 0xA0) ||
+                 (lead == 0xED && continuation > 0x9F) ||
+                 (lead == 0xF0 && continuation < 0x90) ||
+                 (lead == 0xF4 && continuation > 0x8F))) {
+                malformed = true;
+                break;
+            }
+        }
+
+        if (malformed) {
+            output.append(replacement, sizeof(replacement) - 1);
+            ++offset;
+            continue;
+        }
+
+        if (available < sequence_length) {
+            pending.assign(input, offset, available);
+            break;
+        }
+
+        output.append(input, offset, sequence_length);
+        offset += sequence_length;
     }
     return output;
 }
