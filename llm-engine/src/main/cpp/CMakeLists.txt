@@ -92,21 +92,39 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
         int vulkan_nodes = 0;
         int other_nodes = 0;
         int unassigned_nodes = 0;
+        int gdn_cpu_nodes = 0, gdn_vulkan_nodes = 0, gdn_other_nodes = 0, gdn_unassigned_nodes = 0;
+        int ssm_scan_cpu_nodes = 0, ssm_scan_vulkan_nodes = 0, ssm_scan_other_nodes = 0, ssm_scan_unassigned_nodes = 0;
+        int ssm_conv_cpu_nodes = 0, ssm_conv_vulkan_nodes = 0, ssm_conv_other_nodes = 0, ssm_conv_unassigned_nodes = 0;
         const int graph_nodes = ggml_graph_n_nodes(gf);
         for (int i = 0; i < graph_nodes; ++i) {
             ggml_tensor * node = ggml_graph_node(gf, i);
+            const bool is_gdn = node->op == GGML_OP_GATED_DELTA_NET;
+            const bool is_ssm_scan = node->op == GGML_OP_SSM_SCAN;
+            const bool is_ssm_conv = node->op == GGML_OP_SSM_CONV;
             ggml_backend_t backend = ggml_backend_sched_get_tensor_backend(sched, node);
             if (backend == nullptr) {
                 ++unassigned_nodes;
+                if (is_gdn) ++gdn_unassigned_nodes;
+                if (is_ssm_scan) ++ssm_scan_unassigned_nodes;
+                if (is_ssm_conv) ++ssm_conv_unassigned_nodes;
                 continue;
             }
             const char * backend_name = ggml_backend_name(backend);
             if (backend_name != nullptr && std::strcmp(backend_name, "CPU") == 0) {
                 ++cpu_nodes;
+                if (is_gdn) ++gdn_cpu_nodes;
+                if (is_ssm_scan) ++ssm_scan_cpu_nodes;
+                if (is_ssm_conv) ++ssm_conv_cpu_nodes;
             } else if (backend_name != nullptr && std::strncmp(backend_name, "Vulkan", 6) == 0) {
                 ++vulkan_nodes;
+                if (is_gdn) ++gdn_vulkan_nodes;
+                if (is_ssm_scan) ++ssm_scan_vulkan_nodes;
+                if (is_ssm_conv) ++ssm_conv_vulkan_nodes;
             } else {
                 ++other_nodes;
+                if (is_gdn) ++gdn_other_nodes;
+                if (is_ssm_scan) ++ssm_scan_other_nodes;
+                if (is_ssm_conv) ++ssm_conv_other_nodes;
             }
         }
 
@@ -119,7 +137,13 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
             std::string(run_id) + ":" + std::to_string(graph_nodes) + ":" +
             std::to_string(ggml_backend_sched_get_n_splits(sched)) + ":" +
             std::to_string(cpu_nodes) + ":" + std::to_string(vulkan_nodes) + ":" +
-            std::to_string(other_nodes) + ":" + std::to_string(unassigned_nodes);
+            std::to_string(other_nodes) + ":" + std::to_string(unassigned_nodes) + ":" +
+            std::to_string(gdn_cpu_nodes) + ":" + std::to_string(gdn_vulkan_nodes) + ":" +
+            std::to_string(gdn_other_nodes) + ":" + std::to_string(gdn_unassigned_nodes) + ":" +
+            std::to_string(ssm_scan_cpu_nodes) + ":" + std::to_string(ssm_scan_vulkan_nodes) + ":" +
+            std::to_string(ssm_scan_other_nodes) + ":" + std::to_string(ssm_scan_unassigned_nodes) + ":" +
+            std::to_string(ssm_conv_cpu_nodes) + ":" + std::to_string(ssm_conv_vulkan_nodes) + ":" +
+            std::to_string(ssm_conv_other_nodes) + ":" + std::to_string(ssm_conv_unassigned_nodes);
         bool should_log_graph_distribution = false;
         {
             std::lock_guard<std::mutex> lock(local_llm_graph_diagnostic_mutex);
@@ -130,7 +154,7 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
         }
         if (should_log_graph_distribution) {
             LLAMA_LOG_INFO(
-                "llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - runId=%s,graphNodes=%d,graphSplits=%d,cpuNodes=%d,vulkanNodes=%d,otherNodes=%d,unassignedNodes=%d,backendIdsChanged=%d,graphSizeChanged=%d\n",
+                "llama_context: LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION - runId=%s,graphNodes=%d,graphSplits=%d,cpuNodes=%d,vulkanNodes=%d,otherNodes=%d,unassignedNodes=%d,gdnCpuNodes=%d,gdnVulkanNodes=%d,gdnOtherNodes=%d,gdnUnassignedNodes=%d,ssmScanCpuNodes=%d,ssmScanVulkanNodes=%d,ssmScanOtherNodes=%d,ssmScanUnassignedNodes=%d,ssmConvCpuNodes=%d,ssmConvVulkanNodes=%d,ssmConvOtherNodes=%d,ssmConvUnassignedNodes=%d,backendIdsChanged=%d,graphSizeChanged=%d\n",
                 run_id,
                 graph_nodes,
                 ggml_backend_sched_get_n_splits(sched),
@@ -138,6 +162,18 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
                 vulkan_nodes,
                 other_nodes,
                 unassigned_nodes,
+                gdn_cpu_nodes,
+                gdn_vulkan_nodes,
+                gdn_other_nodes,
+                gdn_unassigned_nodes,
+                ssm_scan_cpu_nodes,
+                ssm_scan_vulkan_nodes,
+                ssm_scan_other_nodes,
+                ssm_scan_unassigned_nodes,
+                ssm_conv_cpu_nodes,
+                ssm_conv_vulkan_nodes,
+                ssm_conv_other_nodes,
+                ssm_conv_unassigned_nodes,
                 backend_ids_changed ? 1 : 0,
                 graph_size_changed ? 1 : 0);
         }
@@ -183,8 +219,10 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
     file(MAKE_DIRECTORY "${_patched_dir}")
     set(_patched_context "${_patched_dir}/llama-context.cpp")
     file(WRITE "${_patched_context}" "${_context_contents}")
-    if(NOT _context_contents MATCHES "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION" OR
-       NOT _context_contents MATCHES "ggml_backend_sched_get_tensor_backend")
+    if(NOT _context_contents MATCHES "LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION" OR
+       NOT _context_contents MATCHES "ggml_backend_sched_get_tensor_backend" OR
+       NOT _context_contents MATCHES "ssmScanVulkanNodes" OR
+       NOT _context_contents MATCHES "ssmConvVulkanNodes")
         message(FATAL_ERROR "LocalLLM: graph backend distribution overlay did not apply completely.")
     endif()
     if(NOT _context_contents MATCHES "LOCAL_LLM_QWEN35_GDN_POLICY" OR
