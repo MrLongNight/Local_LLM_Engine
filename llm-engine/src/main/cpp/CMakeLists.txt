@@ -222,28 +222,35 @@ function(local_llm_prepare_android_vulkan source_dir)
 #include <atomic>
 #include <cstring>
 #include <mutex>
-#include <set>
 #include <string>
 #include <unistd.h>
 
 extern "C" int local_llm_vulkan_dmmv_workgroup_override();
 extern "C" const char * local_llm_vulkan_profile_run_id();
 
-// Emit each distinct Q4_K path/shape once per native inference. This keeps the
-// diagnostic bounded while making every A/B run independently verifiable.
-static bool local_llm_should_log_q4k_path(const char * run_id, const std::string & signature) {
+// Emit each selected Q4_K path once per native inference. This keeps the
+// diagnostic bounded and avoids allocating per-operation signature strings.
+static bool local_llm_should_log_q4k_path(
+        const char * run_id, bool is_prefill, bool uses_q8_1) {
     if (run_id == nullptr || run_id[0] == '\0' || std::strcmp(run_id, "none") == 0) {
         return false;
     }
     static std::mutex mutex;
     static std::string active_run_id;
-    static std::set<std::string> seen_signatures;
+    static bool logged_paths[2][2] = {{ false, false }, { false, false }};
     std::lock_guard<std::mutex> lock(mutex);
     if (active_run_id != run_id) {
         active_run_id = run_id;
-        seen_signatures.clear();
+        for (int stage = 0; stage < 2; ++stage) {
+            for (int path = 0; path < 2; ++path) {
+                logged_paths[stage][path] = false;
+            }
+        }
     }
-    return seen_signatures.insert(signature).second;
+    bool & logged = logged_paths[is_prefill ? 0 : 1][uses_q8_1 ? 1 : 0];
+    if (logged) return false;
+    logged = true;
+    return true;
 }
 
 // LOCAL_LLM_ANDROID_VULKAN_COMPAT: resolve the Vulkan 1.1 promoted command
@@ -458,11 +465,8 @@ static void ggml_vk_get_physical_device_features2(
     set(_q4_prefill_replacement [=[    vk_pipeline pipeline = ggml_vk_guess_matmul_pipeline_map(ctx, *mmp_map, ne01, ne11, aligned, false);
     if (src0->type == GGML_TYPE_Q4_K) {
         const char * run_id = local_llm_vulkan_profile_run_id();
-        const std::string selected_path = quantize_y ? "Q8_1_MATMUL" : "F16_F32_MATMUL";
-        const std::string signature =
-            "PREFILL:" + selected_path + ":" + ggml_type_name(y_kernel_type) + ":" +
-            std::to_string(ne11) + ":" + std::to_string(ne10) + ":" + std::to_string(ne01);
-        if (local_llm_should_log_q4k_path(run_id, signature)) {
+        const char * selected_path = quantize_y ? "Q8_1_MATMUL" : "F16_F32_MATMUL";
+        if (local_llm_should_log_q4k_path(run_id, true, quantize_y)) {
             GGML_LOG_INFO(
                 "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH - runId=%s,device=%s,intDot=%d,coopMatInt=%d,canQuantizeY=%d,selected=%s,yKernelType=%s,batchTokens=%llu,hidden=%llu,weightRows=%llu\n",
                 run_id,
@@ -470,7 +474,7 @@ static void ggml_vk_get_physical_device_features2(
                 ctx->device->integer_dot_product ? 1 : 0,
                 ctx->device->coopmat_int_support ? 1 : 0,
                 can_quantize_y ? 1 : 0,
-                selected_path.c_str(),
+                selected_path,
                 ggml_type_name(y_kernel_type),
                 static_cast<unsigned long long>(ne11),
                 static_cast<unsigned long long>(ne10),
@@ -537,20 +541,16 @@ static void ggml_vk_get_physical_device_features2(
     }
     if (src0->type == GGML_TYPE_Q4_K) {
         const char * run_id = local_llm_vulkan_profile_run_id();
-        const std::string selected_path = quantize_y
+        const char * selected_path = quantize_y
             ? "Q8_1_INTEGER_DOT_MMVQ" : "BASE_TYPE_MMV";
-        const std::string signature =
-            "DECODE:" + selected_path + ":" + ggml_type_name(src1->type) + ":" +
-            ggml_type_name(y_kernel_type) + ":" + std::to_string(ne11) + ":" +
-            std::to_string(ne10) + ":" + std::to_string(ne01);
-        if (local_llm_should_log_q4k_path(run_id, signature)) {
+        if (local_llm_should_log_q4k_path(run_id, false, quantize_y)) {
             GGML_LOG_INFO(
                 "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - runId=%s,device=%s,intDot=%d,quantizeY=%d,selected=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
                 run_id,
                 ctx->device->name.c_str(),
                 ctx->device->integer_dot_product ? 1 : 0,
                 quantize_y ? 1 : 0,
-                selected_path.c_str(),
+                selected_path,
                 ggml_type_name(src1->type),
                 ggml_type_name(y_kernel_type),
                 static_cast<unsigned long long>(ne11),
