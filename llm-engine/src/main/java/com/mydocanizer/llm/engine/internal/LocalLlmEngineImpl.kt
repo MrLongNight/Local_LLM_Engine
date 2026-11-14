@@ -132,6 +132,10 @@ internal class LocalLlmEngineImpl(
             _state.value = EngineState.Ready
             Log.i(TAG, "LocalLlmEngine initialized successfully with handle: $handle")
             }.onFailure { err ->
+                if (err is CancellationException) {
+                    _state.value = EngineState.Uninitialized
+                    throw err
+                }
                 EngineDiagnostics.error("engine", "INITIALIZATION_FAILED", err)
                 Log.e(TAG, "Initialization failed", err)
                 _state.value = EngineState.Error("Failed to initialize engine: ${err.message}", err)
@@ -151,6 +155,7 @@ internal class LocalLlmEngineImpl(
         }
         val initializationError = initialize().exceptionOrNull()
         if (initializationError != null) return Result.failure(initializationError)
+        val previousModel = _currentModel.value
 
         return withContext(llamaDispatcher) {
             runCatching {
@@ -316,6 +321,14 @@ internal class LocalLlmEngineImpl(
             info
             }.onFailure { err ->
                 _modelLoadProgress.value = null
+                if (err is CancellationException) {
+                    _state.value = if (previousModel != null) {
+                        EngineState.ModelLoaded(previousModel)
+                    } else {
+                        EngineState.Ready
+                    }
+                    throw err
+                }
                 EngineDiagnostics.error("engine", "MODEL_LOAD_FAILED", err)
                 Log.e(TAG, "Model load failed", err)
                 _state.value = EngineState.Error("Failed to load model: ${err.message}", err)
@@ -343,6 +356,8 @@ internal class LocalLlmEngineImpl(
                 _state.value = EngineState.Ready
                 Log.i(TAG, "Model unloaded successfully")
                 Unit
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
             }
         }
     }
@@ -729,6 +744,8 @@ internal class LocalLlmEngineImpl(
             }
 
             completedResult ?: throw (lastError ?: IllegalStateException("Generation did not produce a result"))
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
         }
     }
 

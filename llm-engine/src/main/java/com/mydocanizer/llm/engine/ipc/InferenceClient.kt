@@ -1361,6 +1361,8 @@ internal class InferenceClient(
             }
 
             completed ?: throw (lastError ?: IllegalStateException("Generation did not produce a result"))
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
         }
     }
 
