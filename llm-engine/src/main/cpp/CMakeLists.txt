@@ -1145,6 +1145,22 @@ function(local_llm_verify_split_scheduler_race_fix source_dir)
         endif()
     endforeach()
 
+    # Verify the complete guard, not just isolated strings: the fence/event wait
+    # must execute inside the no-input cross-backend transition branch.
+    set(_no_input_sync_block_anchor [=[
+        if (split->n_inputs == 0 && prev_backend_id >= 0 && prev_backend_id != split_backend_id) {
+            if (sched->events[prev_backend_id][sched->cur_copy] != NULL) {
+                ggml_backend_event_synchronize(sched->events[prev_backend_id][sched->cur_copy]);
+            } else {
+                ggml_backend_synchronize(sched->backends[prev_backend_id]);
+            }
+        }
+]=])
+    string(FIND "${_function_contents}" "${_no_input_sync_block_anchor}" _no_input_sync_block_position)
+    if(_no_input_sync_block_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream no-input cross-backend synchronization block changed; refusing an unverified hybrid model backend.")
+    endif()
+
     string(FIND "${_function_contents}" "${_previous_backend_anchor}" _previous_backend_position)
     string(FIND "${_function_contents}" "${_no_input_sync_anchor}" _no_input_sync_position)
     string(FIND "${_function_contents}" "${_record_split_anchor}" _record_split_position)
