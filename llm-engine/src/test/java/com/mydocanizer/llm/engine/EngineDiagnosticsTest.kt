@@ -229,13 +229,22 @@ class EngineDiagnosticsTest {
             "2026-11-12 05:00:%02d.000 [NATIVE] ggml_vulkan: SHADER_STATUS - ".format(index) +
                 "shader=".repeat(50)
         }
-        val report = EngineDiagnostics.buildCompactReportForTest(noise + distribution)
+        val opDistribution = "2026-11-12 05:00:01.000 [NATIVE] llama_context: " +
+            "LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION - runId=matrix-q4-run,graphNodes=128," +
+            "gdnCpuNodes=1,gdnVulkanNodes=0,gdnOtherNodes=0,gdnUnassignedNodes=0," +
+            "ssmScanCpuNodes=0,ssmScanVulkanNodes=6,ssmScanOtherNodes=0,ssmScanUnassignedNodes=0," +
+            "ssmConvCpuNodes=0,ssmConvVulkanNodes=6,ssmConvOtherNodes=0,ssmConvUnassignedNodes=0"
+        val report = EngineDiagnostics.buildCompactReportForTest(noise + distribution + opDistribution)
 
         assertTrue(report.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION"))
+        assertTrue(report.contains("LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION"))
         assertTrue(report.contains("runId=matrix-q4-run"))
         assertTrue(report.contains("graphSplits=3"))
         assertTrue(report.contains("cpuNodes=12"))
         assertTrue(report.contains("vulkanNodes=116"))
+        assertTrue(report.contains("gdnCpuNodes=1"))
+        assertTrue(report.contains("ssmScanVulkanNodes=6"))
+        assertTrue(report.contains("ssmConvVulkanNodes=6"))
     }
 
     @Test

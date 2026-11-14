@@ -245,7 +245,7 @@ internal object EngineDiagnosticsReportBuilder {
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST",
             "CPU_RUNTIME_FEATURES", "ABORT_CALLBACK_POLICY", "GRAPH_SPLITS",
             "GATED_DELTA_NET", "QWEN35_GDN",
-            "GRAPH_BACKEND_DISTRIBUTION"
+            "GRAPH_BACKEND_DISTRIBUTION", "GRAPH_OP_BACKEND_DISTRIBUTION"
         )
         val relevantNative = nativeLines
             .filterNot {
@@ -308,6 +308,9 @@ internal object EngineDiagnosticsReportBuilder {
         val graphBackendDistributionEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION") }
             .takeLast(72)
+        val graphOpBackendDistributionEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION") }
+            .takeLast(72)
         val qwen35GdnPolicyEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_QWEN35_GDN_POLICY") }
             .takeLast(4)
@@ -318,7 +321,7 @@ internal object EngineDiagnosticsReportBuilder {
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
                 q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence +
                 cpuFeatureEvidence + abortPolicyEvidence + graphSplitEvidence +
-                graphBackendDistributionEvidence + qwen35GdnPolicyEvidence
+                graphBackendDistributionEvidence + graphOpBackendDistributionEvidence + qwen35GdnPolicyEvidence
             ).distinct().map { compactLine(it, 360) }
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.
