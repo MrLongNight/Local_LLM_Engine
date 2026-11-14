@@ -1,6 +1,6 @@
 > **Dokumenttyp:** Übergeordneter Umsetzungsplan mit technischen Entscheidungen und datierter Nachweishistorie. CI- und Hardware-Statusblöcke sind historische Snapshots und kein aktueller Live-Status. Refactoring-Fortschritt steht ausschließlich in `../active-todos/REFACTORING_STATUS.md`; die offene Cache-Arbeit steht in `../active-todos/TODO_CACHE_STRATEGY.md`. Verbindliche Agent-Regeln stehen in `../AGENTS.md`.
 
-# Aktueller Stand 12.11.2026 – verifizierter CI-/APK-Stand
+# CI-/APK-Nachweis-Snapshot vom 12.11.2026 (historisch)
 
 **Repository:** `MrLongNight/Local_LLM_Engine` · Branch `main`  
 **Commit:** `528e1d34af9b00c3bcd1054fb12862cc09ab0703`

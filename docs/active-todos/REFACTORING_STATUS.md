@@ -50,9 +50,9 @@ At `af594b8`, the existing `SettingsScreen.kt` UI sections have been mechanicall
 
 **Latest CI evidence at this snapshot:**
 
-- Unit Tests run `43564336179` for `af594b8`: **failure** during `:app:compileDebugKotlin`. The host-only native prompt-cache/truncation test still passed.
-- The compiler log identifies missing imports/references in `InferenceSettingsSection.kt` (`it`, `testTag`) and `SamplingParametersSection.kt` (`padding`, `MaterialTheme`). This is a source compile issue, not a test assertion failure. It remains open and must be corrected before Task 3 can be considered CI-green.
-- Android APK Build run `43564336177` for the same SHA was still building at the last inspection; no green conclusion or artifact claim is made here.
+- Unit Tests run `43564336179` for `af594b8`: **failure** during `:app:compileDebugKotlin`. The host-only native prompt-cache/truncation test passed; the Gradle job did not reach a green test run.
+- Android APK Build run `43564336177` for the same SHA: **failure** during `:app:compileDebugKotlin`; no installable APK or instrumentation APK was uploaded for this SHA. The ARM64 native CMake build progressed, but Kotlin compilation failed before APK packaging.
+- Exact compiler findings shared by both runs: `BenchmarkResultSection.kt` has an `item` call outside a `LazyListScope` and consequent invalid composable context; `InferenceSettingsSection.kt` is missing `testTag` and `Slider` references (and consequently its slider lambda parameter `it`); `SamplingParametersSection.kt` is missing `padding` and `MaterialTheme` imports. These are source compile issues, not test assertion failures. They remain open and must be corrected before Task 3 can be considered CI-green.
 
 ## Remaining refactoring work
 
