@@ -554,15 +554,26 @@ static void ggml_vk_get_physical_device_features2(
     const int local_llm_quant_override = local_llm_vulkan_dmmv_workgroup_override();
     // LOCAL_LLM_Q4K_Q8_1_ELIGIBILITY: preserve upstream Q8_1 input/layout/alignment/precision requirements.
     // Only bypass ggml_vk_should_use_mmvq()'s shape heuristic for this measured Q4_K batch-1 A/B path.
-    const bool local_llm_q4k_integer_dot_batch1 =
+    const bool local_llm_q4k_q8_1_eligible =
         src0->type == GGML_TYPE_Q4_K &&
         ne11 == 1 &&
-        ctx->device->integer_dot_product &&
         src1->type == GGML_TYPE_F32 &&
         ggml_is_contiguous(src1) &&
         !y_non_contig &&
         (ne11 * ne10) % 4 == 0 &&
-        (swap_inputs || ggml_vk_src1_prec_allows_q8(dst)) &&
+        (swap_inputs || ggml_vk_src1_prec_allows_q8(dst));
+    const char * local_llm_q4k_q8_1_eligibility_reason =
+        src0->type != GGML_TYPE_Q4_K ? "not_q4k" :
+        ne11 != 1 ? "batch_not_one" :
+        src1->type != GGML_TYPE_F32 ? "src1_not_f32" :
+        !ggml_is_contiguous(src1) ? "src1_not_contiguous" :
+        y_non_contig ? "y_non_contiguous" :
+        (ne11 * ne10) % 4 != 0 ? "alignment_not_multiple_of_four" :
+        !(swap_inputs || ggml_vk_src1_prec_allows_q8(dst)) ? "precision_disallows_q8" :
+        "eligible";
+    const bool local_llm_q4k_integer_dot_batch1 =
+        local_llm_q4k_q8_1_eligible &&
+        ctx->device->integer_dot_product &&
         local_llm_quant_override != 3;
     const bool local_llm_mali_q4k_auto =
         local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;
@@ -575,7 +586,10 @@ static void ggml_vk_get_physical_device_features2(
                (local_llm_quant_override == 3 || local_llm_mali_q4k_auto)) {
         quantize_y = false;
         local_llm_q4k_decode_reason = local_llm_quant_override == 3
-            ? "explicit_base_override" : "mali_auto_base_without_intDot";
+            ? "explicit_base_override"
+            : (!ctx->device->integer_dot_product
+                ? "mali_auto_base_without_intDot"
+                : "mali_auto_base_q8_1_ineligible");
     } else if (src0->type == GGML_TYPE_Q5_K && ne11 == 1 && local_llm_quant_override == 4) {
         quantize_y = false;
     } else if (src0->type == GGML_TYPE_Q6_K && ne11 == 1 && local_llm_quant_override == 5) {
@@ -626,10 +640,12 @@ static void ggml_vk_get_physical_device_features2(
             ? "MMVQ_INTEGER_DOT" : "BASE_TYPE_MMV";
         if (local_llm_should_log_q4k_path(run_id, false, quantize_y)) {
             GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - runId=%s,device=%s,intDot=%d,quantizeY=%d,selected=%s,reason=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
+                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - runId=%s,device=%s,intDot=%d,q8_1Eligible=%d,q8_1Eligibility=%s,quantizeY=%d,selected=%s,reason=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
                 run_id,
                 ctx->device->name.c_str(),
                 ctx->device->integer_dot_product ? 1 : 0,
+                local_llm_q4k_q8_1_eligible ? 1 : 0,
+                local_llm_q4k_q8_1_eligibility_reason,
                 quantize_y ? 1 : 0,
                 selected_path,
                 local_llm_q4k_decode_reason,
@@ -1030,6 +1046,8 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "ggml_is_contiguous\\(src1\\)" OR
        NOT _vulkan_contents MATCHES "ggml_vk_src1_prec_allows_q8\\(dst\\)" OR
        NOT _vulkan_contents MATCHES "selected=MMVQ_INTEGER_DOT" OR
+       NOT _vulkan_contents MATCHES "q8_1Eligible=%d,q8_1Eligibility=%s" OR
+       NOT _vulkan_contents MATCHES "mali_auto_base_q8_1_ineligible" OR
        NOT _vulkan_contents MATCHES "reason=%s" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_OP_TIMING" OR

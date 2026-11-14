@@ -460,6 +460,15 @@ abstract class VulkanDiagnosticsViewModel(
                     val observedQuantizeY = pathEvidence.mapNotNull { line ->
                         Regex("quantizeY=([^,]+)").find(line)?.groupValues?.getOrNull(1)
                     }.toSet()
+                    val observedIntDot = pathEvidence.mapNotNull { line ->
+                        Regex("intDot=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    val observedQ8Eligible = pathEvidence.mapNotNull { line ->
+                        Regex("q8_1Eligible=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
+                    val observedQ8Eligibility = pathEvidence.mapNotNull { line ->
+                        Regex("q8_1Eligibility=([^,]+)").find(line)?.groupValues?.getOrNull(1)
+                    }.toSet()
                     val observedSourceTypes = pathEvidence.mapNotNull { line ->
                         Regex("src1Type=([^,]+)").find(line)?.groupValues?.getOrNull(1)
                     }.toSet()
@@ -485,11 +494,15 @@ abstract class VulkanDiagnosticsViewModel(
                         )
                     }
                     if (observedReasons.size != 1 || observedQuantizeY.size != 1 ||
+                        observedIntDot.size != 1 || observedQ8Eligible.size != 1 ||
+                        observedQ8Eligibility.size != 1 ||
                         observedSourceTypes.size != 1 || observedYKernelTypes.size != 1
                     ) {
                         throw IllegalStateException(
                             "Q4_K-Dispatch-Metadaten fehlen oder sind mehrdeutig: reason=$observedReasons," +
-                                "quantizeY=$observedQuantizeY,src1Type=$observedSourceTypes,yKernelType=$observedYKernelTypes"
+                                "intDot=$observedIntDot,q8_1Eligible=$observedQ8Eligible," +
+                                "q8_1Eligibility=$observedQ8Eligibility,quantizeY=$observedQuantizeY," +
+                                "src1Type=$observedSourceTypes,yKernelType=$observedYKernelTypes"
                         )
                     }
                     val selectedReason = observedReasons.single()
@@ -503,6 +516,57 @@ abstract class VulkanDiagnosticsViewModel(
                     if (expectedReason != null && selectedReason != expectedReason) {
                         throw IllegalStateException(
                             "Q4_K-Dispatchgrund weicht ab: erwartet=$expectedReason, beobachtet=$selectedReason"
+                        )
+                    }
+                    val intDotAvailable = observedIntDot.single() == "1"
+                    val q8Eligible = observedQ8Eligible.single() == "1"
+                    val q8EligibilityReason = observedQ8Eligibility.single()
+                    if (observedIntDot.single() !in setOf("0", "1") ||
+                        observedQ8Eligible.single() !in setOf("0", "1")
+                    ) {
+                        throw IllegalStateException(
+                            "Q4_K-Hardware-/Q8_1-Flags ungültig: intDot=$observedIntDot,q8_1Eligible=$observedQ8Eligible"
+                        )
+                    }
+                    if (q8Eligible != (q8EligibilityReason == "eligible")) {
+                        throw IllegalStateException(
+                            "Q8_1-Eignungsflag und Grund widersprechen sich: eligible=$q8Eligible,reason=$q8EligibilityReason"
+                        )
+                    }
+                    if (selectedKernelPath == "MMVQ_INTEGER_DOT" &&
+                        (!intDotAvailable || !q8Eligible || selectedReason !in setOf(
+                            "intDot_q4k_batch1", "explicit_mmvq_override"
+                        ))
+                    ) {
+                        throw IllegalStateException(
+                            "MMVQ wurde ohne bestätigte Integer-Dot/Q8_1-Voraussetzungen ausgewählt: " +
+                                "intDot=$intDotAvailable,q8_1Eligible=$q8Eligible,reason=$selectedReason"
+                        )
+                    }
+                    if (autoPath && loaded.activeBackend.contains("Mali", ignoreCase = true) &&
+                        selectedKernelPath == "BASE_TYPE_MMV"
+                    ) {
+                        val expectedMaliAutoReason = if (!intDotAvailable) {
+                            "mali_auto_base_without_intDot"
+                        } else {
+                            "mali_auto_base_q8_1_ineligible"
+                        }
+                        if (selectedReason != expectedMaliAutoReason ||
+                            (intDotAvailable && q8Eligible) ||
+                            (!intDotAvailable && q8EligibilityReason.isBlank())
+                        ) {
+                            throw IllegalStateException(
+                                "Mali AUTO wählte BASE ohne zutreffenden Hardware-/Q8_1-Grund: " +
+                                    "intDot=$intDotAvailable,q8_1Eligible=$q8Eligible," +
+                                    "q8_1Eligibility=$q8EligibilityReason,reason=$selectedReason"
+                            )
+                        }
+                    }
+                    if (selectedReason == "mali_auto_base_q8_1_ineligible" &&
+                        (!intDotAvailable || q8Eligible)
+                    ) {
+                        throw IllegalStateException(
+                            "Mali AUTO meldet Q8_1-Ineligibility, obwohl Integer-Dot fehlt oder Q8_1 geeignet ist."
                         )
                     }
                     val expectedQuantizeY = if (selectedKernelPath == "MMVQ_INTEGER_DOT") "1" else "0"
@@ -566,7 +630,9 @@ abstract class VulkanDiagnosticsViewModel(
                             "finishReason=${measured.result.finishReason.name}," +
                             "nativeRunId=$nativeRunId,nativePathVerified=true," +
                             "observedKernelPaths=${observedKernelPaths.joinToString("|")}," +
-                            "observedReasons=${observedReasons.joinToString("|")},quantizeY=${observedQuantizeY.single()}," +
+                            "observedReasons=${observedReasons.joinToString("|")},intDot=${observedIntDot.single()}," +
+                            "q8_1Eligible=${observedQ8Eligible.single()},q8_1Eligibility=${q8EligibilityReason}," +
+                            "quantizeY=${observedQuantizeY.single()}," +
                             "src1Type=${observedSourceTypes.single()},yKernelType=${observedYKernelTypes.single()}," +
                             "context=${profileConfig.contextSize},batch=${profileConfig.batchSize}," +
                             "threads=${profileConfig.threads},batchThreads=${profileConfig.effectiveBatchThreads}," +
