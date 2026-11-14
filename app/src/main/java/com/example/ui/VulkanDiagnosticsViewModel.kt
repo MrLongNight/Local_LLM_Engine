@@ -506,9 +506,15 @@ abstract class VulkanDiagnosticsViewModel(
                         )
                     }
                     val selectedReason = observedReasons.single()
+                    // A requested MMVQ path can legitimately fall back when the Q8_1
+                    // pipeline is unavailable. In that case native evidence must say so;
+                    // never mislabel the executed BASE path as MMVQ.
+                    val q8PipelineFallback =
+                        selectedKernelPath == "BASE_TYPE_MMV" &&
+                            selectedReason == "q8_1_pipeline_unavailable_fallback"
                     val expectedReason = when {
-                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE ->
-                            "explicit_mmvq_override"
+                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE &&
+                            selectedKernelPath == "MMVQ_INTEGER_DOT" -> "explicit_mmvq_override"
                         baseDmmv -> "explicit_base_override"
                         selectedKernelPath == "MMVQ_INTEGER_DOT" -> "intDot_q4k_batch1"
                         else -> null
@@ -543,8 +549,26 @@ abstract class VulkanDiagnosticsViewModel(
                                 "intDot=$intDotAvailable,q8_1Eligible=$q8Eligible,reason=$selectedReason"
                         )
                     }
+                    if (q8PipelineFallback &&
+                        (!intDotAvailable || !q8Eligible || q8EligibilityReason != "eligible" ||
+                            observedQuantizeY.single() != "0" ||
+                            observedYKernelTypes.single() == "q8_1")
+                    ) {
+                        throw IllegalStateException(
+                            "Q8_1-Pipeline-Fallback ist nicht durch einen tatsächlich geeigneten, " +
+                                "aber nicht verfügbaren Q8_1-Pipeline-Pfad belegt: " +
+                                "intDot=$intDotAvailable,q8_1Eligible=$q8Eligible," +
+                                "q8_1Eligibility=$q8EligibilityReason,quantizeY=$observedQuantizeY," +
+                                "yKernelType=$observedYKernelTypes"
+                        )
+                    }
+                    if (selectedReason == "q8_1_pipeline_unavailable_fallback" && !q8PipelineFallback) {
+                        throw IllegalStateException(
+                            "Q8_1-Pipeline-Fallback meldet einen widersprüchlichen tatsächlich gewählten Kernelpfad."
+                        )
+                    }
                     if (autoPath && loaded.activeBackend.contains("Mali", ignoreCase = true) &&
-                        selectedKernelPath == "BASE_TYPE_MMV"
+                        selectedKernelPath == "BASE_TYPE_MMV" && !q8PipelineFallback
                     ) {
                         val expectedMaliAutoReason = if (!intDotAvailable) {
                             "mali_auto_base_without_intDot"
