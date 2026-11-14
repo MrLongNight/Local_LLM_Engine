@@ -11,6 +11,38 @@ import org.junit.Test
 
 class BackendBenchmarkPlanTest {
     @Test
+    fun acceptancePassContainsOnlyCpuReferenceAndVulkanCandidateWithMatchingSettings() {
+        val original = EngineConfig(
+            contextSize = 4096,
+            batchSize = 256,
+            threads = 6,
+            backendPreference = BackendPreference.AUTO,
+            gpuLayers = 37,
+            batchThreads = 3,
+            microBatchSize = 64,
+            flashAttentionMode = FlashAttentionMode.DISABLED
+        )
+        val profiles = BackendBenchmarkPlan.backendAcceptanceProfiles(original)
+
+        assertEquals(listOf(BackendPreference.CPU, BackendPreference.VULKAN), profiles.map { it.backend })
+        assertEquals(listOf("CPU_REFERENCE", "VULKAN_CANDIDATE"), profiles.map { it.id })
+        assertEquals(0, profiles[0].config.gpuLayers)
+        assertEquals(99, profiles[1].config.gpuLayers)
+        assertEquals(64, profiles[0].microBatchSize)
+        assertEquals(64, profiles[1].microBatchSize)
+
+        val cpu = profiles[0].config
+        val vulkan = profiles[1].config
+        assertEquals(cpu.contextSize, vulkan.contextSize)
+        assertEquals(cpu.batchSize, vulkan.batchSize)
+        assertEquals(cpu.threads, vulkan.threads)
+        assertEquals(cpu.batchThreads, vulkan.batchThreads)
+        assertEquals(cpu.microBatchSize, vulkan.microBatchSize)
+        assertEquals(cpu.gdnPolicy, vulkan.gdnPolicy)
+        assertEquals(cpu.flashAttentionMode, vulkan.flashAttentionMode)
+    }
+
+    @Test
     fun q4kDecodePathSweepChangesOnlyTheInternalQ4kKernelModeAndForcesFullOffload() {
         val original = EngineConfig(
             contextSize = 4096,

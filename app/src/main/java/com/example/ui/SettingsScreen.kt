@@ -44,8 +44,6 @@ fun SettingsScreen(
     val currentModel: ModelInfo? by viewModel.currentModel.collectAsState()
     val isBenchmarking: Boolean by viewModel.isBenchmarking.collectAsState()
     val benchmarkReport: String? by viewModel.benchmarkReport.collectAsState()
-    val isConfigSmokeTesting: Boolean by viewModel.isConfigSmokeTesting.collectAsState()
-    val configSmokeReport: String? by viewModel.configSmokeReport.collectAsState()
     val isGenerating: Boolean by viewModel.isGenerating.collectAsState()
     val isImporting: Boolean by viewModel.isImporting.collectAsState()
     LaunchedEffect(Unit) {
@@ -361,146 +359,79 @@ fun SettingsScreen(
             }
         }
 
-        // Reproducible device benchmark: same model, question, system prompt and
-        // inference settings; only the selected compute backend changes.
+        // Two-stage acceptance flow: one combined CPU/Vulkan gate, then an optional targeted Q4_K diagnosis.
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "CPU- / Vulkan-Benchmark",
+                        text = "1. Engine-Abnahmetest: Korrektheit + Leistung",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Vergleicht dasselbe Modell auf Vulkan und CPU mit einer festen Zahlenfolge. " +
-                            "Pro Backend läuft nur eine Inferenz: 4 Warm-up-Tokens und anschließend 20 Mess-Tokens. " +
-                            "Damit wird das teure Prompt-Prefill nicht doppelt ausgeführt. Der Fortschritt wird live angezeigt.",
+                        text = "Ein zusammengefasster Lauf mit genau zwei Profilen: CPU-Referenz zuerst, danach Vulkan. " +
+                            "Beide verwenden dasselbe Modell und dieselben Inferenzparameter. Vor der Geschwindigkeitsmessung " +
+                            "muss Vulkan die 16-Token-Korrektheitsprüfung bestehen: identische Top-1-Tokens und mindestens " +
+                            "4/5 Top-5-Überschneidung. Nur bestandene Profile erhalten einen Geschwindigkeitswert.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Button(
-                        onClick = { viewModel.runDefaultBackendBenchmark() },
+                        onClick = { viewModel.runBackendAcceptanceTest() },
                         enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
-                        modifier = Modifier.fillMaxWidth().testTag("backend_benchmark_button")
+                        modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
                     ) {
-                        Text(if (isBenchmarking) "Benchmark läuft…" else "CPU vs. Vulkan testen")
+                        Text(if (isBenchmarking) "Abnahmetest läuft…" else "CPU + Vulkan gemeinsam prüfen")
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Modellabhängige Messmatrix: Vulkan/CPU, AUTO/SUBGROUP/LARGE plus passender Q4_K-/Q5_K-/Q6_K-A/B-Pfad, n_ubatch 32/64/128 und Flash Attention AUS/AN. Jeder Lauf lädt dasselbe Modell neu; bei kritisch wenig RAM oder hoher Temperatur wird abgebrochen.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Button(
-                        onClick = { viewModel.runFullBenchmarkMatrix() },
-                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
-                        modifier = Modifier.fillMaxWidth().testTag("full_benchmark_matrix_button")
-                    ) {
-                        Text(if (isBenchmarking) "Vollständige Matrix läuft…" else "Vollständige Modellmatrix starten")
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = { viewModel.runVulkanLayerSweep() },
-                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
-                        modifier = Modifier.fillMaxWidth().testTag("vulkan_layer_sweep_button")
-                    ) {
-                        Text(if (isBenchmarking) "Vulkan-Layer-Test läuft…" else "Vulkan-GPU-Layer vergleichen")
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = { viewModel.runVulkanQ4kDecodePathSweep() },
-                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
-                        modifier = Modifier.fillMaxWidth().testTag("vulkan_matvec_workgroup_sweep_button")
-                    ) {
-                        Text(if (isBenchmarking) "Q4_K-Kerneltest läuft…" else "Q4_K Integer-Dot gegen Basis-DMMV testen")
-                    }
-                    Text(
-                        text = "Vier kontrollierte Läufe im ABBA-Ablauf: Q4_K Integer-Dot-MMVQ, Basis-DMMV ohne Q8_1-Integer-Dot, Basis-DMMV-Wiederholung und Integer-Dot-Wiederholung. Nur Q4_K-Decode wird umgeschaltet; alle anderen Tensor-Typen, Modell-Layer, Threads und Promptparameter bleiben gleich.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "Der Workgroup-Test zeigte auf dem Mali-G57 keinen messbaren Vorteil für SUBGROUP gegenüber AUTO; LARGE war langsamer. Dieser Test untersucht deshalb den eigentlichen Q4_K-Rechenpfad. Die ursprünglichen Einstellungen werden danach wiederhergestellt.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    benchmarkReport?.let { report ->
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = report,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "RAM-Verlauf und native Vulkan-Meldungen werden automatisch im Diagnoseprotokoll erfasst. " +
-                            "Die Ausgabe des Modells selbst wird nicht protokolliert.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         }
-        // Controlled in-app screening for independent llama.cpp context parameters.
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Automatischer Konfigurationstest",
+                        text = "2. Gezielte Vulkan-Diagnose (nur bei Bedarf)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Prüft n_threads (Token-Generierung), n_threads_batch (Prompt-Verarbeitung) " +
-                            "und n_batch/n_ubatch getrennt. Das Modell lädt je Profil neu; ein Warmup " +
-                            "und eine Messung verwenden denselben langen Testprompt. Temperatur 0 und " +
-                            "Top-P 1 reduzieren Sampling-Schwankungen. Deine gespeicherten Einstellungen " +
-                            "bleiben unverändert; am Ende wird die ursprüngliche Modellkonfiguration wiederhergestellt.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Vor jedem Profil werden verfügbarer RAM und thermischer Status geprüft. " +
-                            "Bei zu wenig freiem RAM, hoher Temperatur, Backend-Wechsel oder Messfehler wird abgebrochen. " +
-                            "Prompt-Zeit, Time-to-first-token, Decode-Zeit, Tokens/s und geladene Parameter werden protokolliert.",
+                        text = "Nur starten, wenn der erste Abnahmetest Vulkan deutlich langsamer als CPU zeigt " +
+                            "und das Modell Q4_K verwendet. Vier ABBA-Läufe vergleichen ausschließlich den Q4_K-Decodepfad " +
+                            "(Integer-Dot-MMVQ gegen Basis-DMMV) und prüfen die tatsächlich gemeldete GPU-Layerzahl. " +
+                            "Keine allgemeine Parameter- oder Layer-Matrix.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Button(
-                        onClick = { viewModel.runConfigurationSmokeTest() },
-                        enabled = currentModel != null && !isBenchmarking && !isConfigSmokeTesting && !isGenerating && !isImporting,
-                        modifier = Modifier.fillMaxWidth().testTag("configuration_smoke_test_button")
+                        onClick = { viewModel.runVulkanQ4kDecodePathSweep() },
+                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                        modifier = Modifier.fillMaxWidth().testTag("vulkan_q4k_diagnostic_button")
                     ) {
-                        Text(if (isConfigSmokeTesting) "Konfigurationstest läuft…" else "Konfiguration automatisch testen")
+                        Text(if (isBenchmarking) "Vulkan-Diagnose läuft…" else "Q4_K-Kernel gezielt vergleichen")
                     }
-                    if (isConfigSmokeTesting) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { viewModel.cancelConfigurationSmokeTest() },
-                            modifier = Modifier.fillMaxWidth().testTag("configuration_smoke_test_cancel_button")
-                        ) {
-                            Text("Test abbrechen")
-                        }
-                    }
-                    configSmokeReport?.let { report ->
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(text = report, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Die Testausgabe und Modellantwort werden nicht protokolliert. " +
-                            "Die Messwerte erscheinen im Diagnoseexport unter CONFIG_SMOKE_RESULT.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
+        }
+        item {
+            benchmarkReport?.let { report ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Testergebnis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = report, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            Text(
+                text = "RAM-Verlauf, tatsächlicher Backend-/Layer-Status und native Vulkan-Meldungen werden " +
+                    "automatisch im Diagnoseprotokoll erfasst. Die Modellantwort selbst wird nicht protokolliert.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

@@ -71,23 +71,14 @@ spaces and Unicode characters. Existing imports are not renamed on disk.
 
 See [`docs/MODEL_COMPATIBILITY.md`](docs/MODEL_COMPATIBILITY.md) for the model-family catalogue and the distinction between upstream architecture support, backend operator coverage and verified Android-device inference. Qwen3.5 and Gemma 4 are recognized by the pinned llama.cpp source, but neither is marked device-verified for the Mali-G57 until an actual GGUF load, chat-template, inference and backend-offload test has passed.
 
-## CPU / Vulkan benchmark
+## Compact device acceptance flow
 
-The Settings benchmark reloads the same model explicitly on Vulkan and CPU, in that
-order. Each backend receives exactly one deterministic inference request with 24 output
-tokens total: the first four warm the execution path, and the next twenty are measured
-(temperature 0, top-p 1). This avoids a second expensive prompt prefill per backend.
-The screen reports prompt progress, generation progress, time to first token after
-prefill, and post-warm-up throughput. A failed Vulkan run is recorded and does not
-suppress the CPU attempt; the original model configuration is restored in a
-non-cancellable cleanup block.
+Settings exposes only two user-facing test actions:
 
-Native token timing distinguishes llama.cpp decode submission from the subsequent
-GPU synchronization wait. Vulkan can enqueue compute asynchronously; timing only
-the return of `llama_decode()` under-reports actual GPU work. Prompt prefill is also
-synchronized before its duration is finalized, so it is not incorrectly charged to
-the first generated token. `decodeUs` now includes submission plus completion wait,
-with `decodeSubmitUs` and `backendSyncWaitUs` available separately in the native log. Older exports may call the latter `gpuSyncWaitUs`; that field measures the complete `llama_synchronize()` wait envelope, not isolated GPU-kernel time.
+1. **Engine acceptance (correctness + performance):** exactly two profiles, CPU reference first and Vulkan second. Both use the same model and inference settings. Each backend first runs the deterministic 16-token greedy correctness gate; Vulkan must match CPU Top-1 tokens and retain at least 4/5 Top-5 overlap at every step. Only profiles that pass the gate receive the short throughput measurement (4 warm-up plus 20 measured tokens). The original model configuration is restored afterward.
+2. **Targeted Q4_K Vulkan diagnosis (optional):** use only when the first pass shows a Vulkan regression on a Q4_K model. Four ABBA runs isolate Integer-Dot MMVQ versus base DMMV decode and verify the requested model and GPU-layer count. This replaces the former public layer sweep and broad profile matrix for routine device work.
+
+The full backend matrix, independent GPU-layer sweep and automatic context-parameter screening are no longer part of the normal user-facing test workflow. Routine CI remains limited to two automated workflows: JVM/native-host unit tests and the native APK build with Android emulator process-isolation instrumentation. No real-device result is inferred from CI.
 
 ## Debug Vulkan GPU-operation profiler
 

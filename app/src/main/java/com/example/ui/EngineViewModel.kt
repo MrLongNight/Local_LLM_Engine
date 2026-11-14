@@ -614,7 +614,7 @@ class EngineViewModel(
      * Each profile gets a fresh model load and deterministic inference; failures are
      * reported without silently falling back to a different backend.
      */
-    fun runFullBenchmarkMatrix() {
+    fun runBackendAcceptanceTest() {
         if (!com.example.BuildConfig.DEBUG ||
             !com.mydocanizer.llm.engine.BuildConfig.TEXT_DIAGNOSTICS_ENABLED
         ) {
@@ -623,7 +623,7 @@ class EngineViewModel(
         }
         if (_isBenchmarking.value) return
         if (_isGenerating.value || _isImporting.value) {
-            _errorMessage.value = "Die vollständige Benchmarkmatrix erst starten, wenn keine Inferenz oder Modell-Operation läuft."
+            _errorMessage.value = "Den Abnahmetest erst starten, wenn keine Inferenz oder Modell-Operation läuft."
             return
         }
         val model = currentModel.value ?: run {
@@ -635,16 +635,12 @@ class EngineViewModel(
         val source = if (model.path.startsWith("content://", ignoreCase = true)) {
             ModelSource.ContentUri(model.path, model.name)
         } else ModelSource.FilePath(model.path)
-        val profiles = BackendBenchmarkPlan.fullMatrixProfiles(
-            originalConfig,
-            model.name + " " + model.description,
-            model.architecture
-        )
+        val profiles = BackendBenchmarkPlan.backendAcceptanceProfiles(originalConfig)
         val benchmarkPrompt =
             "Gib die Zahlen 1 bis 48 fortlaufend aus, ausschließlich durch Leerzeichen getrennt. Keine Erklärung."
 
         _isBenchmarking.value = true
-        _benchmarkReport.value = "Vollständige Benchmarkmatrix wird vorbereitet (${profiles.size} Profile)…"
+        _benchmarkReport.value = "Kompakter CPU/Vulkan-Abnahmetest wird vorbereitet (${profiles.size} Profile)…"
         _errorMessage.value = null
 
         viewModelScope.launch {
@@ -655,7 +651,7 @@ class EngineViewModel(
             val cpuGateReferences = mutableMapOf<Triple<Int, com.mydocanizer.llm.engine.FlashAttentionMode, GdnPolicy>, CorrectnessGatePlan.GateRun>()
             EngineDiagnostics.info(
                 "benchmark",
-                "FULL_MATRIX_STARTED",
+                "BACKEND_ACCEPTANCE_STARTED",
                 "model=${model.name},modelBytes=${model.sizeBytes},profiles=${profiles.size}," +
                     "backends=VULKAN,CPU,kernelProfiles=AUTO,SUBGROUP,LARGE,QUANTIZATION_MATCHED_AB_PATHS,nUbatch=32,64,128," +
                     "flashAttention=DISABLED,ENABLED,AUTO_UB64,gdnPolicyMatrix=AR_CH_FUSION_COMBINATIONS,warmupTokens=${BackendBenchmarkPlan.WARMUP_TOKENS}," +
@@ -669,14 +665,14 @@ class EngineViewModel(
                     if (safetyStop != null) {
                         stoppedReason = safetyStop
                         rows += "ABBRUCH vor ${profile.id}: ${safetyStop}"
-                        EngineDiagnostics.info("benchmark", "FULL_MATRIX_SAFETY_STOP", safetyStop)
+                        EngineDiagnostics.info("benchmark", "BACKEND_ACCEPTANCE_SAFETY_STOP", safetyStop)
                         break
                     }
                     _benchmarkReport.value =
-                        "Matrix ${index + 1}/${profiles.size}: ${profile.id} – Modell wird geladen…"
+                        "Abnahmetest ${index + 1}/${profiles.size}: ${profile.id} – Modell wird geladen…"
                     EngineDiagnostics.info(
                         "benchmark",
-                        "FULL_MATRIX_PROFILE_STARTED",
+                        "BACKEND_ACCEPTANCE_PROFILE_STARTED",
                         "index=${index + 1},total=${profiles.size},profile=${profile.id}," +
                             "backend=${profile.backend},nUbatch=${profile.microBatchSize}," +
                             "flashAttention=${profile.flashAttention},gdnPolicy=${profile.config.gdnPolicy},model=${model.name}"
@@ -782,7 +778,7 @@ class EngineViewModel(
                         successfulRuns++
                         EngineDiagnostics.info(
                             "benchmark",
-                            "FULL_MATRIX_RESULT",
+                            "BACKEND_ACCEPTANCE_RESULT",
                             "profile=${profile.id},model=${model.name},backend=${actualBackend},gateStatus=PASS," +
                                 "decodeTokensPerSecond=${measured.measuredTokensPerSecond},nativeTokensPerSecond=${measured.result.tokensPerSecond}," +
                                 "kernelProfile=${profile.kernelProfile.name},nUbatch=${profile.microBatchSize}," +
@@ -802,7 +798,7 @@ class EngineViewModel(
                             rows += "${profile.id} | gate=FAIL ($reason) | INVALID | tok/s=n/a"
                             EngineDiagnostics.info(
                                 "benchmark",
-                                "FULL_MATRIX_ROW_INVALID",
+                                "BACKEND_ACCEPTANCE_ROW_INVALID",
                                 "profile=${profile.id},model=${model.name},backend=$actualBackend," +
                                     "gateStatus=FAIL,reason=$reason,tok/s=n/a,gateRunId=${gateSample.result.diagnosticRunId}"
                             )
@@ -816,7 +812,7 @@ class EngineViewModel(
                             rows += "${profile.id} | gate=PASS | INVALID (MESSUNG_FEHLER: $message) | tok/s=n/a"
                             EngineDiagnostics.info(
                                 "benchmark",
-                                "FULL_MATRIX_ROW_INVALID",
+                                "BACKEND_ACCEPTANCE_ROW_INVALID",
                                 "profile=${profile.id},model=${model.name},backend=${profile.backend.name}," +
                                     "gateStatus=PASS,reason=MEASUREMENT_FAILED,gateRunId=$profileGateRunId,detail=$message"
                             )
@@ -827,7 +823,7 @@ class EngineViewModel(
                             rows += "${profile.id} | gate=FAIL ($gateFailure: $message) | INVALID | tok/s=n/a"
                             EngineDiagnostics.info(
                                 "benchmark",
-                                "FULL_MATRIX_ROW_INVALID",
+                                "BACKEND_ACCEPTANCE_ROW_INVALID",
                                 "profile=${profile.id},model=${model.name},backend=${profile.backend.name}," +
                                     "gateStatus=FAIL,reason=$gateFailure,tok/s=n/a,gateRunId=$profileGateRunId,detail=$message"
                             )
@@ -838,19 +834,19 @@ class EngineViewModel(
                                     "gateRunId=$profileGateRunId,status=FAIL,reason=$gateFailure,detail=$message"
                             )
                         }
-                        EngineDiagnostics.error("benchmark", "FULL_MATRIX_PROFILE_FAILED", error)
+                        EngineDiagnostics.error("benchmark", "BACKEND_ACCEPTANCE_PROFILE_FAILED", error)
                     }
                     if (index < profiles.lastIndex) delay(BackendBenchmarkPlan.COOLDOWN_MS)
                 }
             } catch (cancelled: CancellationException) {
                 stoppedReason = "Vom Nutzer oder durch den ViewModel-Lifecycle abgebrochen."
                 rows += "ABGEBROCHEN: Vollständige Matrix wurde unterbrochen."
-                EngineDiagnostics.info("benchmark", "FULL_MATRIX_CANCELLED")
+                EngineDiagnostics.info("benchmark", "BACKEND_ACCEPTANCE_CANCELLED")
                 throw cancelled
             } catch (error: Throwable) {
                 stoppedReason = error.message ?: error.javaClass.simpleName
                 rows += "FEHLER: ${stoppedReason}"
-                EngineDiagnostics.error("benchmark", "FULL_MATRIX_FAILED", error)
+                EngineDiagnostics.error("benchmark", "BACKEND_ACCEPTANCE_FAILED", error)
             } finally {
                 if (restoreRequired) {
                     _benchmarkReport.value = "Stelle die ursprüngliche Modellkonfiguration wieder her…"
@@ -860,25 +856,25 @@ class EngineViewModel(
                     restore.onSuccess { restored ->
                         EngineDiagnostics.info(
                             "benchmark",
-                            "FULL_MATRIX_RESTORED",
+                            "BACKEND_ACCEPTANCE_RESTORED",
                             "backendPreference=${originalConfig.backendPreference},activeBackend=${restored.activeBackend}"
                         )
                     }.onFailure { error ->
                         rows += "KRITISCH: Restore fehlgeschlagen: ${error.message ?: error.javaClass.simpleName}"
-                        EngineDiagnostics.error("benchmark", "FULL_MATRIX_RESTORE_FAILED", error)
+                        EngineDiagnostics.error("benchmark", "BACKEND_ACCEPTANCE_RESTORE_FAILED", error)
                     }
                 }
                 _benchmarkReport.value = buildString {
-                    appendLine("Vollständige Benchmarkmatrix – ${successfulRuns}/${profiles.size} Profile mit bestandenem Gate und gültiger Messung")
+                    appendLine("Kompakter CPU/Vulkan-Abnahmetest – ${successfulRuns}/${profiles.size} Profile mit bestandenem Gate und gültiger Messung")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB); SHA-256: ${model.sha256 ?: "nicht verfügbar"}")
-                    appendLine("Dimensionen: Vulkan/CPU × AUTO/SUBGROUP/LARGE + quantisierungsabhängiger A/B-Pfad × n_ubatch 32/64/128 × Flash Attention AUS/AN.")
+                    appendLine("Umfang: genau zwei Referenzläufe mit identischem Modell und identischen Parametern – zuerst CPU, danach Vulkan.")
                     appendLine("Vor jeder Messung: 16-Token-Greedy-Gate; CPU-Referenz zuerst, Vulkan nur bei Top-1-Identität und mindestens 4/5 Top-5-Überschneidung.")
                     appendLine("Profile ohne Gate PASS sind ungültig; für sie werden keine tok/s ausgewiesen.")
                     appendLine("Je gültigem Profil: Modell-Load, Prefill, TTFT, 4 Warm-up- und 20 Mess-Tokens, Decode tok/s.")
                     appendLine("Graph-Splits stehen direkt in jeder Profilzeile. diagnosticRunId verbindet jede Zeile mit dem exakten INFERENCE_<runId>-Peak-PSS/RAM-/Thermal-Summary.")
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: ${stoppedReason}")
-                    append("Die ursprüngliche Modellkonfiguration wurde wiederhergestellt; nicht unterstützte Profile bleiben als Fehler sichtbar.")
+                    append("Die ursprüngliche Modellkonfiguration wurde wiederhergestellt.")
                 }
                 _isBenchmarking.value = false
             }

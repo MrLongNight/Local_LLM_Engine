@@ -36,6 +36,29 @@ internal object BackendBenchmarkPlan {
     )
 
     /**
+     * One compact acceptance pass: CPU reference first, then Vulkan candidate.
+     * Both use the same context, batch, threading, sampler, GDN and Flash Attention
+     * settings. Only the backend and requested GPU-layer count differ.
+     */
+    fun backendAcceptanceProfiles(original: EngineConfig): List<FullMatrixProfile> {
+        val base = configuration(original)
+        return listOf(BackendPreference.CPU, BackendPreference.VULKAN).map { backend ->
+            val useVulkan = backend == BackendPreference.VULKAN
+            FullMatrixProfile(
+                id = if (useVulkan) "VULKAN_CANDIDATE" else "CPU_REFERENCE",
+                backend = backend,
+                kernelProfile = VulkanMatvecWorkgroup.AUTO,
+                microBatchSize = original.microBatchSize,
+                flashAttention = original.flashAttentionMode,
+                config = base.copy(
+                    backendPreference = backend,
+                    gpuLayers = if (useVulkan) 99 else 0
+                )
+            )
+        }
+    }
+
+    /**
      * Executable G1 matrix: backend × relevant Vulkan kernel/quantization profile ×
      * n_ubatch × Flash Attention. SUBGROUP/LARGE are always measured on Vulkan;
      * quantization-specific overrides are only scheduled for a matching GGUF filename
