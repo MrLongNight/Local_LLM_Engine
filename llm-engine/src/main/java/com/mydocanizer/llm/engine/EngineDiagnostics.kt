@@ -91,15 +91,16 @@ object EngineDiagnostics {
     fun getLogs(): List<String> = logQueue.toList()
 
     /**
-     * Reads only the structured, debug-gated token-ID/logit rows for one inference run.
+     * Reads only the structured, debug-gated token-ID/logit rows for one native inference run.
+     * The native run ID is distinct from the Binder request ID used for RAM phase correlation.
      * Prompt and token-piece text is deliberately not returned by this helper.
      */
-    fun tokenSelectionTraceLines(context: Context, runId: String): List<String> {
-        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED || runId.isBlank()) return emptyList()
+    fun tokenSelectionTraceLines(context: Context, nativeRunId: String): List<String> {
+        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED || nativeRunId.isBlank()) return emptyList()
         val marker = "TOKEN_SELECTION_TRACE - "
         return readAllProcessLogs(context).filter { line ->
             if (!line.contains(marker)) return@filter false
-            line.substringAfter(marker).startsWith("runId=$runId,")
+            line.substringAfter(marker).startsWith("runId=$nativeRunId,")
         }
     }
 
