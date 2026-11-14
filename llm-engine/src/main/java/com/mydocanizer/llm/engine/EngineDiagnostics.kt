@@ -78,7 +78,7 @@ object EngineDiagnostics {
         if (!nativeRunId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return
         if (backend !in setOf("CPU", "Vulkan")) return
         val numericTracePattern = Regex(
-            """step=[0-9]+,selectedId=-?[0-9]+,top5=(?:-?[0-9]+:-?[0-9]+(?:\\.[0-9]+)?(?:\\|-?[0-9]+:-?[0-9]+(?:\\.[0-9]+)?)*)?"""
+            """step=[0-9]+,selectedId=-?[0-9]+,top5=(?:-?[0-9]+:-?[0-9]+(?:\.[0-9]+)?(?:\|-?[0-9]+:-?[0-9]+(?:\.[0-9]+)?)*)?"""
         )
         if (!numericTracePattern.matches(numericTrace)) return
         info(
