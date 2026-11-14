@@ -936,8 +936,6 @@ static void ggml_vk_get_physical_device_features2(
     endif()
     set(_mali_fence_wait_replacement [=[
     const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
-    const auto local_llm_fence_wait_start = local_llm_sync_timing
-        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Mali-G57 shares system memory with the CPU. Repeatedly polling the final
     // fence can keep a CPU core busy for the full GPU decode interval.
     if (ctx->device->vendor_id == 0x13B5) {
@@ -983,6 +981,8 @@ static void ggml_vk_get_physical_device_features2(
             }
         }
     }
+    const auto local_llm_fence_wait_start = local_llm_sync_timing
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     ctx->device->device.resetFences({ ctx->fence });
     if (local_llm_sync_timing) {
         local_llm_vulkan_sync_phase_record(1, static_cast<uint64_t>(
@@ -1016,8 +1016,135 @@ static void ggml_vk_get_physical_device_features2(
             ctx->device->device.resetFences({ ctx->fence });]=])
     string(REPLACE "${_serialized_fence_wait_anchor}" "${_serialized_fence_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
 
-    # Fail configuration if either timing callback disappeared from the generated source.
-    foreach(_required_sync_marker IN ITEMS "local_llm_vulkan_sync_phase_record(0" "local_llm_vulkan_sync_phase_record(1")
+    # Additional upstream synchronization paths that bypass ggml_vk_submit()
+    # or the main graph fence. Keep these anchors explicit and fail-fast.
+    set(_almost_ready_wait_anchor [=[
+    if (ctx->almost_ready_fence_pending) {
+        VK_CHECK(ctx->device->device.waitForFences({ ctx->almost_ready_fence }, true, UINT64_MAX), "almost_ready_fence", ctx->device);
+        ctx->device->device.resetFences({ ctx->almost_ready_fence });
+        ctx->almost_ready_fence_pending = false;
+    }]=])
+    string(FIND "${_vulkan_contents}" "${_almost_ready_wait_anchor}" _almost_ready_wait_position)
+    if(_almost_ready_wait_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream almost-ready Vulkan fence-wait anchor changed.")
+    endif()
+    set(_almost_ready_wait_replacement [=[
+    if (ctx->almost_ready_fence_pending) {
+        const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+        const auto local_llm_almost_ready_wait_start = local_llm_sync_timing
+            ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        // LOCAL_LLM_SYNC_ALMOST_READY_WAIT
+        VK_CHECK(ctx->device->device.waitForFences({ ctx->almost_ready_fence }, true, UINT64_MAX), "almost_ready_fence", ctx->device);
+        if (local_llm_sync_timing) {
+            local_llm_vulkan_sync_phase_record(1, static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - local_llm_almost_ready_wait_start).count()));
+        }
+        ctx->device->device.resetFences({ ctx->almost_ready_fence });
+        ctx->almost_ready_fence_pending = false;
+    }]=])
+    string(REPLACE "${_almost_ready_wait_anchor}" "${_almost_ready_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    set(_serialized_graph_wait_anchor [=[
+                auto res = ctx->device->device.waitForFences({ ctx->fence }, true, UINT64_MAX);
+                if (res != vk::Result::eSuccess) {]=])
+    string(FIND "${_vulkan_contents}" "${_serialized_graph_wait_anchor}" _serialized_graph_wait_position)
+    if(_serialized_graph_wait_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream serialized graph-split wait anchor changed.")
+    endif()
+    set(_serialized_graph_wait_replacement [=[
+                const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+                const auto local_llm_graph_wait_start = local_llm_sync_timing
+                    ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+                // LOCAL_LLM_SYNC_SERIALIZED_GRAPH_WAIT
+                auto res = ctx->device->device.waitForFences({ ctx->fence }, true, UINT64_MAX);
+                if (local_llm_sync_timing) {
+                    local_llm_vulkan_sync_phase_record(1, static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - local_llm_graph_wait_start).count()));
+                }
+                if (res != vk::Result::eSuccess) {]=])
+    string(REPLACE "${_serialized_graph_wait_anchor}" "${_serialized_graph_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    set(_direct_compute_submit_anchor [=[
+            si.setPNext(&tl_info);
+            ctx->device->compute_queue->handle->submit({ si }, ctx->fence);
+            ctx->transfer_semaphore_last_submitted = ctx->transfer_semaphore.value;]=])
+    string(FIND "${_vulkan_contents}" "${_direct_compute_submit_anchor}" _direct_compute_submit_position)
+    if(_direct_compute_submit_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream direct compute-queue submit anchor changed.")
+    endif()
+    set(_direct_compute_submit_replacement [=[
+            si.setPNext(&tl_info);
+            const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+            const auto local_llm_direct_submit_start = local_llm_sync_timing
+                ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            // LOCAL_LLM_SYNC_DIRECT_COMPUTE_QUEUE_SUBMIT
+            ctx->device->compute_queue->handle->submit({ si }, ctx->fence);
+            if (local_llm_sync_timing) {
+                local_llm_vulkan_sync_phase_record(0, static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - local_llm_direct_submit_start).count()));
+            }
+            ctx->transfer_semaphore_last_submitted = ctx->transfer_semaphore.value;]=])
+    string(REPLACE "${_direct_compute_submit_anchor}" "${_direct_compute_submit_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    set(_direct_empty_compute_submit_anchor [=[
+        } else {
+            ctx->device->compute_queue->handle->submit({}, ctx->fence);
+        }
+        if (!ctx->device->serialize_submissions) {]=])
+    string(FIND "${_vulkan_contents}" "${_direct_empty_compute_submit_anchor}" _direct_empty_compute_submit_position)
+    if(_direct_empty_compute_submit_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream direct empty compute-queue submit anchor changed.")
+    endif()
+    set(_direct_empty_compute_submit_replacement [=[
+        } else {
+            const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+            const auto local_llm_direct_submit_start = local_llm_sync_timing
+                ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            // LOCAL_LLM_SYNC_DIRECT_COMPUTE_QUEUE_SUBMIT
+            ctx->device->compute_queue->handle->submit({}, ctx->fence);
+            if (local_llm_sync_timing) {
+                local_llm_vulkan_sync_phase_record(0, static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - local_llm_direct_submit_start).count()));
+            }
+        }
+        if (!ctx->device->serialize_submissions) {]=])
+    string(REPLACE "${_direct_empty_compute_submit_anchor}" "${_direct_empty_compute_submit_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    set(_profiler_wait_anchor [=[
+        ggml_vk_submit(compute_ctx, ctx->device->fence);
+        VK_CHECK(ctx->device->device.waitForFences({ ctx->device->fence }, true, UINT64_MAX), "GGML_VULKAN_PERF waitForFences", ctx->device);
+        ctx->device->device.resetFences({ ctx->device->fence });]=])
+    string(FIND "${_vulkan_contents}" "${_profiler_wait_anchor}" _profiler_wait_position)
+    if(_profiler_wait_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: upstream Vulkan profiler fence-wait anchor changed.")
+    endif()
+    set(_profiler_wait_replacement [=[
+        ggml_vk_submit(compute_ctx, ctx->device->fence);
+        const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+        const auto local_llm_profile_wait_start = local_llm_sync_timing
+            ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        // LOCAL_LLM_SYNC_PROFILER_WAIT
+        VK_CHECK(ctx->device->device.waitForFences({ ctx->device->fence }, true, UINT64_MAX), "GGML_VULKAN_PERF waitForFences", ctx->device);
+        if (local_llm_sync_timing) {
+            local_llm_vulkan_sync_phase_record(1, static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - local_llm_profile_wait_start).count()));
+        }
+        ctx->device->device.resetFences({ ctx->device->fence });]=])
+    string(REPLACE "${_profiler_wait_anchor}" "${_profiler_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    # Fail configuration if any direct synchronization path disappeared.
+    foreach(_required_sync_marker IN ITEMS
+        "local_llm_vulkan_sync_phase_record(0"
+        "local_llm_vulkan_sync_phase_record(1"
+        "LOCAL_LLM_SYNC_ALMOST_READY_WAIT"
+        "LOCAL_LLM_SYNC_SERIALIZED_GRAPH_WAIT"
+        "LOCAL_LLM_SYNC_DIRECT_COMPUTE_QUEUE_SUBMIT"
+        "LOCAL_LLM_SYNC_PROFILER_WAIT")
         string(FIND "${_vulkan_contents}" "${_required_sync_marker}" _sync_marker_position)
         if(_sync_marker_position LESS 0)
             message(FATAL_ERROR "LocalLLM: Vulkan queue-submit/fence-wait timing bridge is incomplete.")
