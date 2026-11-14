@@ -81,60 +81,22 @@ fun SettingsScreen(
 
         // Two-stage acceptance flow: one combined CPU/Vulkan gate, then an optional targeted Q4_K diagnosis.
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "1. Engine-Abnahmetest: Korrektheit + Leistung",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Ein zusammengefasster Lauf mit genau zwei Profilen: CPU-Referenz zuerst, danach Vulkan. " +
-                            "Beide verwenden dasselbe Modell und dieselben Inferenzparameter. Vor der Geschwindigkeitsmessung " +
-                            "muss Vulkan die 16-Token-Korrektheitsprüfung bestehen: identische Top-1-Tokens und mindestens " +
-                            "4/5 Top-5-Überschneidung. Nur bestandene Profile erhalten einen Geschwindigkeitswert.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = { viewModel.runBackendAcceptanceTest() },
-                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
-                        modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
-                    ) {
-                        Text(if (isBenchmarking) "Abnahmetest läuft…" else "CPU + Vulkan gemeinsam prüfen")
-                    }
-                }
-            }
+            BackendAcceptanceTestSection(
+                currentModel = currentModel,
+                isBenchmarking = isBenchmarking,
+                isGenerating = isGenerating,
+                isImporting = isImporting,
+                viewModel = viewModel
+            )
         }
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "2. Gezielte Vulkan-Diagnose (nur bei Bedarf)",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Nur starten, wenn der erste Abnahmetest Vulkan deutlich langsamer als CPU zeigt " +
-                            "und das Modell Q4_K verwendet. Vier ABBA-Läufe vergleichen ausschließlich den Q4_K-Decodepfad " +
-                            "(Integer-Dot-MMVQ gegen Basis-DMMV) und prüfen die tatsächlich gemeldete GPU-Layerzahl. " +
-                            "Keine allgemeine Parameter- oder Layer-Matrix.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = { viewModel.runVulkanQ4kDecodePathSweep() },
-                        enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
-                        modifier = Modifier.fillMaxWidth().testTag("vulkan_q4k_diagnostic_button")
-                    ) {
-                        Text(if (isBenchmarking) "Vulkan-Diagnose läuft…" else "Q4_K-Kernel gezielt vergleichen")
-                    }
-                }
-            }
+            VulkanQ4kDiagnosticsSection(
+                currentModel = currentModel,
+                isBenchmarking = isBenchmarking,
+                isGenerating = isGenerating,
+                isImporting = isImporting,
+                viewModel = viewModel
+            )
         }
         item {
             benchmarkReport?.let { report ->
