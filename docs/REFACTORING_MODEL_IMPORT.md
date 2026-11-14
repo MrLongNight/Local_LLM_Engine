@@ -1,69 +1,68 @@
-# ModelImportScreen – Extraktionsanalyse
+# ModelImportScreen – Extraktion und Verifikation
 
-**Status:** Schritt 1 abgeschlossen – Analyse und Cluster-Vorschlag; Extraktion ausdrücklich noch nicht begonnen.  
-**Analysierter Branch/Stand:** `main` · `af594b8fe80147ce4a544555a9af683ebc20782b`  
-**Quelldatei:** `app/src/main/java/com/example/ui/ModelImportScreen.kt` · 21.454 Zeichen · 454 Zeilen
+**Status:** UI-Extraktion abgeschlossen; JVM-Unit-Tests grün; Android-APK-/Emulator-Verifikation läuft.  
+**Code-Stand:** `main` · `5c6caea4c508a073ff245dd118bd3b1844066575`  
+**Extraktions-Commit:** `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`  
+**Nachfolgender Build-Fix:** `5c6caea4c508a073ff245dd118bd3b1844066575`  
+**Ausgangsdatei:** `app/src/main/java/com/example/ui/ModelImportScreen.kt` · 21.454 Zeichen / 454 Zeilen  
+**Ergebnis:** `ModelImportScreen.kt` · 3.957 Bytes / 102 Zeilen
 
-## 1. Top-level Composables und vorhandene Typen
+## 1. Ausgangsanalyse
 
-| Deklaration | Ort / Sichtbarkeit | Verwendung und Abhängigkeiten | Behandlung |
+| Deklaration / Typ | Ursprünglicher Ort | Verwendung | Ergebnis |
 |---|---|---|---|
-| `ModelImportScreen(viewModel: EngineViewModel, modifier: Modifier = Modifier)` | `ui/ModelImportScreen.kt`, public `@Composable` | Aufruf aus `MainScreen` für `AppTab.IMPORT`; sammelt sechs ViewModel-StateFlows und registriert drei Activity-Result-Launcher | Öffentliche Signatur unverändert in der Hauptdatei belassen |
-| `ModelLoadProgressIndicator(progress: Int?, modifier: Modifier = Modifier)` | `ui/ModelLoadProgressIndicator.kt`, public `@Composable` | Wird sowohl von `ModelImportScreen` als auch von `ChatScreen` verwendet | Bestehende gemeinsame Komponente weiterverwenden; nicht in einen Import-Cluster verschieben |
-| `ImportedModelEntry(file, name, sizeBytes)` | `ui/ModelManagementViewModel.kt`, Data Class | Listeneintrag mit Datei, Anzeigename und Größe; Screen liest `file`, `name` und `sizeMb` | Typ und ViewModel unverändert lassen |
+| `ModelImportScreen(viewModel, modifier)` | `ui/ModelImportScreen.kt`, public `@Composable` | Wird aus `MainScreen` für `AppTab.IMPORT` aufgerufen | Öffentliche Signatur exakt erhalten |
+| `ModelLoadProgressIndicator(progress, modifier)` | `ui/ModelLoadProgressIndicator.kt`, public `@Composable` | Gemeinsame Anzeige für Chat und Import | Unverändert an ursprünglichem Ort weiterverwendet |
+| `ImportedModelEntry(file, name, sizeBytes)` | `ui/ModelManagementViewModel.kt`, Data Class | Daten für die Liste lokaler Modelle | Typ und ViewModel unverändert |
 
-**Preview-Bestand:** In `ModelImportScreen.kt` gibt es keine `@Preview`-Funktion (0 Treffer). Es ist daher keine Preview zu verschieben. Die öffentliche Screen-Signatur und alle bestehenden Aufrufstellen bleiben erhalten.
+In `ModelImportScreen.kt` waren genau ein top-level Composable und keine `@Preview`-Funktion vorhanden. Der Screen sammelt sechs StateFlows und registriert drei SAF-Launcher. Beides bleibt in der Hauptdatei.
 
-## 2. State- und Aktionsabhängigkeiten
+## 2. Umgesetzte Sektionen
 
-Diese sechs Werte werden aktuell in `ModelImportScreen` gesammelt und sollen dort gesammelt bleiben:
+Alle neuen Dateien liegen unter `app/src/main/java/com/example/ui/modelimport/`.
 
-| State | Verwendung |
+| Datei | Inhalt | Bytes |
+|---|---|---:|
+| `ImportErrorBanner.kt` | Inline-Fehler-Card, Memory-Override und Dismiss | 3.165 |
+| `ActiveModelSection.kt` | Aktive Modell-Card, Kopfzeile und Entladen-Aktion | 3.382 |
+| `ActiveModelDetails.kt` | Modellinformationen und optionaler SHA-256-Wert | 3.624 |
+| `FilePickerSection.kt` | SAF-Card und Erläuterung zum direkten Originaldatei-Zugriff | 2.899 |
+| `FilePickerActions.kt` | Einzeldatei-, Mehrfachdatei- und Ordnerauswahl | 3.421 |
+| `ImportProgressSection.kt` | Bedingter Aufruf des bestehenden Fortschritts-Composables | 768 |
+| `ImportedModelsSection.kt` | LazyList-Header, Leerzustand-/Listenverzweigung | 2.278 |
+| `ImportedModelEmptyState.kt` | Karte bei leerer lokaler Modellliste | 2.250 |
+| `ImportedModelCard.kt` | Einzelne lokale Modellkarte mit Laden/Entladen | 4.338 |
+
+`ModelImportScreen.kt` liegt mit 3.957 Bytes unter 5 KB. Alle neuen Sektionen liegen unter 6 KB.
+
+## 3. Erhaltene Struktur und Logik
+
+- Die Reihenfolge bleibt: optionaler Fehlerbanner → aktive Modellkarte → SAF-Importkarte → Listen-Header → Leerzustand oder Modellkarten.
+- Die vorhandenen `LazyColumn`-`item`- und `items`-Grenzen bleiben erhalten; der Listenaufbau liegt in einer `LazyListScope`-Erweiterung.
+- Card-/Column-Hierarchie, Texte, Icons, Farben, Modifier, Abstände und bestehende Test-Tags wurden übernommen.
+- Alle sechs StateFlows sowie die drei Activity-Result-Launcher bleiben in `ModelImportScreen`.
+- Die Launcher-Ergebnisse rufen weiterhin dieselben ViewModel-Importfunktionen auf. Extrahierte UI-Aktionen erhalten Callbacks.
+- `ModelLoadProgressIndicator` und `ImportedModelEntry` wurden nicht dupliziert oder verschoben.
+- Es wurden keine Validierungsdialoge oder neuen Fehlerdialoge erfunden: Die ursprüngliche Fehleranzeige ist eine inline Card.
+- Es gab im Ausgangsscreen keine Preview-Funktion; die bestehenden Preview-Dateien anderer Screens wurden nicht verändert.
+
+## 4. Commits und Verifikation
+
+| Code-Commit / Lauf | Ergebnis |
 |---|---|
-| `currentModel` | aktive Modellkarte; Vergleich mit Listeneinträgen |
-| `importedModelEntries` | Anzahl, Leerzustand und Modellliste |
-| `isImporting` | Import-Schaltflächen und Ladeaktionen aktivieren/deaktivieren |
-| `modelLoadProgress` | gemeinsame Fortschrittsanzeige |
-| `errorMessage` | Fehlerbanner bedingt anzeigen und Text darstellen |
-| `memoryOverrideAvailable` | Aktion „Trotzdem laden“ bedingt anzeigen |
+| `e1e3f5634a9ed19399980bbbeb81dedc10839693` | Korrigierte vorherige SettingsScreen-Compilerfehler |
+| Unit Tests `43565763556` auf `e1e3f56` | Erfolg |
+| Android APK Build `43565763512` auf `e1e3f56` | Erfolg; Debug- und Instrumentation-APK erzeugt, Emulator-Prozessisolation erfolgreich |
+| `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383` | ModelImportScreen-Sektionen extrahiert |
+| `5c6caea4c508a073ff245dd118bd3b1844066575` | Fehlenden `height`-Import in `FilePickerActions.kt` ergänzt |
+| Unit Tests `43567003341` auf `5c6caea` | Erfolg; JVM-Tests und Host-C++-Prompt-Cache-/Truncation-Tests grün |
+| Android APK Build `43567003311` auf `5c6caea` | Bei dieser Dokumentaktualisierung noch in Arbeit |
 
-Die drei Activity-Result-Launcher bleiben ebenfalls in der Hauptdatei:
-- `OpenDocument` → `viewModel.importModelFromSaf(uri)`
-- `OpenMultipleDocuments` → `viewModel.importModelsFromSaf(uris)`
-- `OpenDocumentTree` → `viewModel.importModelsFromTree(treeUri)`
+Der erste Unit-Lauf nach der Extraktion meldete ausschließlich den fehlenden Import von `androidx.compose.foundation.layout.height` in `FilePickerActions.kt`. Dieser konkrete Fehler ist in `5c6caea` korrigiert. Die initiale fehlerhafte Extraktionsversion wird nicht als verifiziert ausgegeben.
 
-Weitere bestehende ViewModel-Aktionen, die als Callbacks übergeben werden:
-`loadModelDespiteMemoryWarning()`, `dismissError()`, `unloadModel()`, `refreshModelFiles()` und `loadModelFile(entry.file)`.
+## 5. Noch offene Abnahme
 
-## 3. UI-Reihenfolge und Cluster-Vorschlag
+- Android APK Build und Emulator-Instrumentation auf dem Code-Stand `5c6caea` abschließen und Artefakte prüfen.
+- Manuellen Import-Flow auf einem Android-Gerät durchklicken: erfolgreicher Import, Picker-Abbruch und Fehlerfall. Diese Geräteprüfung kann CI nicht ersetzen.
 
-Die vorhandene `LazyColumn` enthält in dieser Reihenfolge: optionales Fehlerbanner → aktive Modellkarte → SAF-Importkarte → Listen-Header → entweder Leerzustand oder Modellkarten. Diese Reihenfolge, alle `item`-/`items`-Grenzen und die vorhandene Card-/Column-Hierarchie müssen exakt erhalten bleiben.
-
-| Cluster / Zieldatei | Aktueller Quellblock | Inhalt und Abhängigkeiten | Geplante Extraktion |
-|---|---|---|---|
-| `ImportErrorBanner.kt` | Error Banner, ca. Zeile 88–133 | Fehler-Card; `errorMessage`, `memoryOverrideAvailable`, `isImporting`; Callbacks für Override und Dismiss | Eigenständiges internes Composable; bleibt als optionales erstes Lazy-Item |
-| `ActiveModelSection.kt` | Active Loaded Model Card, ca. Zeile 134–235 | `ElevatedCard`, Kopfzeile, Entladen-Aktion; `currentModel` und `onUnload` | Card und bestehende äußere Column-Hierarchie verschieben |
-| `ActiveModelDetails.kt` | Detailbereich innerhalb der aktiven Modellkarte | Modellname, Dateigröße, Parameter, trainierter Kontext, Architektur, aktives Backend und optionaler SHA-256-Wert | Detail-UI als direkt emittierendes Composable innerhalb der vorhandenen Column; kein zusätzlicher Layout-Container |
-| `FilePickerSection.kt` | SAF-Importkarte, ca. Zeile 236–337 | Erklärung zur Originaldatei, Beschreibung des direkten SAF-Zugriffs und bedingte Fortschrittsanzeige; `isImporting`, `modelLoadProgress` | Card und Text-/Progress-Bereich verschieben; `ModelLoadProgressIndicator` unverändert aufrufen |
-| `FilePickerActions.kt` | Drei SAF-Auswahlaktionen innerhalb der SAF-Karte | Einzeldatei-, Mehrfachdatei- und Ordnerauswahl; Status `isImporting`; drei Launcher-Callbacks | Button-Sequenz als Composable ohne zusätzlichen Wrapper verschieben und an derselben Stelle aufrufen |
-| `ImportedModelsSection.kt` | Listen-Header und Verzweigung ab ca. Zeile 338 | Header mit Anzahl/Refresh sowie Leerzustand oder `items(modelEntries)` | `LazyListScope`-Erweiterung, die dieselben `item`-/`items`-Einträge in derselben Reihenfolge registriert |
-| `ImportedModelCard.kt` | Karteninhalt innerhalb von `items(modelEntries)` | `ImportedModelEntry`, Vergleich des geladenen Pfads, `isImporting`, Laden-/Entladen-Callbacks | Einzelne Modellkarte verschieben; Pfadvergleich und Callback-Ausführung unverändert übernehmen |
-
-Die neuen Cluster-Composables bzw. die LazyListScope-Erweiterung können `internal` sein; keine neue öffentliche Screen-API ist erforderlich.
-
-## 4. Bewusste Nicht-Cluster
-
-- **Keine Import-Validierungssektion:** In dieser Screen-Datei gibt es keinen eigenständigen Validierungs-Composable. Validierung und Importablauf bleiben in den bestehenden ViewModel-/Engine-Pfaden.
-- **Keine Fehlerdialoge:** Der Fehler wird aktuell als inline `Card`-Banner in der Liste angezeigt, nicht als `AlertDialog`. Deshalb heißt der Cluster `ImportErrorBanner`.
-- **Keine neue Progress-Komponente:** `ModelLoadProgressIndicator` existiert bereits als gemeinsame Komponente für Chat und Import. Der bestehende bedingte Aufruf bleibt innerhalb der SAF-Card an derselben Position.
-- **Kein eigener Scaffold:** `ModelImportScreen` enthält aktuell eine `LazyColumn`, keinen Scaffold. Die Screen-Fassade behält die `LazyColumn` sowie State-Sammlung und Launcher; die einzelnen Listeneinträge werden zu Aufrufen der extrahierten Komponenten.
-
-## 5. Erhaltungs- und Größenkriterien für Schritt 2
-
-1. `ModelImportScreen(viewModel, modifier)` bleibt exakt gleich signiert.
-2. State-Sammlung und drei Launcher bleiben in der Hauptdatei; UI-Abschnitte erhalten Werte und Callbacks statt eigener neuer ViewModel-/Launcher-Logik.
-3. Alle vorhandenen Texte, Modifier, Test-Tags, Icons, Farben, Abstände, Card-/Column-Verschachtelungen und Lazy-List-Grenzen bleiben erhalten.
-4. Geplante Dateien werden nach der Extraktion auf **unter 6 KB** geprüft; `ModelImportScreen.kt` auf **unter 5 KB**. Die Größen sind nach dem tatsächlichen Commit anhand der Dateibytes zu verifizieren.
-5. Nach jedem Cluster: Build und fokussierte Tests, anschließend separater Commit. Abschließend Build/Tests sowie manueller Import-Flow (Erfolg, Abbruch, Fehler); keine Verhaltens- oder Performancebehauptung ohne entsprechende Prüfung.
-
-**Aktueller Umfang:** Nur diese Analyse-Dokumentation wird hinzugefügt. `ModelImportScreen.kt` und alle Produktions-/Testdateien bleiben unverändert. Auf Freigabe warten, bevor Schritt 2 beginnt.
+Die Extraktion selbst ist abgeschlossen; eine Verhaltens- oder Geräteabnahme wird erst nach den jeweiligen Belegen als abgeschlossen markiert.

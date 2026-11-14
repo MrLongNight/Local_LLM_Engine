@@ -1,8 +1,8 @@
 # Refactoring status — Local_LLM_Engine
 
-**Live tracker:** SettingsScreen extraction (Task 3).
+**Live tracker:** ModelImportScreen extraction (Task 4).
 **Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `main`
-**Latest inspected code SHA:** `af594b8fe80147ce4a544555a9af683ebc20782b` (2026-11-14).
+**Latest inspected code SHA:** `5c6caea4c508a073ff245dd118bd3b1844066575` (2026-11-14).
 
 ## Task 2 — EngineViewModel split
 
@@ -31,7 +31,7 @@ The `EngineViewModel` facade is reduced to navigation/shared state and delegates
 
 ## Task 3 — SettingsScreen sections
 
-<badge color="warning">Extracted; CI compile verification currently failing</badge>
+<badge color="success">Extracted; CI build and emulator verification passed</badge>
 
 At `af594b8`, the existing `SettingsScreen.kt` UI sections have been mechanically moved into these composables:
 
@@ -48,18 +48,34 @@ At `af594b8`, the existing `SettingsScreen.kt` UI sections have been mechanicall
 
 `SettingsScreen.kt` now composes these sections in the existing order. The commit chain includes import corrections after the mechanical moves.
 
-**Latest CI evidence at this snapshot:**
+**Compiler fixes and verification:**
 
-- Unit Tests run `43564336179` for `af594b8`: **failure** during `:app:compileDebugKotlin`. The host-only native prompt-cache/truncation test passed; the Gradle job did not reach a green test run.
-- Android APK Build run `43564336177` for the same SHA: **failure** during `:app:compileDebugKotlin`; no installable APK or instrumentation APK was uploaded for this SHA. The ARM64 native CMake build progressed, but Kotlin compilation failed before APK packaging.
-- Exact compiler findings shared by both runs: `BenchmarkResultSection.kt` has an `item` call outside a `LazyListScope` and consequent invalid composable context; `InferenceSettingsSection.kt` is missing `testTag` and `Slider` references (and consequently its slider lambda parameter `it`); `SamplingParametersSection.kt` is missing `padding` and `MaterialTheme` imports. These are source compile issues, not test assertion failures. They remain open and must be corrected before Task 3 can be considered CI-green.
+- Unit Tests run `43565763556` on code SHA `e1e3f5634a9ed19399980bbbeb81dedc10839693`: completed / success.
+- Android APK Build run `43565763512` on the same code SHA: completed / success. Debug APK and instrumentation APK were uploaded; emulator process-isolation instrumentation completed successfully.
+- The earlier errors in `BenchmarkResultSection.kt`, `InferenceSettingsSection.kt` and `SamplingParametersSection.kt` were corrected with the minimal changes required to restore the original LazyList item boundary and Compose imports. Public SettingsScreen signature and section order remain unchanged.
+
+## Task 4 — ModelImportScreen sections
+
+<badge color="warning">Code extraction complete; Android build / emulator verification in progress</badge>
+
+The public `ModelImportScreen(viewModel, modifier)` signature, six StateFlow collections, three SAF launchers and LazyColumn remain in the main file. The new files under `ui/modelimport/` are:
+
+- `ImportErrorBanner.kt`, `ActiveModelSection.kt`, `ActiveModelDetails.kt`
+- `FilePickerSection.kt`, `FilePickerActions.kt`, `ImportProgressSection.kt`
+- `ImportedModelsSection.kt`, `ImportedModelEmptyState.kt`, `ImportedModelCard.kt`
+
+Sizes: main screen 3,957 bytes; every new section below 4.4 KB. No `@Preview` existed in the original screen. Existing shared `ModelLoadProgressIndicator` and `ImportedModelEntry` remain in place.
+
+Code commits: extraction `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`; import correction `5c6caea4c508a073ff245dd118bd3b1844066575`. Unit Tests run `43567003341` on `5c6caea`: completed / success, including host-only native tests. Android APK Build run `43567003311` for `5c6caea` is in progress at this update.
+
+Detailed mapping and file sizes: [ModelImportScreen extraction report](../REFACTORING_MODEL_IMPORT.md).
 
 ## Remaining refactoring work
 
-- Fix the exact Task 3 compile errors listed above, then rerun Unit Tests and Android APK Build on the resulting final code SHA.
-- Confirm APK and instrumentation APK artifact IDs and the emulator instrumentation conclusion for that same SHA.
-- Keep physical-device smoke testing separate from CI: Settings behavior, model load, GPU backend/offload and real Mali-G57 execution still require the target phone.
-- ModelImportScreen extraction, InferenceServiceProcessTest class split and `:app` package moves remain deferred; only resume them as separate focused tasks after Task 3 is green.
+- ModelImportScreen sections have been extracted; Unit Tests run `43567003341` on code SHA `5c6caea4c508a073ff245dd118bd3b1844066575` completed successfully. Android APK Build run `43567003311` for that SHA is in progress at this update; artifact and emulator conclusions are not yet claimed.
+- Complete the APK build / emulator instrumentation and record the artifact IDs for `5c6caea`.
+- Keep physical-device smoke testing separate from CI: Model Import success, picker cancellation and error handling still require a target Android device.
+- `InferenceServiceProcessTest` class split and `:app` package moves remain deferred.
 - Use-case/repository extraction remains optional; do not add abstractions without a concrete reuse/ownership reason.
 
 Update this document in place after each verified task/CI transition. It is the only live refactoring status tracker.
