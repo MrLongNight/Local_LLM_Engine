@@ -27,7 +27,7 @@ Zeilenbereiche beziehen sich auf den oben dokumentierten Blob-Snapshot. Große C
 | `ActiveModelHeader` | 146–174 | `ui/modelimport/ActiveModelHeader.kt` | Kopfzeile / Entladen-Button innerhalb bestehender Card |
 | `ActiveModelDetails` | 175–231 | `ui/modelimport/ActiveModelDetails.kt` | Modell-Metadaten, Hash und Leerzustand |
 | `SafImportDescription` | 240–265 | `ui/modelimport/SafImportDescription.kt` | Erklärtext innerhalb bestehender SAF-Card |
-| `SafImportActions` | 267–336 | `ui/modelimport/SafImportActions.kt` | Bestehender Fortschrittsindikator + drei Picker-Aktionen |
+| `SafImportActions` | 267–333 | `ui/modelimport/SafImportActions.kt` | Bestehender Fortschrittsindikator + drei Picker-Aktionen; Card-/Column-Schließklammern bleiben im Screen |
 | `ImportedModelsHeader` | 338–354 | `ui/modelimport/ImportedModelsHeader.kt` | LazyColumn-Header mit Refresh |
 | `EmptyModelLibraryState` | 356–385 | `ui/modelimport/EmptyModelLibraryState.kt` | Bestehende Empty-State-Card |
 | `ImportedModelIdentity` | 397–426 | `ui/modelimport/ImportedModelIdentity.kt` | Icon, Dateiname, Dateigröße |

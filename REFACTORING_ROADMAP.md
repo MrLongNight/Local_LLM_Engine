@@ -6,6 +6,9 @@
 **Settings-Code-HEAD:** `4492dc3ec7a281cd64640f0186482f98fc07fca8`  
 **Branch-Regel:** nur `main`; keine Feature-Branches.
 
+**Gespeicherte Mermaid-Übersicht:** [Refactoring-Roadmap und Abhängigkeiten öffnen](https://mermaid.ai/app/projects/d7b9e612-2e4e-4eba-ac5b-098c4d58b067/diagrams/50efdfab-718e-4578-8580-01c437062111/version/v0.1/edit?utm_source=mermaid_app_widget&utm_medium=mermaid-chatgpt-app)  
+**Mermaid documentID:** `50efdfab-718e-4578-8580-01c437062111`
+
 ## Statuslegende
 
 - **IN PROGRESS / APPROVED** — Umsetzung im genehmigten Scope erlaubt.
@@ -68,6 +71,6 @@ R1 bleibt aktiv und wartet nicht auf Freigaben für R2–R5. R2 und R3 können u
 - Unit Tests Run [43557763450](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/43557763450): **completed / success**.
 - APK Workflow Run [43557763490](https://github.com/MrLongNight/Local_LLM_Engine/actions/runs/43557763490), Attempt 1: Gradle APK-/Instrumentation-APK-Build, Manifest-Checks und beide Artifact Uploads erfolgreich. Emulator-Test `realGgufIsReloadedAndFollowupInferenceSucceedsAfterTimeoutKill` fehlgeschlagen: Zeile 393 erwartete `DEBUG_NATIVE_INFERENCE_BLOCKED`, erhalten wurde `MODEL_LOADED`.
 - Artifact IDs des fehlgeschlagenen Gesamtworkflows: Debug APK `14099167164`; Instrumentation Test APK `14100095064`.
-- **Retry Attempt 2** wurde gestartet. Beim letzten Check war der Workflow `in_progress`; konkrete Schlussfolgerung erst nach Abschluss ergänzen.
+- **Retry Attempt 2** wurde gestartet. Letzter Check: Workflow `in_progress`, aktiver Schritt `Run process-isolation instrumentation tests on Android emulator`. Für Attempt 2 liegen neue APK-Artefakte vor: Debug APK `14099708612`, Instrumentation APK `14099983067`. Retry-Resultat noch offen.
 - Derselbe Test und alle für den Fehler relevanten Engine-/JNI-/CMake-/Workflow-Dateien haben identische Blob-SHAs zum vorherigen grünen APK-Run `43556762673` / Code-HEAD `a6bcd532be45bc7d08381ed802c388dd6219cf4e`. Das ist ein bisher nicht deterministisch reproduzierter Emulator-Testfehler; nicht als Settings-Code-Regression ausgeben.
 - Vorheriger ViewModel-Code-HEAD `a6bcd532be45bc7d08381ed802c388dd6219cf4e`: Unit Run `43556762677` success; APK Run `43556762673` success; beide Artefakte hochgeladen.

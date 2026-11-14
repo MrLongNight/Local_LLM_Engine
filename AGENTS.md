@@ -58,7 +58,7 @@ Bei Widersprüchen nicht raten: aktuellen Source, Branch-HEAD und zugehörigen A
 
 ## Live-Dokumentationskarte
 
-- `REFACTORING_ROADMAP.md` — einziger aktueller Gesamtstatus und Task-Abhängigkeiten.
+- `REFACTORING_ROADMAP.md` — einziger aktueller Gesamtstatus und Task-Abhängigkeiten; [gespeicherte Mermaid-Roadmap](https://mermaid.ai/app/projects/d7b9e612-2e4e-4eba-ac5b-098c4d58b067/diagrams/50efdfab-718e-4578-8580-01c437062111/version/v0.1/edit?utm_source=mermaid_app_widget&utm_medium=mermaid-chatgpt-app).
 - `REFACTORING_SETTINGS.md` — SettingsScreen-Extraktion und Mermaid-Struktur.
 - `REFACTORING_MODEL_IMPORT.md` — ModelImportScreen-Analyse; bis Freigabe keine Codeänderung.
 - `REFACTORING_TESTS.md` — InferenceServiceProcessTest-Analyse; bis Freigabe keine Codeänderung.
