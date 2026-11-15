@@ -204,15 +204,14 @@ jobs:
           ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
         run: |
           set -euo pipefail
-          # This Debug APK is the active P0 diagnostic build: retain prompt/output
-          # text diagnostics and numeric token-selection traces for the acceptance gate.
-          # Release builds keep all diagnostic instrumentation disabled.
-          gradle_args=("-PlocalLlmSyntheticTokenDiagnostics=true")
+          # Standard diagnostic APK: keep compact metrics and normal backend sampling.
+          # Full prompt/token/response text tracing is deliberately disabled by default.
+          gradle_args=()
           if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
             echo "Building separate Vulkan per-operation profiler APK."
             gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
           else
-            echo "Building diagnostic Debug APK with full token traces enabled; release builds remain diagnostic-free."
+            echo "Building standard Debug APK with bounded, readable diagnostics; raw text traces are disabled."
           fi
           gradle --no-daemon "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
 
@@ -229,8 +228,8 @@ jobs:
           build_config="$(find llm-engine/build/generated -type f -name BuildConfig.java -print -quit)"
           test -n "$build_config"
           grep -Eq "VULKAN_PERF_PROFILER_ENABLED[[:space:]]*=[[:space:]]*${expected};" "$build_config"
-          grep -Eq "TEXT_DIAGNOSTICS_ENABLED[[:space:]]*=[[:space:]]*true;" "$build_config"
-          echo "Verified VULKAN_PERF_PROFILER_ENABLED=${expected} and TEXT_DIAGNOSTICS_ENABLED=true in ${build_config}"
+          grep -Eq "TEXT_DIAGNOSTICS_ENABLED[[:space:]]*=[[:space:]]*false;" "$build_config"
+          echo "Verified VULKAN_PERF_PROFILER_ENABLED=${expected} and TEXT_DIAGNOSTICS_ENABLED=false in ${build_config}"
           python3 - <<'PY'
           import glob
           import json
@@ -252,18 +251,18 @@ jobs:
           for entry in jni_entries:
               command = entry.get("command")
               args = shlex.split(command) if command else entry.get("arguments", [])
-              if not any(
+              if any(
                   arg == "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS" or
                   arg.startswith("-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=")
                   for arg in args
               ):
                   raise SystemExit(
-                      "Diagnostic Debug JNI compilation is missing LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS"
+                      "Standard Debug JNI build unexpectedly enables raw text/token diagnostics"
                   )
 
           print(
-              "Verified the diagnostic Debug JNI build includes LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS "
-              "and full token-selection trace support."
+              "Verified standard Debug JNI compilation omits LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS; "
+              "raw prompt/token/response traces are disabled."
           )
           PY
 
