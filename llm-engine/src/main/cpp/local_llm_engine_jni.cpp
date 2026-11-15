@@ -218,9 +218,9 @@ public:
 static void local_llm_native_log_callback(enum ggml_log_level level, const char* text, void* /*user_data*/) {
     if (text == nullptr) return;
 
-    // llama.cpp reports the actual Vulkan feature set (FP16, integer dot,
-    // subgroup size, shared memory, UMA and matrix cores) as DEBUG. Preserve
-    // only its compact device-capability line; do not enable noisy per-op DEBUG.
+    // llama.cpp reports Vulkan capabilities and detailed backend diagnostics at DEBUG.
+    // Full diagnostic Debug builds retain all levels; normal builds keep the compact
+    // capability line while excluding noisy per-operation DEBUG messages.
     const bool is_vulkan_capability_line =
         level == GGML_LOG_LEVEL_DEBUG && std::strstr(text, "ggml_vulkan:") != nullptr;
 #if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
