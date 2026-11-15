@@ -168,7 +168,7 @@ internal object EngineDiagnosticsReportBuilder {
         if (line.length <= maxChars) line else line.take(maxChars - 18) + " …[gekürzt]"
 
     private val eventLinePattern = Regex(
-        """^([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}) \\[(INFO|WARN|ERROR|DEBUG)] \\[([^]]+)] ([A-Z0-9_]+)(?: - (.*))?$"""
+        """^([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}) \[(INFO|WARN|ERROR|DEBUG)] \[([^]]+)] ([A-Z0-9_]+)(?: - (.*))?$"""
     )
     private val fieldSeparator = Regex(""",(?=[A-Za-z][A-Za-z0-9_]*=)""")
 
