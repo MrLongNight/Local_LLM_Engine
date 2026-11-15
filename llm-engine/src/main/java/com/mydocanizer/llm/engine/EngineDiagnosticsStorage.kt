@@ -110,7 +110,7 @@ internal object EngineDiagnosticsStorage {
         val bytes = file.readBytes()
         var start = (bytes.size - MAX_LOG_FILE_BYTES.toInt()).coerceAtLeast(0)
         // Start at a complete line boundary; never keep a partial UTF-8/log envelope.
-        while (start < bytes.size && bytes[start] != '\\n'.code.toByte()) start++
+        while (start < bytes.size && bytes[start] != '\n'.code.toByte()) start++
         if (start < bytes.size) start++
 
         val tail = if (start < bytes.size) {
@@ -122,7 +122,7 @@ internal object EngineDiagnosticsStorage {
             .filter { it.isNotBlank() }
             .toList()
             .takeLast(MAX_LOG_ENTRIES)
-            .joinToString(separator = "\\n", postfix = "\\n")
+            .joinToString(separator = "\n", postfix = "\n")
         file.writeText(retained, Charsets.UTF_8)
     }
 
