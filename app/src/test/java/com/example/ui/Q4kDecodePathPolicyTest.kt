@@ -9,6 +9,13 @@ import org.junit.Test
 
 class Q4kDecodePathPolicyTest {
     @Test
+    fun onlyKnownNativeKernelPathsAreAccepted() {
+        assertTrue(Q4kDecodePathPolicy.isKnownKernelPath(Q4kDecodePathPolicy.BASE_PATH))
+        assertTrue(Q4kDecodePathPolicy.isKnownKernelPath(Q4kDecodePathPolicy.MMVQ_PATH))
+        assertFalse(Q4kDecodePathPolicy.isKnownKernelPath("UNKNOWN_KERNEL_PATH"))
+    }
+
+    @Test
     fun nonMaliAutoRetainsUpstreamMmvqSelectionAndReason() {
         assertEquals(
             Q4kDecodePathPolicy.MMVQ_PATH,
