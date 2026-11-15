@@ -22,19 +22,14 @@ object EngineDiagnostics {
         EngineDiagnosticsStorage.info(tag, event, details)
 
     /**
-     * Full text trace for explicit Debug diagnostics. Preserve every supplied character
-     * and split long payloads into envelope-sized records so prompts, responses, token
-     * pieces and error details are not silently truncated. Release builds stay disabled.
+     * Records only that a text payload was available. Prompt text, partial output,
+     * token pieces and generated responses are never written to persistent diagnostics.
      */
     fun testText(tag: String, event: String, details: String) {
-        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
-        val chunks = details.chunked(3_000).ifEmpty { listOf("") }
-        chunks.forEachIndexed { index, chunk ->
-            val partEvent = if (chunks.size == 1) event else "${event}_PART_${index + 1}_OF_${chunks.size}"
-            info(tag, partEvent, chunk)
-        }
+        if (!BuildConfig.DEBUG) return
+        info(tag, event, "contentChars=${details.length},contentOmitted=true")
     }
- 
+
     /**
      * Persist the numeric token-ID/logit row for one inference step. The raw token
      * piece is recorded separately by the native text-trace path.
