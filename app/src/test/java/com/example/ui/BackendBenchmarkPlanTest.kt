@@ -400,7 +400,7 @@ class BackendBenchmarkPlanTest {
         assertEquals(32, BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
         val gatePrompt = BackendBenchmarkPlan.correctnessGatePrompt()
         assertEquals(
-            "Continue the even-number sequence: 2, 4, 6, ..., 320. Output only the next five numbers, separated by commas.",
+            "Copy exactly this text and output nothing else: 322, 324, 326, 328, 330",
             gatePrompt
         )
         assertTrue("Correctness prompt must fit reduced contexts", gatePrompt.length <= 128)
