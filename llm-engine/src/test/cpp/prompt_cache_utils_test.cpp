@@ -4,6 +4,14 @@
 #include <vector>
 
 int main() {
+    // Sampler output must be a real vocabulary ID before EOG lookup/decode.
+    assert(local_llm::is_valid_token_id(0, 1));
+    assert(local_llm::is_valid_token_id(32000, 32001));
+    assert(!local_llm::is_valid_token_id(-1, 32001));
+    assert(!local_llm::is_valid_token_id(32001, 32001));
+    assert(!local_llm::is_valid_token_id(0, 0));
+    assert(!local_llm::is_valid_token_id(0, -1));
+
     // Incremental KV reuse/context shifting stays disabled for either hybrid
     // or recurrent memory. Only ordinary-attention models may enter the prefix cache.
     assert(local_llm::supports_incremental_memory_ops(false, false));

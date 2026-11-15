@@ -1978,13 +1978,23 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     // Capture logits before the selected token is decoded and overwrites the output slot.
     log_token_selection_trace(engine, engine->tokens_generated + 1, new_token_id);
 #endif
+    // Validate sampler output before any vocabulary lookup or decode. A null or
+    // out-of-range ID is a native generation failure, never an EOG token.
+    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
+    const int32_t vocabulary_size = llama_vocab_n_tokens(vocab);
+    if (!local_llm::is_valid_token_id(new_token_id, vocabulary_size)) {
+        LOGE("Sampler returned invalid token ID: token=%d,vocabSize=%d,runId=%s",
+             new_token_id, vocabulary_size, engine->inference_run_id.c_str());
+        engine->last_finish_reason = 3; // ERROR
+        engine->generation_finished = true;
+        return finish_native_generation(env, engine);
+    }
     common_sampler_accept(engine->sampler, new_token_id, true);
 
     // EOG is a control token, not an assistant token to evaluate into the KV cache.
     // Stop before llama_decode(), matching llama.cpp's reference generation loop.
     // Decoding EOG needlessly advances recurrent/cache state and performs a full
     // backend step after the model has already decided to finish.
-    const struct llama_vocab* vocab = llama_model_get_vocab(engine->model);
     if (llama_vocab_is_eog(vocab, new_token_id)) {
         const int64_t stop_step_duration_us = llama_time_us() - token_step_start_us;
         LOGI("Generated EOG token: %d (excluded from decode and visible token count; stop_step_ms=%.3f)",

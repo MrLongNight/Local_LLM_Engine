@@ -7,6 +7,15 @@
 
 namespace local_llm {
 
+// Reject sentinel/out-of-range sampler results before vocabulary lookups or
+// decode. This is intentionally independent of llama.cpp types for host tests.
+template <typename Token>
+inline bool is_valid_token_id(Token token, std::int64_t vocabulary_size) noexcept {
+    return vocabulary_size > 0 &&
+           token >= 0 &&
+           static_cast<std::int64_t>(token) < vocabulary_size;
+}
+
 // Exact token prefix shared by the last evaluated sequence and the new prompt.
 template <typename Token>
 inline std::size_t common_prefix_length(
