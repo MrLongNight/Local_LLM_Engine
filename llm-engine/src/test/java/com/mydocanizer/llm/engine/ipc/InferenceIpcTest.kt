@@ -614,6 +614,65 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun inferenceUsesRememberedModelsAbortGraceWhenRequestHasNoOverride() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterFirstToken.set(true)
+        }
+        val clientTimeout = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 1_000L,
+            firstTokenMs = 1_500L,
+            interTokenMs = 1_500L,
+            totalInferenceMs = 3_000L,
+            abortGracePeriodMs = 20L,
+            reconnectMs = 2_000L
+        )
+        val rememberedTimeout = clientTimeout.copy(abortGracePeriodMs = 250L)
+        val modelFile = File.createTempFile("remembered_timeout", ".gguf").apply {
+            writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46) + ByteArray(96))
+            deleteOnExit()
+        }
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = clientTimeout,
+            processLivenessCheck = { !fakeService.isKilled.get() }
+        )
+
+        try {
+            val loaded = client.loadModel(
+                ModelSource.FilePath(modelFile.absolutePath),
+                EngineConfig(timeoutConfig = rememberedTimeout)
+            )
+            assertTrue("Model load with remembered timeout policy must succeed", loaded.isSuccess)
+
+            val tokenReceived = AtomicBoolean(false)
+            val stream = launch {
+                client.streamChat(InferenceRequest.single("remembered model timeout policy")).collect {
+                    if (it is InferenceEvent.Token) tokenReceived.set(true)
+                }
+            }
+            withTimeout(1_000L) {
+                while (!tokenReceived.get()) delay(5L)
+            }
+
+            client.cancelInference()
+            delay(60L)
+            assertFalse(
+                "The loaded model's 250 ms grace must override the client's 20 ms default",
+                fakeService.isKilled.get()
+            )
+            withTimeout(1_000L) {
+                while (!fakeService.isKilled.get()) delay(5L)
+            }
+            assertTrue("The remembered model grace must still escalate after expiry", fakeService.isKilled.get())
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun followUpInferenceSucceedsAfterCooperativeCancellation() = runBlocking {
         val fakeService = FakeInferenceService().apply {
             hangAfterFirstToken.set(true)
