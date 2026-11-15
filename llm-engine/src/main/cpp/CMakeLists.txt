@@ -1350,6 +1350,44 @@ void vk_perf_logger::print_timings(bool force) {
     endif()
     message(STATUS "LocalLLM: verified Q4_K decode selector -> Q8_1 pipeline -> explicit fallback -> runtime path evidence")
 
+    # Verify every quantization-specific override remains scoped to its intended
+    # tensor type and batch shape. These are source-overlay guards, not device
+    # runtime proof; the latter remains in the P0-02 acceptance matrix.
+    set(_q4k_prefill_scope [=[
+    const bool local_llm_force_q4k_prefill_f16 =
+        src0->type == GGML_TYPE_Q4_K && ne11 > 1 &&
+        local_llm_vulkan_dmmv_workgroup_override() == 6;]=])
+    set(_q4k_decode_batch1_scope [=[
+    } else if (src0->type == GGML_TYPE_Q4_K && ne11 == 1 &&
+               (local_llm_quant_override == 3 || local_llm_mali_q4k_auto)) {]=])
+    set(_q5k_decode_scope [=[
+    } else if (src0->type == GGML_TYPE_Q5_K && ne11 == 1 && local_llm_quant_override == 4) {]=])
+    set(_q6k_decode_scope [=[
+    } else if (src0->type == GGML_TYPE_Q6_K && ne11 == 1 && local_llm_quant_override == 5) {]=])
+    set(_mali_auto_scope [=[
+    const bool local_llm_mali_q4k_auto =
+        local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;]=])
+    set(_mmvq_force_scope [=[
+    const bool local_llm_mmvq_force_requested =
+        local_llm_quant_override == 7 &&
+        ctx->device->integer_dot_product &&
+        src1->type == GGML_TYPE_F32 &&
+        ggml_is_contiguous(src1) && !y_non_contig &&
+        (ne11 * ne10) % 4 == 0 &&
+        (swap_inputs || ggml_vk_src1_prec_allows_q8(dst));]=])
+    foreach(_scope_name IN ITEMS
+            _q4k_prefill_scope _q4k_decode_batch1_scope _q5k_decode_scope
+            _q6k_decode_scope _mali_auto_scope _mmvq_force_scope)
+        string(FIND "${_vulkan_contents}" "${${_scope_name}}" _scope_position)
+        if(_scope_position LESS 0)
+            message(FATAL_ERROR "LocalLLM: Vulkan quantization override scope changed: ${_scope_name}")
+        endif()
+    endforeach()
+    if(NOT _vulkan_contents MATCHES "ggml_vk_should_use_mmvq\\(")
+        message(FATAL_ERROR "LocalLLM: pinned upstream MMVQ heuristic disappeared from AUTO path.")
+    endif()
+    message(STATUS "LocalLLM: verified Q4_K prefill/batch-1, Q5_K/Q6_K, Mali AUTO and guarded MMVQ override scopes")
+
     set(LOCAL_LLM_PATCHED_VULKAN_CPP "${_patched_cpp}" PARENT_SCOPE)
 
     # Current upstream only uses this package lookup as a header-package
