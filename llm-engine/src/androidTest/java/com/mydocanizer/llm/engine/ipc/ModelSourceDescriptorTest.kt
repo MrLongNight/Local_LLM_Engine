@@ -329,24 +329,19 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             Process.killProcess(killedPid)
 
             // Process.killProcess() returns before Android delivers onServiceDisconnected.
-            // Do not race the dead Binder proxy: wait until the client has rebound and
-            // automatically restored this exact provider-backed model in the new process.
+            // Wait for a different Binder process before issuing the next request; this
+            // EngineConfig intentionally uses LAZY reload, so generateChat() performs the
+            // provider-URI restore after the replacement process is connected.
             val recoveryDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
             while (SystemClock.elapsedRealtime() < recoveryDeadline) {
                 val recoveredPid = client.remotePid.value
-                val recoveredModel = client.currentModel.value
-                if (recoveredPid != null &&
-                    recoveredPid != killedPid &&
-                    recoveredModel?.path == secondUri.toString()
-                ) break
+                if (recoveredPid != null && recoveredPid != killedPid) break
                 SystemClock.sleep(PROCESS_POLL_INTERVAL_MS)
             }
             assertTrue(
-                "Client must reconnect and restore the original provider URI before inference; " +
-                    "state=${client.state.value},pid=${client.remotePid.value},model=${client.currentModel.value?.path}",
-                client.remotePid.value != null &&
-                    client.remotePid.value != killedPid &&
-                    client.currentModel.value?.path == secondUri.toString()
+                "Client must bind a replacement inference process before retrying; " +
+                    "state=${client.state.value},pid=${client.remotePid.value}",
+                client.remotePid.value != null && client.remotePid.value != killedPid
             )
             val recoveredInference = client.generateChat(
                 InferenceRequest.single("Reply with one short word after recovery.")
@@ -354,6 +349,11 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             )
             assertTrue("Recovery must reopen the original provider URI after service death: ${recoveredInference.exceptionOrNull()}",
                 recoveredInference.isSuccess)
+            assertEquals(
+                "Lazy recovery must preserve the original provider URI as the active model",
+                secondUri.toString(),
+                client.currentModel.value?.path
+            )
             val recoveredPid = client.remotePid.value
                 ?: throw AssertionError("Inference service PID missing after descriptor recovery")
             assertTrue("Service death must create a replacement process", recoveredPid != killedPid)
