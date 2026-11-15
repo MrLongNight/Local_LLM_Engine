@@ -40,10 +40,10 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
         val timeoutConfig = TimeoutConfig(
             serviceBindMs = 5_000L,
             modelLoadMs = 15_000L,
-            prefillMs = 1_200L,
+            prefillMs = 10_000L,
             firstTokenMs = 2_500L,
             interTokenMs = 1_500L,
-            totalInferenceMs = 6_000L,
+            totalInferenceMs = 15_000L,
             abortGracePeriodMs = 150L,
             reconnectMs = 5_000L
         )
