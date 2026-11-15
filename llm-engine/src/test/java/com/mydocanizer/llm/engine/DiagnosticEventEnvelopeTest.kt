@@ -77,4 +77,21 @@ class DiagnosticEventEnvelopeTest {
 
         assertTrue(line.contains("correlationType=none,correlationId=none"))
     }
+
+    @Test
+    fun zeroPidIsRepresentedForHostAndRobolectricTestProcesses() {
+        val line = DiagnosticEventEnvelope.format(
+            timestamp = "timestamp",
+            level = "INFO",
+            tag = "engine",
+            event = "TEST_EVENT",
+            details = "",
+            pid = 0,
+            sequence = 1
+        )
+
+        assertTrue(line.contains("eventId=0-1"))
+        assertTrue(line.contains("pid=0"))
+    }
+
 }

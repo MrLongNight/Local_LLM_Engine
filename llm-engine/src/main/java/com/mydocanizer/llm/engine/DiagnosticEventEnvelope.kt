@@ -31,7 +31,7 @@ internal object DiagnosticEventEnvelope {
         pid: Int,
         sequence: Long
     ): String {
-        require(pid > 0) { "Diagnostic PID must be positive." }
+        require(pid >= 0) { "Diagnostic PID must be non-negative." }
         require(sequence > 0L) { "Diagnostic event sequence must be positive." }
 
         val normalizedDetails = details
