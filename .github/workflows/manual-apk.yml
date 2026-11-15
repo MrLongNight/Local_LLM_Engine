@@ -204,18 +204,19 @@ jobs:
           ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
         run: |
           set -euo pipefail
-          # The CPU/Vulkan acceptance gate requires numeric token-selection traces.
-          # They are restricted to synthetic benchmark runs and remain disabled in release builds.
-          gradle_args=("-PlocalLlmSyntheticTokenDiagnostics=true")
+          # The standard installable Debug APK must exercise normal inference, including
+          # Vulkan backend sampling. Synthetic numeric token traces are opt-in only and
+          # stay disabled in the ordinary app build.
+          gradle_args=("-PlocalLlmSyntheticTokenDiagnostics=false")
           if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
             echo "Building separate Vulkan per-operation profiler APK."
             gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
           else
-            echo "Building profiler-disabled APK for normal use and throughput comparisons."
+            echo "Building standard Debug APK with Vulkan backend sampling enabled; token diagnostics and profiler disabled."
           fi
           gradle --no-daemon "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
 
-      - name: Verify explicit profiler BuildConfig selection
+      - name: Verify standard Debug BuildConfig selection
         shell: bash
         env:
           ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
@@ -228,8 +229,44 @@ jobs:
           build_config="$(find llm-engine/build/generated -type f -name BuildConfig.java -print -quit)"
           test -n "$build_config"
           grep -Eq "VULKAN_PERF_PROFILER_ENABLED[[:space:]]*=[[:space:]]*${expected};" "$build_config"
-          grep -Eq "TEXT_DIAGNOSTICS_ENABLED[[:space:]]*=[[:space:]]*true;" "$build_config"
-          echo "Verified VULKAN_PERF_PROFILER_ENABLED=${expected} and TEXT_DIAGNOSTICS_ENABLED=true in ${build_config}"
+          grep -Eq "TEXT_DIAGNOSTICS_ENABLED[[:space:]]*=[[:space:]]*false;" "$build_config"
+          echo "Verified VULKAN_PERF_PROFILER_ENABLED=${expected} and TEXT_DIAGNOSTICS_ENABLED=false in ${build_config}"
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          import shlex
+
+          jni_entries = []
+          for database in glob.glob("llm-engine/.cxx/**/compile_commands.json", recursive=True):
+              with open(database, encoding="utf-8") as stream:
+                  entries = json.load(stream)
+              jni_entries.extend(
+                  entry for entry in entries
+                  if os.path.basename(entry.get("file", "")) == "local_llm_engine_jni.cpp"
+              )
+
+          if not jni_entries:
+              raise SystemExit("No native JNI compile entry found; cannot verify Vulkan backend sampling build mode")
+
+          for entry in jni_entries:
+              command = entry.get("command")
+              args = shlex.split(command) if command else entry.get("arguments", [])
+              if any(
+                  arg == "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS" or
+                  arg.startswith("-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=")
+                  for arg in args
+              ):
+                  raise SystemExit(
+                      "Standard Debug JNI compilation unexpectedly enables LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS; "
+                      "Vulkan backend sampling would be disabled"
+                  )
+
+          print(
+              "Verified the standard Debug JNI build has TEXT_DIAGNOSTICS disabled; "
+              "the Vulkan backend-sampling code path is compiled in."
+          )
+          PY
 
       - name: Verify instrumentation test APK exists
         shell: bash
