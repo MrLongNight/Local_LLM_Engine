@@ -396,7 +396,7 @@ class BackendBenchmarkPlanTest {
         assertTrue(firstVulkan > 0)
         assertTrue(profiles.take(firstVulkan).all { it.backend == BackendPreference.CPU })
         assertTrue(profiles.drop(firstVulkan).all { it.backend == BackendPreference.VULKAN })
-        assertEquals(16, BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
+        assertEquals(32, BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
         val gatePrompt = BackendBenchmarkPlan.correctnessGatePrompt()
         assertTrue(gatePrompt.contains("2, 4, 6"))
         assertTrue(gatePrompt.contains("320"))
