@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.ui.ModelLoadProgressIndicator
+import com.example.ui.chat.ModelLoadProgressIndicator
 
 @Composable
 internal fun ImportProgressSection(
