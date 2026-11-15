@@ -88,6 +88,7 @@ class CorrectnessGatePlanTest {
         val result = CorrectnessGatePlan.evaluate(vulkan, cpu, expectedBackend = "Vulkan")
         assertFalse(result.passed)
         assertEquals("CPU_TRACE_LENGTH_MISMATCH", result.reason)
+        assertEquals(24, result.comparedSteps)
     }
 
     @Test
