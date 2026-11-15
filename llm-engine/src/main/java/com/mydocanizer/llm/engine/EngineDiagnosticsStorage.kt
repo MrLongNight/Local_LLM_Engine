@@ -140,6 +140,10 @@ internal object EngineDiagnosticsStorage {
                 Log.w(TAG, "Could not remove stale diagnostic process log: ${stale.name}")
             }
         }
+        // Also clean files created by earlier, unbounded diagnostic builds. Merely
+        // limiting future appends would otherwise leave multi-megabyte legacy logs
+        // in the next export.
+        retained.forEach(::trimLogFileIfNeeded)
     }
 
     internal fun diagnosticsDirectory(context: Context): File =
