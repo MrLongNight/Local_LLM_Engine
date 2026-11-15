@@ -5,6 +5,8 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.ArrayDeque
 
@@ -42,7 +44,9 @@ internal object SafGgufFolderScanner {
             pending.addLast(PendingDirectory(rootId, 0))
 
             var visitedDocuments = 0
+            val coroutineContext = currentCoroutineContext()
             while (pending.isNotEmpty()) {
+                coroutineContext.ensureActive()
                 val directory = pending.removeFirst()
                 if (!visited.add(directory.documentId)) continue
                 require(directory.depth <= MAX_DEPTH) {
@@ -67,6 +71,7 @@ internal object SafGgufFolderScanner {
                     val mimeColumn = it.getColumnIndexOrThrow(Document.COLUMN_MIME_TYPE)
 
                     while (it.moveToNext()) {
+                        coroutineContext.ensureActive()
                         visitedDocuments++
                         require(visitedDocuments <= MAX_DOCUMENTS) {
                             "Der Ordner enthält mehr als $MAX_DOCUMENTS Einträge; Import aus Sicherheitsgründen abgebrochen."

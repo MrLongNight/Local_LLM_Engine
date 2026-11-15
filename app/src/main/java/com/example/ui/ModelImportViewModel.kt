@@ -63,6 +63,7 @@ abstract class ModelImportViewModel(
             var skipped = 0
             val failures = mutableListOf<String>()
             try {
+                currentCoroutineContext().ensureActive()
                 val resolver = getApplication<Application>().contentResolver
                 val hasGrant = resolver.persistedUriPermissions.any {
                     it.uri == treeUri && it.isReadPermission
@@ -75,12 +76,14 @@ abstract class ModelImportViewModel(
                 }
 
                 val documents = SafGgufFolderScanner.scan(getApplication(), treeUri)
+                currentCoroutineContext().ensureActive()
                 if (documents.isEmpty()) {
                     _statusMessage.value = "Im ausgewählten Ordner wurden keine .gguf-Dateien gefunden."
                     return@launch
                 }
 
                 for ((index, document) in documents.withIndex()) {
+                    currentCoroutineContext().ensureActive()
                     try {
                         ModelLibrary.importFromSaf(
                             getApplication(),
@@ -145,6 +148,7 @@ abstract class ModelImportViewModel(
             val failures = mutableListOf<String>()
             try {
                 for ((index, uri) in uris.withIndex()) {
+                    currentCoroutineContext().ensureActive()
                     val displayName = runCatching {
                         getApplication<Application>().contentResolver.query(
                             uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
@@ -156,6 +160,8 @@ abstract class ModelImportViewModel(
                         }
                     }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Modell ${index + 1}.gguf"
 
+                    currentCoroutineContext().ensureActive()
+
                     if (!displayName.endsWith(".gguf", ignoreCase = true)) {
                         skipped++
                         failures += "$displayName: keine GGUF-Datei"
@@ -163,6 +169,7 @@ abstract class ModelImportViewModel(
                     }
 
                     try {
+                        currentCoroutineContext().ensureActive()
                         val resolver = getApplication<Application>().contentResolver
                         val hasGrant = resolver.persistedUriPermissions.any {
                             it.uri == uri && it.isReadPermission
@@ -173,6 +180,7 @@ abstract class ModelImportViewModel(
                                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                             )
                         }
+                        currentCoroutineContext().ensureActive()
                         withContext(Dispatchers.IO) {
                             ModelLibrary.importFromSaf(getApplication(), uri, displayName)
                         }
