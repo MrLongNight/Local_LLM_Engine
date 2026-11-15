@@ -5,8 +5,8 @@ import android.net.Uri
 import android.util.Log
 
 /**
- * Diagnostic logger for Local LLM Engine lifecycle and inference metrics.
- * Does not store chat prompts or sensitive user text.
+ * Diagnostic logger for Local LLM Engine lifecycle and inference. Full Debug
+ * diagnostic builds intentionally persist prompt and model-output text for P0 analysis.
  */
 object EngineDiagnostics {
     private const val TAG = "EngineDiagnostics"
@@ -14,7 +14,7 @@ object EngineDiagnostics {
     /**
      * Each process writes a separate file in shared app-private storage. This makes
      * :inference events exportable from the main process even after a service crash.
-     * Prompt and response text are not stored.
+     * Full Debug diagnostic builds include prompt and response text.
      */
     fun initialize(context: Context) = EngineDiagnosticsStorage.initialize(context)
 
