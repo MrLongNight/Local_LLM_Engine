@@ -6,14 +6,10 @@ package com.example.ui
  */
 internal object CorrectnessGatePlan {
     /**
-     * The gate decodes only [BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS] tokens. Tokenizers that
-     * emit every digit as its own token (Qwen, LFM, ...) need 23+ tokens for
-     * "322, 324, 326, 328, 330", so the token budget cuts the answer mid-number. A budget-truncated
-     * answer is accepted when it is a long enough prefix of the expected answer.
+     * The gate budgets 32 generated tokens so digit-per-token tokenizers (Qwen, LFM, ...)
+     * can finish the complete five-number answer. A truncated prefix is never accepted as
+     * a successful correctness result.
      */
-    // Require at least three complete sequence values; a two-value prefix can
-    // otherwise hide an early EOS or a stalled/blank remainder of the token budget.
-    private const val MIN_TRUNCATED_ANSWER_CHARS = "322,324,326".length
 
     data class Candidate(val tokenId: Int, val logit: Double)
     data class TokenStep(val step: Int, val selectedId: Int, val top5: List<Candidate>)
@@ -125,8 +121,6 @@ internal object CorrectnessGatePlan {
         return when {
             normalized.isEmpty() -> "EMPTY"
             normalized == expected -> "EXACT_SEQUENCE"
-            expected.startsWith(normalized) && normalized.length < MIN_TRUNCATED_ANSWER_CHARS ->
-                "PREFIX_TOO_SHORT"
             expected.startsWith(normalized) -> "EXPECTED_PREFIX"
             normalized.startsWith(expected) -> "EXTRA_SUFFIX"
             normalized.any { !it.isDigit() && it != ',' } -> "NON_SEQUENCE_TEXT"
@@ -158,13 +152,10 @@ internal object CorrectnessGatePlan {
 
         val normalizedOutput = run.output.filterNot { it.isWhitespace() }
         val expectedOutput = BackendBenchmarkPlan.CORRECTNESS_GATE_EXPECTED.joinToString(",")
-        // Exact answer, or an answer cut by the 16-token budget. Extra numbers, explanatory text,
-        // wrong digits and a too-short stub are still rejected.
+        // Require the complete expected answer. A token-budget-truncated prefix,
+        // even when numerically correct so far, is not a completed correctness run.
         val isExactAnswer = normalizedOutput == expectedOutput
-        val isBudgetTruncatedPrefix = normalizedOutput.length >= MIN_TRUNCATED_ANSWER_CHARS &&
-            normalizedOutput.length < expectedOutput.length &&
-            expectedOutput.startsWith(normalizedOutput)
-        if (!isExactAnswer && !isBudgetTruncatedPrefix) {
+        if (!isExactAnswer) {
             return "EXPECTED_OUTPUT_MISMATCH"
         }
         if (maxConsecutiveRepeat(steps) > 8) return "TOKEN_REPEAT_OVER_8"
