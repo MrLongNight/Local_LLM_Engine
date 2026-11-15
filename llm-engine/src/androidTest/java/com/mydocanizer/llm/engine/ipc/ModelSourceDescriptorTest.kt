@@ -148,6 +148,10 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
                 followupResult.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP ||
                     followupResult.finishReason == com.mydocanizer.llm.engine.FinishReason.MAX_TOKENS
             )
+            assertTrue(
+                "Provider-backed inference must report the native execution identity",
+                followupResult.nativeRunId.isNotBlank()
+            )
 
             val unloaded = client.unloadModel()
             assertTrue("Unloading must release the service-owned descriptor: ${unloaded.exceptionOrNull()}",
