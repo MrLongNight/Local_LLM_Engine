@@ -221,9 +221,9 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
     // llama.cpp reports Vulkan capabilities and detailed backend diagnostics at DEBUG.
     // Full diagnostic Debug builds retain all levels; normal builds keep the compact
     // capability line while excluding noisy per-operation DEBUG messages.
+#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     const bool is_vulkan_capability_line =
         level == GGML_LOG_LEVEL_DEBUG && std::strstr(text, "ggml_vulkan:") != nullptr;
-#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     if (level < GGML_LOG_LEVEL_INFO && !is_vulkan_capability_line) return;
 #endif
 
@@ -311,6 +311,7 @@ static void log_native_info_message(const std::string& message) {
 
 // The native logger API is C-string based. Render embedded NUL bytes explicitly so
 // debug traces preserve their position instead of silently truncating at the first NUL.
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
 static void log_native_text_trace(const std::string& message) {
     std::string escaped;
     escaped.reserve(message.size());
@@ -320,6 +321,7 @@ static void log_native_text_trace(const std::string& message) {
     }
     log_native_info_message(escaped);
 }
+#endif
 
 // Force pending stdio bytes into the shared file so the app process can read the
 // native log immediately after export or an inference terminal event. This only
