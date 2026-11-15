@@ -39,7 +39,7 @@ import kotlinx.coroutines.withContext
 abstract class ConfigurationSmokeViewModel(
     application: Application,
     engine: LocalLlmEngine
-) : VulkanDiagnosticsViewModel(application, engine) {
+) : BenchmarkDiagnosticsViewModel(application, engine) {
 
     private val _isConfigSmokeTesting = MutableStateFlow(false)
     val isConfigSmokeTesting: StateFlow<Boolean> = _isConfigSmokeTesting.asStateFlow()
