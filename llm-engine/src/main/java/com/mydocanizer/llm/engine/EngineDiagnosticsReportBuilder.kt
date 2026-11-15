@@ -4,9 +4,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Builds the bounded, privacy-safe diagnostics export from structured log rows.
- * Resource aggregation and event prioritization live here; storage and file
- * ownership are handled by [EngineDiagnosticsStorage].
+ * Builds a structured diagnostics overview and, in full diagnostic Debug builds,
+ * appends every original log row without filtering or truncation. Resource
+ * aggregation lives here; file ownership is handled by [EngineDiagnosticsStorage].
  */
 internal object EngineDiagnosticsReportBuilder {
     private val timestampPrefix = Regex("""^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}""")
