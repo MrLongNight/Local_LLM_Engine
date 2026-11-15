@@ -78,8 +78,8 @@ abstract class ConfigurationSmokeViewModel(
             Runtime.getRuntime().availableProcessors(),
             activeBackend = model.activeBackend
         )
-        if (profiles.size < 2) {
-            _errorMessage.value = "Keine abweichenden Testprofile für diese Konfiguration gefunden."
+        if (profiles.isEmpty()) {
+            _errorMessage.value = "Kein Vulkan-Diagnoseprofil verfügbar."
             return
         }
 
@@ -198,7 +198,7 @@ abstract class ConfigurationSmokeViewModel(
                     appendLine("Modell: " + model.name + " (" + model.sizeMb.toInt() + " MB)")
                     appendLine("Backend: " + (confirmedBackend ?: "nicht bestätigt"))
                     appendLine("Kontext: " + originalConfig.contextSize + "; GPU-Layer: " + originalConfig.gpuLayers)
-                    appendLine("4 Warmup-Tokens + 16 Mess-Tokens; Temperatur 0; Top-P 1.")
+                    appendLine("Ein Vulkan-Lauf mit 4 Warmup-Tokens + 16 Mess-Tokens; Temperatur 0; Top-P 1; vollständiger GPU-Offload angefordert.")
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: " + stoppedReason)
                     append("Restore-Status steht im Diagnoseexport.")
@@ -237,9 +237,7 @@ abstract class ConfigurationSmokeViewModel(
         val streamedOutput = StringBuilder()
         var cancelledPartialText: String? = null
         var failedPartialText: String? = null
-        val sequence = (1..160).joinToString(", ") { (it * 2).toString() }
-        val prompt = "Analysiere diese Zahlenfolge und gib die nächsten fünf geraden Zahlen aus. " +
-            "Antworte ausschließlich im Format ZAHL, ZAHL, ZAHL, ZAHL, ZAHL. Zahlenfolge: " + sequence
+        val prompt = "Copy exactly this text and output nothing else: 322, 324, 326, 328, 330"
 
         try {
             engine.streamChat(
