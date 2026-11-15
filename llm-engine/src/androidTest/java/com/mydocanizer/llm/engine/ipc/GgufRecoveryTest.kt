@@ -219,6 +219,27 @@ class GgufRecoveryTest : InferenceServiceProcessTestBase() {
             )
             assertEquals("The same model source must remain active after follow-up",
                 modelFile.absolutePath, client.currentModel.value?.path)
+
+            // A second request on the same recovered process verifies that the first
+            // response did not leave stale sampler/KV/terminal state behind.
+            val repeated = withTimeout(recoveryTimeoutConfig.totalInferenceMs + 5_000L) {
+                client.generateChat(
+                    InferenceRequest.single(
+                        userPrompt = "Give a brief greeting.",
+                        maxPredictTokens = 12
+                    ).copy(timeoutConfig = recoveryTimeoutConfig)
+                )
+            }
+            assertTrue("A consecutive inference must also succeed: ${repeated.exceptionOrNull()}",
+                repeated.isSuccess)
+            val repeatedResult = repeated.getOrThrow()
+            assertTrue("Consecutive inference must generate visible output",
+                repeatedResult.tokensGenerated > 0 && repeatedResult.text.isNotBlank())
+            assertNotEquals(
+                "Each independent inference must retain its own native run identity",
+                followupResult.nativeRunId,
+                repeatedResult.nativeRunId
+            )
         } finally {
             client.close()
             directBinding?.let { binding ->
