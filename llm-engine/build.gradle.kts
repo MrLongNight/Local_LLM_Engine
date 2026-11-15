@@ -3,8 +3,9 @@ plugins {
 }
 
 // Profiler builds are intentionally opt-in: timestamp queries perturb throughput.
-// The legacy-named localLlmSyntheticTokenDiagnostics property now enables full
-// prompt/token/response traces in Debug builds and defaults on for P0 diagnosis.
+// Explicit opt-in for numeric token-selection diagnostics. Disabled by default:
+ // normal diagnostic runs must keep backend sampling active and must not persist
+ // full prompts, token pieces or generated responses.
 // Release builds explicitly keep every text-diagnostic compile flag disabled.
 val localLlmVulkanPerfProfiler = providers.gradleProperty("localLlmVulkanPerfProfiler")
     .map { it.equals("true", ignoreCase = true) }
@@ -20,7 +21,7 @@ val localLlmSyntheticTokenDiagnostics = providers.gradleProperty("localLlmSynthe
             )
         }
     }
-    .getOrElse(true)
+    .getOrElse(false)
 
 android {
     namespace = "com.mydocanizer.llm.engine"
