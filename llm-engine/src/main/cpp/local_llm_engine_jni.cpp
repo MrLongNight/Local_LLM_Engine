@@ -223,7 +223,9 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
     // only its compact device-capability line; do not enable noisy per-op DEBUG.
     const bool is_vulkan_capability_line =
         level == GGML_LOG_LEVEL_DEBUG && std::strstr(text, "ggml_vulkan:") != nullptr;
+#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     if (level < GGML_LOG_LEVEL_INFO && !is_vulkan_capability_line) return;
+#endif
 
     int android_priority = ANDROID_LOG_INFO;
     switch (level) {
@@ -262,6 +264,7 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
         if (line_length > 0) {
             const long current_size = std::ftell(g_native_log_file);
             const long incoming_size = static_cast<long>(line_length) + 64L;
+#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
             if (current_size >= 0 && current_size + incoming_size > MAX_NATIVE_LOG_FILE_BYTES) {
                 std::fflush(g_native_log_file);
                 if (ftruncate(fileno(g_native_log_file), 0) == 0) {
@@ -271,7 +274,12 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
                         timestamp);
                 }
             }
+#endif
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+            const size_t safe_length = line_length;
+#else
             const size_t safe_length = std::min(line_length, static_cast<size_t>(4096));
+#endif
             std::fprintf(
                 g_native_log_file, "%s [NATIVE] %.*s\n",
                 timestamp, static_cast<int>(safe_length), cursor
@@ -484,8 +492,8 @@ struct EngineInstance {
 
 
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
-// Diagnostic prompt metadata is deliberately content-free. Never persist the
-// rendered prompt, chat-template source, detokenized prompt or token-piece text.
+// Explicit Debug diagnostics retain full model metadata and text traces so
+// template, tokenization and generated-output failures can be reconstructed.
 static std::string read_model_metadata_value(const llama_model* model, const char* key) {
     if (model == nullptr || key == nullptr) return "unknown";
     char value[256] = {};
@@ -497,7 +505,6 @@ static std::string read_model_metadata_value(const llama_model* model, const cha
             character = '_';
         }
     }
-    if (normalized.size() > 96) normalized.resize(96);
     return normalized.empty() ? "empty" : normalized;
 }
 
@@ -536,8 +543,8 @@ static void log_prompt_metadata(
     log_native_info_message(metadata.str());
 }
 
-// Keep only numeric token IDs/logits for the explicitly enabled synthetic
-// correctness gate. Token pieces are reversible text and must never be logged.
+// Capture numeric token IDs/logits for the correctness gate. The same diagnostic
+// build also records input, rendered prompt and visible token pieces below.
 static void log_token_selection_trace(
         EngineInstance* engine, int32_t step_index, llama_token selected_token) {
     if (engine == nullptr || engine->context == nullptr || engine->model == nullptr) return;
@@ -763,6 +770,13 @@ static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {
 }
 
 static jstring finish_native_generation(JNIEnv* env, EngineInstance* engine) {
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    if (engine != nullptr && !engine->assistant_ss.str().empty()) {
+        log_native_info_message(
+            "LOCAL_LLM_TEXT_TRACE - runId=" + engine->inference_run_id +
+            ",kind=FINAL_ASSISTANT_OUTPUT\n" + engine->assistant_ss.str());
+    }
+#endif
     jstring final_piece = flush_incomplete_utf8(env, engine);
     flush_native_log_file();
     return final_piece;
@@ -1688,6 +1702,18 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         msg.content = std::move(content_utf8);
         messages.push_back(std::move(msg));
     }
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    {
+        std::ostringstream input_trace;
+        input_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+                    << ",kind=INPUT_MESSAGES\n";
+        for (size_t i = 0; i < messages.size(); ++i) {
+            input_trace << "--- message " << i << " role=" << messages[i].role << " ---\n"
+                        << messages[i].content << "\n";
+        }
+        log_native_info_message(input_trace.str());
+    }
+#endif
 
     std::string full_prompt;
     common_chat_prompt rendered_prompt;
@@ -1824,6 +1850,23 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
              removed_history_messages);
     }
     engine->chat_msgs = messages;
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    {
+        std::ostringstream rendered_trace;
+        rendered_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+                       << ",kind=RENDERED_PROMPT\n" << full_prompt;
+        log_native_info_message(rendered_trace.str());
+
+        std::ostringstream token_trace;
+        token_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+                    << ",kind=PROMPT_TOKEN_IDS\n";
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            if (i != 0) token_trace << ' ';
+            token_trace << tokens[i];
+        }
+        log_native_info_message(token_trace.str());
+    }
+#endif
 
     const int64_t tokenization_duration_ms = (llama_time_us() - tokenization_start_us) / 1000;
     engine->last_prompt_tokenization_us = tokenization_duration_ms * 1000;
@@ -2177,6 +2220,15 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     const std::string valid_output =
         local_llm::normalize_utf8_incremental(token_piece, engine->cached_token_chars);
     const int64_t piece_duration_us = llama_time_us() - piece_start_us;
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    {
+        std::ostringstream token_piece_trace;
+        token_piece_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
+                          << ",kind=TOKEN_PIECE,step=" << engine->tokens_generated
+                          << ",tokenId=" << new_token_id << "\n" << valid_output;
+        log_native_info_message(token_piece_trace.str());
+    }
+#endif
     const int64_t token_total_duration_us = llama_time_us() - token_step_start_us;
     if (engine->tokens_generated <= 4 || engine->tokens_generated % 8 == 0) {
         std::ostringstream metric;
