@@ -292,7 +292,7 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 **Evidence (2026-11-15):** The app now has dedicated `navigation`, `chat`, `modelimport`, `settings` and `diagnostics` packages. Screens, `AppTab`, feature ViewModels, model-library/import state, lifecycle/benchmark ViewModels and benchmark plans/policies were moved in commits `f76e6f5` and `964ba94`. The shared `EngineViewModel` remains the app facade. The `com.example` namespace and library-internal package organization are still open.
 
-- [ ] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Primary screens and navigation contract were moved in `f76e6f5`; the progress-indicator import was corrected in `e8944f4`; model-card package imports were corrected in `7365270`. The ViewModel/plan package move is in `964ba94`. JVM tests pass in `43676537999`; APK verification is running in `43676409777`.
+- [x] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Screens/navigation moved in `f76e6f5`; progress/model-card imports corrected in `e8944f4` and `7365270`; ViewModels/plans moved in `964ba94`. JVM tests pass in `43676537999`; APK verification is still running in `43676409777`.
 - [ ] Replace `com.example` only after auditing manifests, generated BuildConfig, instrumentation, saved state and deep links.
 - [ ] Organize library internals by lifecycle, model source, memory/resource policy, diagnostics and IPC; keep consumer-facing types separate.
 - [x] Enforce dependency direction `:app → :llm-engine`; the library Gradle module depends only on Android core/coroutines and has no app/UI/benchmark/DMS module dependency.
