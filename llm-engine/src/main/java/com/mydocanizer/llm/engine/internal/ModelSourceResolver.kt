@@ -203,7 +203,7 @@ internal object ModelSourceResolver {
      * then publishes it with an atomic same-filesystem rename. A failed/cancelled copy
      * can therefore never appear as a selectable .gguf model.
      */
-    private suspend fun copyAndPublish(
+    internal suspend fun copyAndPublish(
         targetDir: File,
         displayName: String,
         input: InputStream,

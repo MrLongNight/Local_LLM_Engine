@@ -1,6 +1,9 @@
 package com.mydocanizer.llm.engine.internal
 
 import java.io.File
+import java.io.InputStream
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,4 +59,46 @@ class ModelSourceResolverTest {
             file.delete()
         }
     }
+    @Test
+    fun cancelledSafCopyDeletesItsTemporaryFile() = runBlocking {
+        val targetDir = File.createTempFile("cancelled-import-", "").apply {
+            delete()
+            mkdir()
+        }
+        lateinit var importJob: Job
+        val source = object : InputStream() {
+            private var delivered = false
+
+            override fun read(): Int = -1
+
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                if (delivered) return -1
+                delivered = true
+                importJob.cancel()
+                val header = byteArrayOf(0x47, 0x47, 0x55, 0x46)
+                header.copyInto(buffer, offset)
+                return header.size
+            }
+        }
+
+        try {
+            importJob = launch {
+                ModelSourceResolver.copyAndPublish(
+                    targetDir = targetDir,
+                    displayName = "cancelled.gguf",
+                    input = source
+                )
+            }
+            importJob.join()
+
+            assertTrue("Import job must be cancelled", importJob.isCancelled)
+            assertTrue(
+                "Cancelled import must remove its incomplete .part file",
+                targetDir.listFiles().isNullOrEmpty()
+            )
+        } finally {
+            targetDir.deleteRecursively()
+        }
+    }
+
 }
