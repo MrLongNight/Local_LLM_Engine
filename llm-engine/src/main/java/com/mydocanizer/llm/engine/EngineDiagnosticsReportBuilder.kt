@@ -167,10 +167,124 @@ internal object EngineDiagnosticsReportBuilder {
     private fun compactLine(line: String, maxChars: Int = 300): String =
         if (line.length <= maxChars) line else line.take(maxChars - 18) + " …[gekürzt]"
 
-    internal fun buildCompactReport(
-        lines: List<String>,
-        includeFullDebugTrace: Boolean = BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED
-    ): String {
+    private val eventLinePattern = Regex(
+        """^([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}) \\[(INFO|WARN|ERROR|DEBUG)] \\[([^]]+)] ([A-Z0-9_]+)(?: - (.*))?$"""
+    )
+    private val fieldSeparator = Regex(""",(?=[A-Za-z][A-Za-z0-9_]*=)""")
+
+    private fun readableEventTitle(event: String): String = when (event) {
+        "CONFIG_SMOKE_STARTED" -> "Vulkan-Kurztest gestartet"
+        "CONFIG_SMOKE_RESULT" -> "Vulkan-Kurztest abgeschlossen"
+        "CONFIG_SMOKE_FAILED" -> "Vulkan-Kurztest fehlgeschlagen"
+        "CONFIG_SMOKE_SAFETY_STOP" -> "Vulkan-Kurztest aus Sicherheitsgrund gestoppt"
+        "CONFIG_SMOKE_CANCELLED" -> "Vulkan-Kurztest abgebrochen"
+        "CONFIG_SMOKE_RESTORED" -> "Ursprüngliche Modellkonfiguration wiederhergestellt"
+        "CONFIG_SMOKE_RESTORE_FAILED" -> "Wiederherstellung fehlgeschlagen"
+        "PREFILL_COMPLETED" -> "Prompt-Verarbeitung abgeschlossen"
+        "FIRST_TOKEN_RECEIVED" -> "Erstes Token empfangen"
+        "GENERATION_COMPLETED" -> "Textgenerierung abgeschlossen"
+        "MODEL_LOADED" -> "Modell geladen"
+        "MODEL_LOAD_FAILED" -> "Modell konnte nicht geladen werden"
+        "NATIVE_BACKEND_PREFLIGHT" -> "Backend- und Geräteprüfung"
+        "MODEL_NATIVE_RUNTIME_READY" -> "Native Laufzeit bereit"
+        "INFERENCE_TIMEOUT" -> "Zeitüberschreitung bei der Inferenz"
+        "PROCESS_ABORT_CONFIRMED" -> "Inference-Prozess wurde beendet"
+        else -> event.lowercase(Locale.GERMAN).split('_')
+            .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase(Locale.GERMAN) } }
+    }
+
+    private val readableFieldNames = mapOf(
+        "backend" to "Backend",
+        "activeBackend" to "Aktives Backend",
+        "model" to "Modell",
+        "contextSize" to "Kontextgröße",
+        "contextTokens" to "Kontext-Tokens",
+        "batchSize" to "Batchgröße",
+        "microBatchSize" to "Microbatch",
+        "gpuLayers" to "GPU-Layer",
+        "gpuLayersRequested" to "Angeforderte GPU-Layer",
+        "measuredTokensPerSecond" to "Gemessene Tokens/s",
+        "decodeTokensPerSecond" to "Decode-Tokens/s",
+        "nativeTokensPerSecond" to "Native Tokens/s",
+        "promptTokens" to "Prompt-Tokens",
+        "tokensGenerated" to "Erzeugte Tokens",
+        "finishReason" to "Abschlussgrund",
+        "status" to "Status",
+        "reason" to "Begründung",
+        "prefillMs" to "Prefill-Zeit (ms)",
+        "ttftMs" to "Zeit bis erstes Token (ms)",
+        "loadMs" to "Ladezeit (ms)",
+        "graphSplits" to "Graph-Splits",
+        "cpuNodes" to "CPU-Knoten",
+        "vulkanNodes" to "Vulkan-Knoten",
+        "systemAvailableRamMb" to "Verfügbarer RAM (MB)",
+        "processPssMb" to "Prozess-PSS (MB)"
+    )
+
+    private fun readableFields(details: String): List<String> =
+        details.split(fieldSeparator)
+            .filterNot { field ->
+                val key = field.substringBefore('=')
+                key in setOf("schemaVersion", "eventId", "pid", "correlationType", "correlationId")
+            }
+            .take(16)
+            .map { field ->
+                val key = field.substringBefore('=')
+                val value = field.substringAfter('=', "")
+                val label = readableFieldNames[key]
+                if (label == null || value.isEmpty()) "• $field"
+                else "• $label: $value  [$key=$value]"
+            }
+
+    private fun readableEventLine(line: String, maxChars: Int = 560): String {
+        val match = eventLinePattern.matchEntire(line) ?: return compactLine(line, maxChars)
+        val timestamp = match.groupValues[1]
+        val level = match.groupValues[2]
+        val tag = match.groupValues[3]
+        val event = match.groupValues[4]
+        val details = match.groupValues.getOrElse(5) { "" }
+        val fields = readableFields(details)
+        return buildString {
+            append(timestamp)
+            append("  ")
+            append(level.padEnd(5))
+            append("  ")
+            append(tag)
+            append("  ")
+            append(readableEventTitle(event))
+            append(" [")
+            append(event)
+            append(']')
+            if (fields.isNotEmpty()) {
+                fields.forEach { field ->
+                    appendLine()
+                    append("    ")
+                    append(compactLine(field, maxChars))
+                }
+            }
+        }
+    }
+
+    private fun readableNativeLine(line: String, maxChars: Int = 420): String {
+        val timestamp = timestampPrefix.find(line)?.value ?: ""
+        val body = line.substringAfter(" [NATIVE] ", line).trim()
+        val header = body.substringBefore(" - ").replace(Regex("\\s+"), " ")
+        val details = body.substringAfter(" - ", "")
+        val fields = readableFields(details)
+        return buildString {
+            if (timestamp.isNotBlank()) append(timestamp).append("  ")
+            append("NATIVE  ").append(header)
+            fields.forEach { field ->
+                appendLine()
+                append("    ").append(compactLine(field, maxChars))
+            }
+            if (fields.isEmpty() && details.isNotBlank()) {
+                appendLine().append("    ").append(compactLine(details, maxChars))
+            }
+        }
+    }
+
+    internal fun buildCompactReport(lines: List<String>): String {
         val ordered = lines.sorted()
         val kotlinLines = ordered.filterNot { it.contains("[NATIVE]") }
         val nativeLines = ordered.filter { it.contains("[NATIVE]") }
@@ -179,7 +293,7 @@ internal object EngineDiagnosticsReportBuilder {
             .filterNot { it.contains("RESOURCE_SNAPSHOT") || isPerformanceEvent(it) }
             .filter(::isImportantEvent)
             .takeLast(MAX_EVENT_LINES)
-            .map { compactLine(it) }
+            .map { readableEventLine(it) }
         // These low-frequency metrics are essential to compare Vulkan against CPU:
         // prefill/tokenization/decode times, generated tokens, generation wall time,
         // measured tokens/s, and the backend used for each test. Prompts/responses
@@ -251,7 +365,7 @@ internal object EngineDiagnosticsReportBuilder {
             )
             .distinct()
             .sorted()
-            .map { compactLine(it, 520) }
+            .map { readableEventLine(it, 620) }
 
         val nativeKeywords = listOf(
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
@@ -562,9 +676,12 @@ internal object EngineDiagnosticsReportBuilder {
             .map { (status, count) -> "$status=$count" }
 
         return buildString {
-            appendLine("LOCAL LLM ENGINE – KOMPAKTER DIAGNOSEBERICHT")
+            appendLine("LOCAL LLM ENGINE – DIAGNOSEBERICHT")
+            appendLine("============================================================")
             appendLine("Erstellt: ${Date()}")
-            appendLine("Erfasste Logzeilen: ${ordered.size}; RAM-Samples: ${samples.size}")
+            appendLine("Datenbasis: ${ordered.size} Logeinträge · ${samples.size} RAM-Messpunkte")
+            appendLine("Export: kompakt, nach Themen gruppiert, ohne Prompt-/Antwort-Rohtexte")
+            appendLine("------------------------------------------------------------")
             appendLine("Zeitraum: $periodStart bis $periodEnd")
             appendLine("gdnPolicy=$latestGdnPolicy")
             appendLine("graphBackend=$graphSummary")
@@ -572,77 +689,60 @@ internal object EngineDiagnosticsReportBuilder {
             if (gateStatusSummary.isEmpty()) appendLine("Keine Korrektheits-Gate-Ergebnisse vorhanden.")
             else gateStatusSummary.forEach(::appendLine)
             appendLine()
-            appendLine("[CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE]")
+            appendLine("[1] CPU/VULKAN-TESTS UND PROFILERGEBNISSE")
             if (fullMatrixRows.isEmpty()) {
                 appendLine("Keine Matrix-Profilzeilen vorhanden.")
             } else {
-                fullMatrixRows.forEach { appendLine(compactLine(it, 360)) }
+                fullMatrixRows.forEach { appendLine(readableEventLine(it, 620)) }
             }
-            fullMatrixLifecycleEvents.forEach { appendLine(compactLine(it, 220)) }
+            fullMatrixLifecycleEvents.forEach { appendLine(readableEventLine(it, 480)) }
             if (correctnessGateFailures.isNotEmpty()) {
                 appendLine("Zusätzliche Korrektheits-Gate-Fehlerdetails:")
-                correctnessGateFailures.forEach { appendLine(compactLine(it, 300)) }
+                correctnessGateFailures.forEach { appendLine(readableEventLine(it, 520)) }
             }
             appendLine()
-            appendLine("[VULKAN-LAUFZEITBELEG – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET]")
+            appendLine("[2] VULKAN-LAUFZEIT UND GPU-OFFLOAD")
             if (nativePriorityEvidence.isEmpty()) {
                 appendLine("Keine passende Runtime-Zeile für Mali-Treiberfähigkeiten oder tatsächliche Layer-Zuweisung im nativen Log gefunden.")
             } else {
-                nativePriorityEvidence.forEach(::appendLine)
+                nativePriorityEvidence.map(::readableNativeLine).forEach(::appendLine)
             }
             appendLine()
-            appendLine("[VULKAN-GPU-OPERATIONSPROFIL – LETZTE ${MAX_VULKAN_PROFILE_SNAPSHOTS} GRAPH-SNAPSHOTS]")
+            appendLine("[3] VULKAN-GPU-OPERATIONSPROFIL")
             vulkanOperationSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
-            appendLine("[BACKEND- UND INFERENZ-MESSWERTE]")
+            appendLine("[4] BACKEND- UND INFERENZ-MESSWERTE")
             if (performanceEvents.isEmpty()) {
                 appendLine("Keine abgeschlossenen Backend-/Inferenz-Messwerte gefunden.")
             }
             performanceEvents.forEach(::appendLine)
             appendLine()
-            appendLine("[WICHTIGE EREIGNISSE]")
+            appendLine("[5] WICHTIGE EREIGNISSE / FEHLER")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
             events.forEach(::appendLine)
             appendLine()
             // Keep the most valuable throughput and synchronization evidence ahead
             // of the potentially unbounded number of per-PID/per-phase RAM groups.
-            appendLine("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
+            appendLine("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
             tokenMetricSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
-            appendLine("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
+            appendLine("[7] RAM-ZUSAMMENFASSUNG")
             if (memorySummaries.isEmpty()) appendLine("Keine RAM-Samples gefunden.")
             memorySummaries.forEach(::appendLine)
             appendLine()
-            appendLine("[RAM-ZEITVERLAUF – AUSGEDÜNNT, SPITZEN UND BACKEND-SAMPLES]")
+            appendLine("[8] RAM-ZEITVERLAUF")
             memoryTimeline.forEach(::appendLine)
             appendLine()
-            if (includeFullDebugTrace) {
-                appendLine("[VOLLSTÄNDIGE TEXTTRACES]")
-            } else {
-                appendLine("[TESTAUSGABEN – IM STANDARD-EXPORT AUSGEBLENDET]")
-                appendLine("Prompt-Inhalte, Token-Text und generierte Testantworten werden nicht exportiert.")
-            }
+            appendLine("[ROHTEXT – NICHT EXPORTIERT]")
+            appendLine("Prompts, gerenderte Templates, Token-Text und Modellantworten bleiben aus Datenschutz- und Übersichtsgründen ausgeschlossen.")
             appendLine()
-            appendLine("[NATIVE / VULKAN – AUSZUG DER ZUSAMMENFASSUNG]")
+            appendLine("[9] NATIVE / VULKAN – AUSGEWÄHLTE EREIGNISSE")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
-            nativeSelected.forEach(::appendLine)
-            if (includeFullDebugTrace) {
-                appendLine()
-                appendLine("[VOLLSTÄNDIGES, UNGEFILTERTES PROZESSLOG – ALLE EINTRÄGE IN ZEITREIHENFOLGE]")
-                ordered.forEach(::appendLine)
-            }
+            nativeSelected.map(::readableNativeLine).forEach(::appendLine)
             appendLine()
-            appendLine(
-                if (includeFullDebugTrace) {
-                    "Hinweis: Vollständige Debug-Diagnostik aktiv. Prompts, gerenderte Templates, Token-Auswahl, Token-Texte, Modellantworten und sämtliche Prozesslogzeilen werden unverändert exportiert."
-                } else {
-                    "Hinweis: Standardexport ist auf 128 KiB begrenzt; Release-Diagnostik enthält keine vollständigen Prompt-/Antwort-Texttraces."
-                }
-            )
-        }.let {
-            if (includeFullDebugTrace) it
-            else limitUtf8(it, MAX_EXPORT_BYTES)
+            appendLine("Hinweis: Der Bericht enthält ausgewählte Diagnoseereignisse und aggregierte Messwerte. Rohe Prompt-, Token- und Antworttexte werden nicht exportiert.")
         }
+        .let { limitUtf8(it, MAX_EXPORT_BYTES) }
     }
 
     private fun limitUtf8(value: String, maxBytes: Int): String {
