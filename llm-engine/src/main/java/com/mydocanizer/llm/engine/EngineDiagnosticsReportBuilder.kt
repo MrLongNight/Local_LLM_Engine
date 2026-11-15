@@ -156,7 +156,10 @@ internal object EngineDiagnosticsReportBuilder {
     private fun compactLine(line: String, maxChars: Int = 300): String =
         if (line.length <= maxChars) line else line.take(maxChars - 18) + " …[gekürzt]"
 
-    internal fun buildCompactReport(lines: List<String>): String {
+    internal fun buildCompactReport(
+        lines: List<String>,
+        includeFullDebugTrace: Boolean = BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED
+    ): String {
         val ordered = lines.sorted()
         val kotlinLines = ordered.filterNot { it.contains("[NATIVE]") }
         val nativeLines = ordered.filter { it.contains("[NATIVE]") }
@@ -602,7 +605,7 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[RAM-ZEITVERLAUF – AUSGEDÜNNT, SPITZEN UND BACKEND-SAMPLES]")
             memoryTimeline.forEach(::appendLine)
             appendLine()
-            if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+            if (includeFullDebugTrace) {
                 appendLine("[VOLLSTÄNDIGE TEXTTRACES]")
             } else {
                 appendLine("[TESTAUSGABEN – IM STANDARD-EXPORT AUSGEBLENDET]")
@@ -612,21 +615,21 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[NATIVE / VULKAN – AUSZUG DER ZUSAMMENFASSUNG]")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
             nativeSelected.forEach(::appendLine)
-            if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+            if (includeFullDebugTrace) {
                 appendLine()
                 appendLine("[VOLLSTÄNDIGES, UNGEFILTERTES PROZESSLOG – ALLE EINTRÄGE IN ZEITREIHENFOLGE]")
                 ordered.forEach(::appendLine)
             }
             appendLine()
             appendLine(
-                if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+                if (includeFullDebugTrace) {
                     "Hinweis: Vollständige Debug-Diagnostik aktiv. Prompts, gerenderte Templates, Token-Auswahl, Token-Texte, Modellantworten und sämtliche Prozesslogzeilen werden unverändert exportiert."
                 } else {
                     "Hinweis: Standardexport ist auf 128 KiB begrenzt; Release-Diagnostik enthält keine vollständigen Prompt-/Antwort-Texttraces."
                 }
             )
         }.let {
-            if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) it
+            if (includeFullDebugTrace) it
             else limitUtf8(it, MAX_EXPORT_BYTES)
         }
     }
