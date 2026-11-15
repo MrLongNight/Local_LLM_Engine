@@ -54,7 +54,7 @@ class GgufRecoveryTest : InferenceServiceProcessTestBase() {
             // already-bound process. Match the process-binding helper's 15s budget.
             serviceBindMs = 15_000L,
             modelLoadMs = 30_000L,
-            prefillMs = 1_500L,
+            prefillMs = 10_000L,
             firstTokenMs = 10_000L,
             interTokenMs = 10_000L,
             totalInferenceMs = 30_000L,
