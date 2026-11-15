@@ -144,6 +144,20 @@ Status meanings:
 - The `MASTER_TODO.md` Mali AUTO statement matches the current selector: BASE DMMV is the source default for Mali Q4_K AUTO. The historical MMVQ sweep remains useful for A/B analysis but is not evidence of current AUTO dispatch.
 - P0 acceptance across model families, current Mali runtime dispatch, Vulkan synchronization attribution, real-device timeout/cancellation/reconnect cycles, SAF cloud-provider behavior and cache-on/cache-off equivalence remain separate execution/device requirements. They are deliberately not marked complete by this source recheck.
 
+## P0 scope reduction — 2026-11-15
+
+The P0 queue was re-scoped around user-visible inference blockers rather than accumulating separate evidence runs:
+
+- Dropped the obsolete LFM3 16-token exact-continuation result from active investigation; it cannot diagnose the current fixture/build and is only reopened on a real current-app failure.
+- Removed mandatory all-family fixture, CPU/Vulkan parity and output-shape matrices. The exact-copy gate remains a targeted diagnostic utility, not a required run for every change.
+- Removed Q5_K/Q6_K, multiple Q4_K models, separate prefill/CPU/base-override A/B and old-vs-new fence strategy as P0 device matrices. The current Qwen3-4B Q4_K app run supplies the relevant decode/offload/synchronization evidence once.
+- Combined Vulkan baseline, sampler/readback, synchronization, prefill/TTFT, graph/offload and Q4_K dispatch into one user-device export from build 7c986e1; no separate profiler run is requested initially.
+- Removed historical abort-grace inspection and repeated kill/reconnect cycles as standalone tests. Revisit only if a new real failure makes their result actionable.
+- Removed broad cloud-provider loading acceptance from P0. Local document-picker loading remains a core user-facing behavior; test only if it actually fails.
+- Closed duplicate cache lifecycle/reuse test matrices using the current source audit and existing host invariants. Hybrid/recurrent architectures remain on the conservative full-clear path.
+
+No physical-device pass is implied by this scope reduction. The single current-build user run is still pending and is recorded in MASTER_TODO.
+
 ## Workflow evidence at audit time
 
 - **Unit Tests:** run `43671275805`, commit `07b56cd6a3d7417016b1771ae84d11202419ef38`, status **in progress** at audit time. The immediately preceding `aadcbd3` run `43670909807` succeeded, but does not verify the newer commit.
