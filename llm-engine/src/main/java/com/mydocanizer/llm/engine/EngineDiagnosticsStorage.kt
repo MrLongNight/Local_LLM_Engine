@@ -44,28 +44,34 @@ internal object EngineDiagnosticsStorage {
     }
 
     fun info(tag: String, event: String, details: String = "") {
-        val entry = formatLog("INFO", tag, event, details)
-        logQueue.add(entry)
-        if (!preserveAllDebugDetails) {
-            while (logQueue.size > MAX_LOG_ENTRIES) {
-                logQueue.poll()
+        val chunks = if (preserveAllDebugDetails) details.chunked(3_000).ifEmpty { listOf("") }
+        else listOf(details)
+        chunks.forEachIndexed { index, chunk ->
+            val partEvent = if (chunks.size == 1) event else "${event}_PART_${index + 1}_OF_${chunks.size}"
+            val entry = formatLog("INFO", tag, partEvent, chunk)
+            logQueue.add(entry)
+            if (!preserveAllDebugDetails) {
+                while (logQueue.size > MAX_LOG_ENTRIES) logQueue.poll()
             }
+            persist(entry)
+            Log.i(TAG, "[$tag] $partEvent: $chunk")
         }
-        persist(entry)
-        Log.i(TAG, "[$tag] $event: $details")
     }
 
     fun error(tag: String, event: String, throwable: Throwable? = null) {
         val details = throwable?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: ""
-        val entry = formatLog("ERROR", tag, event, details)
-        logQueue.add(entry)
-        if (!preserveAllDebugDetails) {
-            while (logQueue.size > MAX_LOG_ENTRIES) {
-                logQueue.poll()
+        val chunks = if (preserveAllDebugDetails) details.chunked(3_000).ifEmpty { listOf("") }
+        else listOf(details)
+        chunks.forEachIndexed { index, chunk ->
+            val partEvent = if (chunks.size == 1) event else "${event}_PART_${index + 1}_OF_${chunks.size}"
+            val entry = formatLog("ERROR", tag, partEvent, chunk)
+            logQueue.add(entry)
+            if (!preserveAllDebugDetails) {
+                while (logQueue.size > MAX_LOG_ENTRIES) logQueue.poll()
             }
+            persist(entry)
+            Log.e(TAG, "[$tag] $partEvent: $chunk", if (index == 0) throwable else null)
         }
-        persist(entry)
-        Log.e(TAG, "[$tag] $event: $details", throwable)
     }
 
     private fun formatLog(level: String, tag: String, event: String, details: String): String {
