@@ -1,372 +1,370 @@
-# Master TODO — Local LLM Engine
+# Master-TODO — Local LLM Engine
 
-**Purpose:** Single active execution queue. The order is deliberate: first make the standalone LLM engine correct and reliable, then clean up its code and architecture, and only after that adapt/freeze the myDocAnizer-Mobile integration.  
-**Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `main`  
-**Current HEAD at reordering:** `529008a90f0c578af74be53bbfad0fd18bf80d30`  
-**Target consumer (final phase only):** `MrLongNight/myDocAnizer_Mobile`
+**Zweck:** Zentrale, einzige aktive Arbeitsliste. Die Reihenfolge ist bewusst festgelegt: Zuerst wird die eigenständige LLM-Engine korrekt und zuverlässig gemacht. Danach werden Code und Architektur bereinigt. Erst anschließend wird die Integration in myDocAnizer-Mobile angepasst und eingefroren.
+**Repository:** `MrLongNight/Local_LLM_Engine` · **Branch:** `main`
+**HEAD zum Zeitpunkt der Neuordnung:** `529008a90f0c578af74be53bbfad0fd18bf80d30`
+**Ziel-Anwendung (ausschließlich in der letzten Phase):** `MrLongNight/myDocAnizer_Mobile`
 
-> **Single source of truth:** This is the only active task list. Architecture references, integration guides and historical reports may document facts and contracts, but must not create parallel implementation queues.
+> **Einzige maßgebliche Quelle:** Dies ist die einzige aktive Aufgabenliste. Architekturunterlagen, Integrationsleitfäden und historische Berichte dürfen Fakten und Schnittstellenverträge dokumentieren, aber keine parallelen Umsetzungslisten erzeugen.
 
-## Audit control — 2026-11-15
+## Audit-Kontrolle — 2026-11-15
 
-- [x] Source-audit all 55 pre-existing implementation checklist items marked `[x]` against the implementation and named tests at code HEAD `07b56cd6a3d7417016b1771ae84d11202419ef38` (excluding this audit-control checkbox); findings: `docs/active-todos/COMPLETED_ITEMS_AUDIT.md`.
-- [x] Resolve the P0-02 Mali Q4_K AUTO documentation mismatch: current source selects BASE DMMV. The paired natural-EOG PASS accounting gap is fixed and covered by JVM tests (`9f9afb6`, `c5131fa`); the finish-reason gate gap is fixed and covered by JVM tests (`a73240f`).
-- [ ] Complete the separate P1-03 metadata-query cancellation regression and direct cancellation propagation recorded in the audit.
-- [x] Re-run and record the current-head JVM and Android APK/instrumentation workflows separately: Unit Tests run `43679806775` passed; APK + process-isolation instrumentation run `43679806820` passed on commit `5a87d8f90b24f36c5ba893ba14eea27e50cc73f1`. Both ARM64 and x86_64 CMake configure/build tasks succeeded. Debug APK artifact `14148461029` (37,010,982 bytes; SHA-256 `821f4aaa60bf6034dcca1aa203c7201dcf244655a8e3f6665c3fe439b28b018e`) and instrumentation APK artifact `14148281622` (24,341,340 bytes; SHA-256 `a9f44b1a2311a024093598f9754e4adecb55b35b7bfc13e66f88f51d38f9e77c`) are uploaded. Host-native tests remain a separately tracked verification item where applicable.
-- [ ] Complete the physical-device checks that remain open in P0/P1; source review and CI do not substitute for hardware acceptance.
+- [x] Alle 55 bereits vorhandenen Implementierungs-Checklisteneinträge mit Status [x] anhand der Implementierung und der benannten Tests am Code-HEAD `07b56cd6a3d7417016b1771ae84d11202419ef38` geprüft (dieser Audit-Kontrollpunkt selbst ausgenommen). Ergebnisse: `docs/active-todos/COMPLETED_ITEMS_AUDIT.md`.
+- [x] Die widersprüchliche Dokumentation zur Mali-Q4_K-AUTO-Auswahl in P0-02 korrigiert: Der aktuelle Quellcode wählt BASE DMMV. Die fehlerhafte PASS-Zählung bei natürlichem EOG wurde behoben und durch JVM-Tests abgesichert (`9f9afb6`, `c5131fa`); ebenso die Lücke bei der Prüfung des Finish-Grunds (`a73240f`).
+- [ ] Die separate P1-03-Regression zur Abfrage von Metadaten bei Abbruch sowie die direkte Weitergabe des Abbruchs abschließen, wie im Audit dokumentiert.
+- [x] Die JVM- und Android-APK-/Instrumentation-Workflows für den aktuellen HEAD getrennt erneut ausführen und dokumentieren: Unit-Tests, Lauf `43679806775`, bestanden; APK- und Process-Isolation-Instrumentation, Lauf `43679806820`, auf Commit `5a87d8f90b24f36c5ba893ba14eea27e50cc73f1` bestanden. Die CMake-Konfiguration und der Build für ARM64 und x86_64 waren erfolgreich. Debug-APK-Artefakt `14148461029` (37.010.982 Bytes; SHA-256 `821f4aaa60bf6034dcca1aa203c7201dcf244655a8e3f6665c3fe439b28b018e`) und Instrumentation-APK-Artefakt `14148281622` (24.341.340 Bytes; SHA-256 `a9f44b1a2311a024093598f9754e4adecb55b35b7bfc13e66f88f51d38f9e77c`) wurden hochgeladen. Host-native Tests bleiben, soweit zutreffend, ein separat zu verfolgender Verifikationspunkt.
+- [ ] Die noch offenen Prüfungen auf realen Geräten aus P0/P1 abschließen. Quellcodeprüfung und CI ersetzen keine Abnahme auf echter Hardware.
 
-## Execution order and invariants
+## Reihenfolge der Umsetzung und verbindliche Regeln
 
-1. **P0 — Correctness defects:** incorrect/garbled model output, backend/kernel selection defects, inference and loading failures, cache/state corruption, cancellation and recovery defects.
-2. **P1 — Runtime reliability and proof:** privacy-safe diagnostics, resource stability, automated regression coverage and real-device verification of the corrected engine.
-3. **P2 — Code and architecture refactoring:** reduce complexity and establish clear responsibility boundaries without changing behavior.
-4. **P3 — Cleanup and engineering guardrails:** feature inventory, dependency/build hygiene, test organization and documentation of the standalone engine.
-5. **P4 — myDocAnizer-Mobile integration (last):** define/freeze the consumer contract, perform compatibility changes and run the actual downstream build only after P0–P3 are accepted.
+1. **P0 — Fehler bei der Korrektheit:** Falsche/verstümmelte Modellausgaben, Fehler bei Backend-/Kernel-Auswahl, Inferenz- und Ladefehler, beschädigter Cache/Zustand sowie Fehler bei Abbruch und Wiederherstellung.
+2. **P1 — Laufzeitzuverlässigkeit und Nachweise:** Datenschutzgerechte Diagnostik, Ressourcenstabilität, automatisierte Regressionstests und Verifikation der korrigierten Engine auf realen Geräten.
+3. **P2 — Code- und Architektur-Refactoring:** Komplexität reduzieren und klare Verantwortungsgrenzen schaffen, ohne das Verhalten zu verändern.
+4. **P3 — Bereinigung und technische Leitplanken:** Funktionsinventar, Abhängigkeiten und Build-Hygiene, Testorganisation sowie Dokumentation der eigenständigen Engine.
+5. **P4 — Integration in myDocAnizer-Mobile (zuletzt):** Schnittstellenvertrag für die Zielanwendung definieren/einfrieren, Kompatibilitätsanpassungen durchführen und den tatsächlichen nachgelagerten Build erst nach Abnahme von P0–P3 ausführen.
 
-Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before each write and use expected-HEAD leases where available. Make small, independently verifiable commits. Keep the pinned llama.cpp submodule pristine. Do not introduce DI frameworks, dependencies, NPU backends, speculative abstractions or unproven performance-default changes. Preserve public Kotlin/Java APIs, AIDL/Parcelable layouts, manifests, process names, JNI exports and ABI support during P0–P3 unless a defect fix is impossible without a separately documented compatibility change. Correctness comes before performance. Report JVM tests, host-native tests, APK builds, emulator instrumentation and physical-device checks separately. Never claim an APK/Actions result without the actual successful job and artifact.
-
----
-
-## P0 — Fix engine correctness and runtime defects first
-
-### P0-01 — Restore and lock down output correctness across model families
-
-### Investigation update — 2026-11-15
-
-- The uploaded 2026-11-14 LFM3 1.7B Q4_K_M acceptance evidence repeatedly reports `EXPECTED_OUTPUT_MISMATCH` for both CPU reference and Vulkan candidate. This is not evidence of a Vulkan-only defect; it does not yet distinguish a model-response issue from an unsuitable exact-answer fixture.
-- The final 2026-11-14 device run used `maxPredictTokens=16` on both CPU and Vulkan (16 generated tokens each). The current source gate has since been raised to a 32-token safety budget; therefore those older mismatch results do not validate the current gate. That export also predates the 2026-11-15 content-free output-shape diagnostics, so it cannot reveal whether the model returned an empty answer, a truncated prefix, malformed text or a wrong sequence.
-- The shared gate prompt is now an ASCII-only exact-copy fixture (`Copy exactly this text and output nothing else: 322, 324, 326, 328, 330`) rather than an arithmetic continuation task. This removes arithmetic/reasoning ability as a confounder when checking backend inference correctness; it is a fixture-isolation improvement, **not** a model-output fix or proof of semantic correctness (`63b5770`, `24a162e`).
-- The latest 2026-11-15 user-device log records two completed CPU chat runs (17 generated tokens each, `STOP`, approximately 5.56 tok/s). It proves completed inference for those runs, but the exported summary does not contain the answer text, so semantic correctness cannot be inferred from throughput/finish reason alone.
-- The previous prompt metadata trace recorded template mode, BOS/EOS and token count but omitted model architecture, model name, tokenizer model and thinking mode. These fields are now added to content-free native prompt metadata; failed acceptance rows also carry output-shape/length/repetition classification so the next log directly distinguishes empty, short-prefix, malformed and extra-text answers without persisting response text.
-- **Root cause remains open.** Do not interpret this instrumentation commit as a model-output fix or mark P0-01 complete.
-
-
-**Problem:** There have been incorrect/garbled outputs across Qwen3.5 and other model paths. A successful load or non-empty token stream is not sufficient evidence of correct inference.
-
-- [x] Trace the complete generation path: request/messages → chat-template selection/rendering → tokenization/BOS/EOS → prompt evaluation → sampler/token selection → detokenization/streaming → finish reason. Source trace and unresolved findings: `docs/active-todos/P0-01-generation-path-audit.md`.
-- [ ] Identify why affected models emit garbage or lose output quality. Inspect model metadata, architecture detection, tokenizer/template choice, special-token handling, sampler configuration, context state and CPU/Vulkan differences. Do not mask defects with prompt wording or arbitrary parameter changes.
-- [ ] Add deterministic correctness fixtures per supported model family, including Qwen3, Qwen3.5 (dense/MoE where supported), Gemma 4 and ordinary attention models. Keep prompt fixtures synthetic and content-safe.
-- [x] Route JNI role/content conversion through the shared host-testable UTF-16→UTF-8 utility; cover BMP characters, valid/unpaired surrogates and embedded NUL bytes in host-native tests.
-- [x] Reject null/out-of-range sampler token IDs before EOG lookup or `llama_decode`; log only the numeric ID, vocabulary size and run ID, with host-native boundary tests (`d2ac290`). This is defensive validation, not a confirmed explanation for the current empty-output symptom.
-- [x] Move token-stream UTF-8 normalization into the host-testable native utility and cover multibyte code points split between token callbacks plus malformed/overlong UTF-8.
-- [x] Remove the competing Kotlin-side visible-chunk limit; native token-ID accounting now sets `MAX_TOKENS` and flushes a pending UTF-8 suffix before stream completion (`8f94fe3`).
-- [x] Finalize pending UTF-8 as U+FFFD on token-limit, cooperative-cancel, Kotlin coroutine cancellation and terminal error paths; Kotlin performs one final native step before every terminal stream exit; add host-native tests and keep the JNI/Kotlin terminal handoff aligned; add local helper compile smoke-check for 2/3/4-byte incomplete prefixes.
-- [ ] Compare CPU and Vulkan outputs using the same GGUF, messages, template, context, sampler and generation limits. Separate backend numerical variation from malformed templates, invalid token IDs, premature EOS and state corruption.
-- [ ] Assert expected structure/markers, valid UTF-8, non-empty meaningful output, correct finish reason and no unexpected control/special-token leakage. Include multi-turn and repeated-turn cases.
-- [x] Strengthen the Android tiny-GGUF recovery smoke test to require non-blank visible text and a normal `STOP`/`MAX_TOKENS` finish after process death/reload (`23a65a9`). This is lifecycle/output-presence coverage only, not model-family correctness acceptance.
-- [x] Extend the real-GGUF recovery test with a second consecutive inference on the recovered process; require visible output and a distinct native run ID to catch stale sampler/KV/terminal state (`34f330f`). This remains lifecycle/repeated-request coverage, not model-family correctness acceptance.
-- [ ] Run correctness gates before changing performance defaults. Do not accept a speed improvement that fails output parity/correctness.
-- [x] Add content-safe correctness-output classification for the synthetic gate: `EMPTY`, `PREFIX_TOO_SHORT`, `EXPECTED_PREFIX`, `EXACT_SEQUENCE`, `SEQUENCE_MISMATCH`, `NON_SEQUENCE_TEXT` and `EXTRA_SUFFIX`, plus a non-whitespace character count. Only the category/count are persisted; generated response text remains in-memory and is never written to diagnostics. JVM regression tests cover every category (`4c68e28`).
-- [x] Capture the terminal EOG token-selection trace before the Kotlin null/terminal check, and clear the per-step trace before every native token attempt so non-sampling exits cannot replay a stale trace as a duplicate (`9bf5f3e`, `d460522`). This fixes trace attribution only; it does not establish model-output correctness.
-- [x] Fix the correctness gate's self-imposed truncation: 16 generated tokens could not reliably complete the five-number answer on digit-per-token Qwen/LFM tokenizers. Increase the safety budget to 32, require the complete exact answer, and accept the model's natural early EOG after the answer; CPU/Vulkan trace lengths must match. JVM tests cover truncation rejection, early stop and paired trace-length mismatch (`2279d37`, `faeea29`, `752e26e`, `11db00b`, `dcd85d7`, `dcb6b4f`, `1f02efb`).
-- [x] Correct gate accounting after allowing natural early EOG: `Evaluation.comparedSteps` reports the actual trace length on CPU-only pass and CPU/Vulkan comparison failures, rather than the 32-token safety ceiling. The acceptance report also derives its displayed gate budget from the shared constant instead of retaining a stale `16-token` label (`2c6b1ae`, `77b0407`, `5f7ce1e`).
-- [x] Fix paired CPU/Vulkan **PASS** accounting to report `candidateSteps.size` when both traces stop naturally before the 32-token safety limit; add a regression test for a 25-step paired early-EOG PASS (`9f9afb6`, `c5131fa`).
-- [x] Require natural EOG for correctness-gate acceptance: pass only when `InferenceResult.finishReason == STOP`; reject `MAX_TOKENS`, `CANCELLED`, `ERROR` and every timeout reason even when the answer and token trace otherwise match. Persist the actual finish reason in the content-free gate result. JVM regression covers every non-`STOP` enum value (`a73240f`).
-- [ ] Investigate the 2026-11-14 compact acceptance result for LFM3 1.7B Q4_K_M: both the CPU reference and Vulkan candidate failed the synthetic expected-continuation check with `EXPECTED_OUTPUT_MISMATCH`. Because the CPU reference also failed, this run does not establish a Vulkan-only regression and its 5.51 vs 3.37 tok/s figures must not be treated as an accepted performance comparison. Use the new output-shape evidence on the next run to determine whether the prompt/output expectation or model output is wrong; do not persist response text.
-
-**Acceptance:** Every intended model family passes repeatable output-correctness tests on CPU; Vulkan passes the same correctness contract on supported devices. Root causes and remaining unsupported combinations are explicit.
-
-### P0-02 — Verify and correct the Mali-G57 Q4_K decode kernel path
-
-**Current source finding (2026-11-15 source audit):** Mali Q4_K batch-1 AUTO currently selects the base DMMV path: `local_llm_mali_auto_prefers_mmvq` is explicitly `false` in the generated Vulkan overlay. The guarded Q8_1/integer-dot MMVQ path remains available for explicit diagnostic A/B selection; non-Mali vendors retain the pinned upstream `ggml_vk_should_use_mmvq()` AUTO heuristic. The 2026-11-14 runtime MMVQ evidence is historical and must not be described as proof of the current Mali AUTO selection. The pinned llama.cpp submodule remains pristine.
-
-**Device evidence (2026-11-14):**
-- Mali-G57 reports `int dot=1`, `fp16=1`, `bf16=0`, warp size 16, shared memory 32 KiB and no matrix cores.
-- Runtime Q4_K decode log records `selected=MMVQ_INTEGER_DOT`, `reason=intDot_q4k_batch1`, `q8_1Eligible=1`, `quantizeY=1` and `yKernelType=q8_1`; prefill records `Q8_1_MATMUL`.
-- A six-run Q4_K path sweep on LFM3 1.7B Q4_K_M (20 measured tokens/run, context 2048, batch 128, 2 threads) recorded BASE_DMMV at 4.14 and 3.92 tok/s, MMVQ_INTEGER_DOT at 2.71 and 2.80 tok/s, and AUTO repeat at 3.65 tok/s. The runtime path was marked verified. In these runs MMVQ was about 40–48% slower than BASE_DMMV. This is a strong model/device-specific performance result, not yet output-correctness acceptance for all Q4_K models.
-- The LFM3 runtime load reported 25/25 model layers offloaded to Vulkan. Vulkan memory-budget extension support was unavailable, so the 7.78 GB heap value is a heap-size/free estimate, not a reliable driver-reported free budget.
-
-- [x] Compare the selector against pinned llama.cpp `a4d4f2f`; preserve Q8_1 input/layout/alignment/precision eligibility while bypassing only the upstream shape heuristic (`a0f1cee`). CMake now fails configuration if these guards disappear.
-- [x] On the target integer-dot-capable Mali-G57, capture runtime proof for Q4_K batch-1 `MMVQ_INTEGER_DOT` with `reason=intDot_q4k_batch1`, `quantizeY=1` and `yKernelType=q8_1`.
-- [x] Perform repeated, run-correlated Q4_K MMVQ-vs-BASE_DMMV throughput comparisons with actual dispatch verification; MMVQ is slower in the current LFM3 1.7B sweep. Keep the production default unchanged until correctness/output parity is proven.
-- [x] Validate Q4_K×Q8_1 pipeline-unavailable fallback evidence in the Vulkan A/B runner: accept only an explicitly reported BASE execution with integer-dot/Q8_1 eligibility, `quantizeY=0` and a non-Q8_1 fallback kernel; reject contradictory or falsely labeled MMVQ evidence. Runtime/device proof that the pinned driver actually exercises this fallback remains open.
-- [x] Extract the fallback evidence predicate into `Q4kPipelineFallbackPolicy` and add JVM regression cases for valid fallback, missing integer-dot/Q8_1 eligibility, contradictory quantization/kernel evidence, wrong selected path and normal non-fallback dispatch.
-- [x] Extend the generated Vulkan-overlay configure gate to require the explicit `q8_1_pipeline_unavailable_fallback` marker and verify that it is recorded before `quantize_y` is cleared; upstream `llama.cpp` remains untouched.
-- [x] Trace the pinned upstream Vulkan decode selection and generated overlay end to end. In the pinned `ggml_vk_mul_mat_vec` path, `ggml_vk_should_use_mmvq()` only participates in the initial `quantize_y` heuristic; the overlay then applies the guarded Q4_K batch-1 policy. The only later change to `quantize_y` is the null-Q8_1-pipeline fallback, which is explicitly recorded before switching to the base kernel. Runtime evidence is emitted after that fallback decision.
-- [x] Restore the pinned upstream MMVQ heuristic for AUTO on non-Mali vendors. The Q4_K overlay now applies its AUTO override only when `vendor_id == 0x13B5` (Mali) and Q8_1/integer-dot prerequisites pass; non-Mali AUTO retains upstream `quantize_y`. Explicit MMVQ A/B remains available, explicit BASE remains separate, and the generated-source configure gate requires the vendor-scope marker (`2f1fa1e`).
-- [x] Source-audit and enforce the intended path scopes: Q4_K F16 prefill only for batch>1; Q4_K base/Mali AUTO decode override only for batch-1; Q5_K/Q6_K base overrides only for their own batch-1 tensor types; explicit MMVQ remains guarded by Q8_1 prerequisites; the pinned upstream MMVQ heuristic remains present for AUTO on non-Mali vendors. The Android overlay patches only generated `ggml-vulkan.cpp`; CPU code and the pinned llama.cpp submodule remain untouched.
-- [ ] Prove those paths at runtime on device, including Q4_K prefill/batch>1, Q5_K/Q6_K, CPU and explicit A/B base override.
-- [x] Add deterministic CMake source-overlay scope guards and JVM policy tests for AUTO, explicit BASE, explicit MMVQ, missing-pipeline fallback and Mali/non-Mali reason handling. Fix the validator so non-Mali AUTO accepts the pinned upstream reason `upstream` instead of incorrectly requiring Mali-only `intDot_q4k_batch1`; actual device path proof remains open. Keep upstream llama.cpp untouched.
-- [x] Reject unknown Q4_K dispatch path labels even in AUTO mode; AUTO remains evidence-driven only among the two recognized native paths (BASE DMMV or MMVQ Integer-Dot). The JVM regression test explicitly rejects unknown path labels.
-- [ ] Repeat the kernel A/B on Qwen3-4B Q4_K_M and at least one additional Q4_K model with output-correctness evidence; determine whether the MMVQ regression is general or architecture/model-specific.
-
-**Acceptance:** The intended path is proven by actual runtime selection and correctness evidence, or the selector is corrected based on a reproducible failing case. Requested configuration or source-string matches alone do not count.
-
-### P0-03 — Root-cause the Vulkan throughput and synchronization regression
-
-**Problem:** Current Mali-G57 measurements show Vulkan decode/prefill is not delivering the expected benefit and can be close to or slower than CPU. The source already contains substantial diagnosis; the latest uploaded device report now supplies a strong synchronization bottleneck signal and a repeatable Q4_K kernel-path performance difference.
-
-**Measured device evidence (2026-11-14):**
-- Native samples for PID 10321 show CPU decode p50 around 181–185 ms with `backendSyncWait` p50 1 µs; Vulkan decode p50 around 354–361 ms with `backendSyncWait` p50 around 339–345 ms. Thus roughly 95–96% of the measured Vulkan decode envelope is inside `llama_synchronize()`, while the CPU synchronization wait is negligible.
-- Vulkan `decodeSubmit` p50 is around 15–16 ms in those samples; it does not account for the 339–345 ms synchronization envelope. This narrows the issue substantially, but `llama_synchronize()` still includes more than a pure fence wait: submission completion, fence waiting/polling and deferred copies can contribute.
-- The report confirms the Mali-G57 device feature line and 25/25 layer offload for the LFM3 1.7B run. One older graph snapshot records 72 Vulkan nodes, 0 CPU nodes and 2 unassigned nodes out of 74; this graph snapshot is not yet correlated to the newest Q4_K sweep run.
-- The Q4_K sweep provides measured evidence that MMVQ Integer-Dot is slower than BASE_DMMV in LFM3 1.7B. See P0-02 for the exact repeated throughput values.
-- The latest 23:03 CPU/Vulkan acceptance gate failed its expected-output check on both backends. Its 5.51 vs 3.37 tok/s figures are therefore not accepted as a controlled performance baseline.
-- The Vulkan GPU operation profiler was disabled in the reported Release runs; no per-operation GPU timestamps were present. The Vulkan memory-budget extension was not supported, so heap values are estimates.
-
-**Implemented in source (not yet fully device-accepted):**
-- [x] Add run-correlated scheduler graph-node accounting for CPU/Vulkan/other/unassigned backends, including GDN/SSM op classes. The generated `llama-context.cpp` overlay records distinct graph layouts.
-- [x] Preserve compact Vulkan capability output (FP16, integer-dot, subgroup and related device features) and query Vulkan memory heap/budget information.
-- [x] Add run-correlated Q4_K prefill/decode path evidence, including Q8_1 eligibility, `quantizeY`, selected kernel family and explicit pipeline-unavailable fallback reason.
-- [x] Separate prompt template/tokenization/prefill metrics from per-token sampling, decode-submit and `llama_synchronize()` envelope metrics. The sync envelope is explicitly not labeled as pure GPU execution.
-- [x] Add decode logits-readback map/copy/sync timing and opt-in per-operation GPU timestamp profiling. The GPU profiler is build/runtime opt-in and must remain separate from profiler-free throughput.
-- [x] Replace the upstream Mali vendor-ID fence busy-poll loop with blocking `waitForFences` in the generated Android overlay; retain upstream polling for non-Mali devices. This is a candidate fix only; the uploaded report does not isolate its own before/after effect.
-- [x] Add run-correlated Vulkan queue-submit and fence-wait timing callbacks to the generated overlay and native token-step metrics. Source audit against pinned upstream `a4d4f2f` found four queue-submit call sites: the two `ggml_vk_submit()` branches and two direct compute-queue submissions in `ggml_vk_synchronize()`; all four are instrumented. Fence timing covers the almost-ready fence, normal graph fence (including Mali blocking wait/non-Mali poll), serialized synchronize wait, serialized graph-split wait and profiler-only fence wait. The CMake configure gate requires the added path markers. Fields `vkQueueSubmitUs` and `vkFenceWaitUs` are host-side call/wait durations, not GPU shader execution time. Physical-device validation remains open (`5c578fb`, `b2c339a`, `246b54c`, `0afa383`).
-- [x] Register the existing pinned llama.cpp sampler chain with the Vulkan context for normal non-diagnostic inference, allowing supported sampler stages to execute in the backend graph and avoid a full-vocabulary logits readback to CPU on each token. Detach the chain before replacement/unload. Keep CPU sampling on CPU and in `TEXT_DIAGNOSTICS` builds so Top-5 traces retain full logits. Runtime Mali speed impact is not yet measured; this removes a known transfer path but does not claim to solve the separate GPU synchronization envelope.
-
-**One remaining device decision — no separate benchmark matrix:**
-- [ ] Use the standard Debug APK from workflow run 43698646578 (commit 2096f1b) for one normal Qwen3-4B-Instruct Q4_K_M Vulkan chat with the established settings (context 2048, batch 128, microbatch 128, 37 GPU layers). **Verified build evidence (2026-11-15):** APK Build job succeeded; standard Debug artifact `14156021001` and instrumentation APK artifact `14155921425` were uploaded. The workflow explicitly verified `TEXT_DIAGNOSTICS_ENABLED=false` and that native `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS` is not compiled in, so this build includes the normal Vulkan backend-sampling path. Do not use the older artifact `14153973027`, which had TEXT_DIAGNOSTICS enabled. Install artifact `14156021001`, run one normal Qwen3 chat with the settings above, inspect the actual answer, and export compact diagnostics for tokens/s, prefill/TTFT, backendSyncWaitUs, vkQueueSubmitUs, vkFenceWaitUs, logits readback phases, graph/offload, Q4_K dispatch and `LOCAL_LLM_BACKEND_SAMPLING`. This single run decides the next performance investigation; no separate baseline, fence A/B, profiler or multi-model matrix unless the result leaves two plausible fixes.
-
-
-**Acceptance:** A measured root cause explains the regression. Any fix is backed by repeatable profiler-free on-device CPU/Vulkan measurements and unchanged output correctness; otherwise retain the safe behavior and document the unresolved driver/backend limit.
-
-### P0-04 — Make cancellation, timeout, abort and recovery deterministic
-
-- [x] Trace cancellation end to end: collector/coroutine cancellation reaches `InferenceClient`, request-ID-checked Binder/AIDL `cancelInference`, `InferenceService`, `LocalLlmEngineImpl`, `NativeEngineHandle.nativeCancel` and the JNI atomic flag. The service rejects stale request IDs; llama.cpp's `abort_callback` is installed only for CPU because the pinned `llama.h` documents it as CPU-only. Vulkan therefore observes cancellation between token steps and relies on the isolated-process watchdog/hard-kill if an in-flight decode does not unwind.
-- [ ] Verify the effective `abortGracePeriodMs` from the actual run configuration. The source default is 3,000 ms, but `LastModelStore` persists the exact load-time timeout configuration and can restore an older/custom 300 ms value. `InferenceClient` logs the effective per-request values and their source in `INFERENCE_TIMEOUT_POLICY`. JVM regression `inferenceUsesRememberedModelsAbortGraceWhenRequestHasNoOverride` now verifies that the remembered model's 250 ms grace overrides a 20 ms client default when the request has no override (`58784cd`). The uploaded 2026-11-14 export does not contain `INFERENCE_TIMEOUT_POLICY`, so the actual value for that run remains unproven. Do not tune it based on a single token timing.
-- [x] Capture the actual service PID when the Binder request is dispatched and use that immutable request PID for timeout, explicit cancel and collector-close escalation; a reconnect cannot redirect an old request's abort to a replacement service.
-- [x] Add a regression test that changes the reported service PID mid-request and asserts cancel/kill is not sent to the replacement process.
-- [x] Cover prefill-timeout escalation after a service-PID replacement; liveness checks remain bound to the original request PID.
-- [x] Confirm cooperative cancellation is attempted first, then hard-kill targets only the original inference-service PID after the configured grace period; never kill a replacement process. The blocked-native Android instrumentation test now asserts persisted cooperative-cancel and escalation events in order and checks the original PID.
-- [x] Verify terminal events are emitted exactly once and streams close: `duplicateAndLateTerminalCallbacksAreIgnoredAfterCompletion` injects late error/cancel/duplicate-completion callbacks after the first completion and asserts exactly one terminal event plus a non-Inferring final state. Existing timeout tests continue to assert timeout failures are never successful completions; process-death/stale-PID coverage remains separate.
-- [x] Treat `streamChat` collector cancellation as a real native cancellation: retain the request ID through cooperative unwind and escalate to the original service PID after the configured grace period; add a non-cooperative fake-service regression test.
-- [x] Add fake-service regression coverage for reconnect to a replacement PID, EAGER same-model reload and a successful follow-up inference (`eagerReconnectReloadsSameModelAndAllowsFollowUpInference`).
-- [x] Add fake-service regression coverage proving a successful follow-up inference after cooperative cancellation (`followUpInferenceSucceedsAfterCooperativeCancellation`).
-- [ ] Verify follow-up inference after escalated cancellation, timeout and native crash, plus repeated real process-death/reconnect cycles on Android; the existing single process-kill recovery test is not sufficient physical-device evidence.
-- [x] Add fake-service regression coverage for cancellation during model load, prefill (including explicit cancellation before `Started`), decode, stream collection and reconnect; verify follow-up inference after escalated cancellation. The focused coverage is in `InferenceIpcTest` and the process-kill Android test.
-- [ ] Run repeated real process-death/reconnect cycles on Android and verify follow-up inference after escalated cancellation, timeout and native crash; the fake-service suite is not a substitute for physical-device proof.
-
-**Acceptance:** No stuck request, duplicate terminal event, stale-PID kill or poisoned post-cancel model state. A following inference succeeds after every tested recovery path.
-
-### P0-05 — Correct selected-model loading and descriptor ownership
-
-**Source audit:** The service already accepts and retains a Binder-transferred descriptor, validates regular-file/seek/mmap capability in `ModelSourceResolver`, and passes the service-local `/proc/self/fd/N` to JNI. The defect was in `InferenceClient.loadModelInternal()`: the `ContentUri` branch copied the document into private storage before Binder handoff, so ordinary single-file loading never reached the descriptor route.
-
-- [x] Replace the normal `ContentUri` load branch with `ContentResolver.openFileDescriptor(uri, "r")` and transfer that original descriptor through the existing Binder method.
-- [x] Keep the provider URI as the in-memory model identity/recovery source and use the provider display name; explicit bulk/model-library import remains a separate copy operation.
-- [x] Reject descriptors without a known size before the memory guard; show an explicit provider/mmap limitation and do not silently copy.
-- [ ] Verify descriptor ownership end to end on Android: the new instrumentation coverage measures the service PID's open descriptors across failed load, model replacement, unload and service death/recovery. Keep this unchecked until the Android emulator/device run passes; source ownership is client-copy close after Binder handoff and service/native copies retained only while mmap is active.
-- [x] Correct the instrumentation size assertion: compare the provider PFD's `statSize` to the staged GGUF bytes; do not compare container-file size to `llama_model_size` (tensor/model payload accounting). Stage the same fixture in both possible test-provider cache contexts.
-- [ ] Test local document provider and representative cloud/document providers, including unload/reload and follow-up inference.
-
-**Acceptance:** Original-source loading works end to end where supported; unsupported descriptors fail visibly and deterministically; no leaked descriptors or hidden copies.
-
-### P0-06 — Prove model-aware cache and context-state correctness
-
-**Current implementation finding:** Ordinary attention uses common-token-prefix reuse where supported. Hybrid/recurrent models currently fall back to clearing state. Keep this safe fallback until all relevant state components are proven reusable.
-
-- [x] Audit the exact pinned llama.cpp revision for ordinary attention, sliding-window, recurrent/SSM and convolution state behavior; classify LFM3 and Qwen3.5 as hybrid/recurrent-safe-clear paths and ordinary/SWA-only models as conditional KV-prefix paths. Evidence: `docs/active-todos/P0-06-memory-state-audit.md`.
-- [x] Define cache identity/invalidation for loaded model/file identity, adapters, tokenizer/vocabulary, rendered chat template, BOS/EOS, system prompt, context settings and session. The audit documents current invalidation boundaries and the remaining non-leading-system-message context-shift edge case.
-- [x] Add host-native token-prefix tests for appended turns and invalidation when system-prompt, rendered-template/BOS-boundary or tool-message tokens change. Exact-prefix comparison also covers rewrites/deletions at the first changed token.
-- [ ] Add/verify lifecycle tests for context shifts, cancellation/failure, model reload, process restart and memory-pressure eviction; the source audit documents current clear/reset paths, but full device evidence remains open.
-- [x] Guard non-leading/interleaved system messages: when system messages are not a contiguous leading prefix, context shifting preserves the complete current prompt instead of risking removal of a protected system message. Host-native tests cover leading, absent and interleaved system-role sequences.
-- [x] Enforce `cached_tokens.size() == current_position` before prefix reuse and context shift; mismatch forces a full KV/cache clear, with host tests for shorter, longer and negative-position states.
-- [ ] Enable reuse only when all model-state components remain synchronized. Keep full-clear fallback whenever state integrity is uncertain.
-- [ ] Prove cache-on/cache-off output equivalence before benchmarking. Bound memory and invalidate on unload/reload, process restart, failed/cancelled inference and pressure eviction.
-
-**Acceptance:** No stale or cross-session state reuse. Every supported architecture has verified state reuse or a documented safe full-clear fallback.
+Es wird ausschließlich auf dem bestehenden Branch `main gearbeitet. Vor jeder Änderung HEAD und die betroffenen Blob-SHAs erneut einlesen; wenn möglich, erwarteten HEAD als Schreibschutz/Lease verwenden. Kleine, einzeln überprüfbare Commits erstellen. Das festgelegte llama.cpp-Submodul muss unverändert bleiben. Keine DI-Frameworks, zusätzlichen Abhängigkeiten, NPU-Backends, spekulativen Abstraktionen oder unbelegten Änderungen an Performance-Standardeinstellungen einführen. Während P0–P3 öffentliche Kotlin-/Java-APIs, AIDL-/Parcelable-Strukturen, Manifeste, Prozessnamen, JNI-Exports und ABI-Unterstützung erhalten, außer ein Fehler lässt sich nachweislich nicht anders beheben und eine separate Kompatibilitätsänderung ist dokumentiert. Korrektheit hat Vorrang vor Performance. JVM-Tests, Host-native Tests, APK-Builds, Emulator-Instrumentation und Prüfungen auf realen Geräten getrennt ausweisen. Niemals einen erfolgreichen APK-/Actions-Lauf behaupten, wenn der tatsächlich erfolgreiche Job und das Artefakt nicht geprüft wurden.
 
 ---
 
-## P1 — Privacy, runtime reliability and verification
+## P0 — Zuerst Korrektheit und Laufzeitfehler der Engine beheben
 
-### P1-01 — Prevent prompt, document and response text from entering diagnostics
+### P0-01 — Korrekte Modellausgaben über die unterstützten Modellfamilien hinweg wiederherstellen und absichern
 
-**Evidence:** The current Debug Gradle configuration sets `TEXT_DIAGNOSTICS_ENABLED=true` and passes `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=ON`. `EngineDiagnostics.testText()` persists through the normal log path; callers include benchmark/configuration output and token-selection traces. The compact export omits the dedicated test-text section, but the persisted process logs still contain it.
+### Untersuchungsstand — 2026-11-15
 
-- [x] Make standard Debug and Release builds content-safe by default. Normal Debug disables token diagnostics; the opt-in Gradle property is `localLlmSyntheticTokenDiagnostics` and defaults to false.
-- [x] Remove native rendered-prompt, chat-template-source, detokenized-prompt and token-piece logging. The legacy Kotlin `testText()` method remains source-compatible but intentionally discards its payload.
-- [x] Restrict the optional native correctness trace to numeric token IDs/logits; record it through a separately gated method and never include token-piece strings.
-- [ ] Verify the opt-in cannot be used accidentally with real user conversations; currently it is an explicit build property and must be used only for synthetic correctness prompts.
-- [x] Add a Kotlin sentinel test proving caller-supplied raw text is not persisted; add/retain compact-export sentinels. Native runtime/build verification remains open.
+- Die hochgeladenen Abnahme-Daten vom 14.11.2026 für LFM3 1.7B Q4_K_M melden wiederholt `EXPECTED_OUTPUT_MISMATCH` sowohl für die CPU-Referenz als auch für den Vulkan-Kandidaten. Das ist kein Beleg für einen ausschließlich Vulkan-bedingten Fehler. Die Daten unterscheiden noch nicht zwischen einem Problem bei der Modellausgabe und einer ungeeigneten Fixture mit einer exakt erwarteten Antwort.
+- Der letzte Gerätelauf vom 14.11.2026 verwendete auf CPU und Vulkan `maxPredictTokens=16` (jeweils 16 generierte Tokens). Das aktuelle Source-Gate wurde inzwischen auf ein Sicherheitslimit von 32 Tokens angehoben. Die älteren Mismatch-Ergebnisse prüfen daher nicht das aktuelle Gate. Der damalige Export stammt außerdem von vor den am 15.11.2026 ergänzten inhaltsfreien Diagnosen zur Ausgabeform. Er kann deshalb nicht zeigen, ob das Modell eine leere Antwort, einen abgeschnittenen Anfang, fehlerhaften Text oder eine falsche Zahlenfolge geliefert hat.
+- Der gemeinsame Gate-Prompt ist jetzt eine reine ASCII-Textkopieraufgabe (`Copy exactly this text and output nothing else: 322, 324, 326, 328, 330`) statt einer Rechen-/Fortsetzungsaufgabe. Damit wird die Fähigkeit zu rechnen oder zu schlussfolgern als Störfaktor bei der Prüfung der Backend-Inferenz entfernt. Das verbessert die Isolation der Test-Fixture, ist aber **weder eine Korrektur der Modellausgabe noch ein Nachweis semantischer Korrektheit** (`63b5770`, `24a162e`).
+- Das neueste Geräteprotokoll des Nutzers vom 15.11.2026 enthält zwei abgeschlossene CPU-Chat-Läufe (jeweils 17 generierte Tokens, Finish-Grund `STOP`, ungefähr 5,56 Tokens/s). Es belegt abgeschlossene Inferenz in genau diesen Läufen. Da die exportierte Zusammenfassung den Antworttext nicht enthält, lässt sich aus Durchsatz und Finish-Grund allein keine semantische Korrektheit ableiten.
+- Die bisherige Prompt-Metadatenspur erfasste Template-Modus, BOS/EOS und Token-Anzahl, ließ aber Modellarchitektur, Modellname, Tokenizer-Modell und Thinking-Modus aus. Diese Felder wurden nun zu den inhaltsfreien nativen Prompt-Metadaten hinzugefügt. Fehlgeschlagene Abnahmezeilen enthalten außerdem eine Klassifizierung von Ausgabeform, Länge und Wiederholungen. Der nächste Log-Export kann dadurch leere, zu kurze, fehlerhafte und zusätzliche Ausgaben unterscheiden, ohne Antworttexte zu speichern.
+- **Die Ursache ist weiterhin ungeklärt.** Diese Instrumentierungsänderung darf nicht als Korrektur der Modellausgabe verstanden werden; P0-01 darf deshalb nicht als abgeschlossen markiert werden.
 
-**Acceptance:** No supported normal build persists user/document prompt or response content. Engineering diagnostics remain structured, bounded and run-correlated.
+**Problem:** Bei Qwen3.5 und anderen Modellpfaden traten falsche oder verstümmelte Ausgaben auf. Ein erfolgreicher Modell-Load oder ein nicht leerer Token-Stream reicht nicht als Nachweis korrekter Inferenz.
 
-- [x] Add a native diagnostics-file startup marker and explicit `fflush` checkpoints after backend/model/prompt initialization and inference terminal paths, so native log bytes are visible to export immediately instead of waiting for the 500 ms batching window.
-- [ ] Verify the exported document-provider file is byte-identical and non-empty, and confirm the scan includes both app-process and `:inference` process logs on the target device.
+- [x] Den vollständigen Generierungspfad nachverfolgen: Request/Nachrichten → Auswahl und Rendering des Chat-Templates → Tokenisierung/BOS/EOS → Prompt-Auswertung → Sampler/Token-Auswahl → Detokenisierung/Streaming → Finish-Grund. Quellcode-Trace und offene Befunde: `docs/active-todos/P0-01-generation-path-audit.md`.
+- [ ] Ermitteln, warum betroffene Modelle unverständliche Ausgaben liefern oder Ausgabequalität verlieren. Modell-Metadaten, Architekturerkennung, Tokenizer-/Template-Auswahl, Behandlung von Special Tokens, Sampler-Konfiguration, Context-Zustand sowie Unterschiede zwischen CPU und Vulkan untersuchen. Fehler nicht durch Prompt-Formulierungen oder willkürliche Parameteränderungen kaschieren.
+- [ ] Deterministische Korrektheits-Fixtures für jede unterstützte Modellfamilie ergänzen: Qwen3, Qwen3.5 (Dense/MoE, soweit unterstützt), Gemma 4 und gewöhnliche Attention-Modelle. Die Prompt-Fixtures müssen synthetisch und datenschutzneutral sein.
+- [x] Die Umwandlung von Rollen/Inhalten an der JNI-Grenze über die gemeinsame, auf dem Host testbare UTF-16→UTF-8-Hilfsfunktion führen. BMP-Zeichen, gültige/ungültige Surrogates und eingebettete NUL-Bytes in Host-native Tests abdecken.
+- [x] Null- und außerhalb des gültigen Bereichs liegende Sampler-Token-IDs vor EOG-Abfrage oder `llama_decode` zurückweisen. Nur numerische ID, Vokabulargröße und Run-ID protokollieren; Host-native Grenzwerttests ergänzen (`d2ac290`). Das ist eine defensive Validierung, aber keine bestätigte Erklärung für das aktuelle Symptom leerer Ausgaben.
+- [x] Die UTF-8-Normalisierung des Token-Streams in die Host-testbare native Hilfsfunktion verschieben. Multibyte-Codepoints abdecken, die zwischen Token-Callbacks aufgeteilt werden, ebenso fehlerhaftes/überlanges UTF-8.
+- [x] Das konkurrierende Kotlin-seitige Limit für sichtbare Chunks entfernen. Die native Token-ID-Zählung bestimmt jetzt `MAX_TOKENS` und gibt ein noch offenes UTF-8-Suffix vor Stream-Ende aus (`8f94fe3`).
+- [x] Ein noch offenes UTF-8-Suffix bei Token-Limit, kooperativem Abbruch, Kotlin-Coroutine-Abbruch und terminalem Fehler als U+FFFD abschließen. Kotlin führt vor jedem terminalen Stream-Ende einen letzten nativen Schritt aus. Native/Kotlin-Übergabe am Stream-Ende synchron halten; einen lokalen Compile-Smoke-Test für unvollständige 2-/3-/4-Byte-Präfixe ergänzen.
+- [ ] CPU- und Vulkan-Ausgaben mit identischer GGUF-Datei, identischen Nachrichten, identischem Template, Context, Sampler und identischen Generierungslimits vergleichen. Unterschiede durch numerisches Backend-Verhalten von fehlerhaften Templates, ungültigen Token-IDs, vorzeitigem EOS und beschädigtem Zustand trennen.
+- [ ] Erwartete Struktur/Marker, gültiges UTF-8, nicht leere sinnvolle Ausgabe, korrekten Finish-Grund und das Ausbleiben unerwarteter Steuer-/Special-Tokens prüfen. Mehrere Gesprächsrunden und wiederholte Anfragen einbeziehen.
+- [x] Den Android-Tiny-GGUF-Recovery-Smoke-Test so erweitern, dass nach Prozessabbruch und erneutem Laden sichtbarer, nicht leerer Text sowie ein regulärer Finish-Grund `STOP`/`MAX_TOKENS` verlangt werden (`23a65a9`). Das deckt Prozesslebenszyklus und Vorhandensein einer Ausgabe ab, nicht die Korrektheit ganzer Modellfamilien.
+- [x] Den Recovery-Test mit echter GGUF-Datei um eine zweite aufeinanderfolgende Inferenz im wiederhergestellten Prozess erweitern. Sichtbare Ausgabe und eine andere native Run-ID verlangen, um veralteten Sampler-/KV-/Terminal-Zustand zu erkennen (`34f330f`). Auch das bleibt ein Test für Lebenszyklus und wiederholte Requests, keine Korrektheitsabnahme ganzer Modellfamilien.
+- [ ] Korrektheits-Gates ausführen, bevor Performance-Standardeinstellungen geändert werden. Keine Geschwindigkeitsverbesserung akzeptieren, wenn dadurch die Ausgabekorrektheit oder Parität verloren geht.
+- [x] Eine datenschutzneutrale Klassifizierung der Korrektheitsausgabe für das synthetische Gate ergänzen: `EMPTY`, `PREFIX_TOO_SHORT`, `EXPECTED_PREFIX`, `EXACT_SEQUENCE`, `SEQUENCE_MISMATCH`, `NON_SEQUENCE_TEXT` und `EXTRA_SUFFIX`, zusätzlich zur Anzahl der Nicht-Leerzeichen-Zeichen. Gespeichert werden nur Kategorie und Anzahl; der generierte Antworttext bleibt im Arbeitsspeicher und wird nie in Diagnosen geschrieben. JVM-Regressionstests decken alle Kategorien ab (`4c68e28`).
+- [x] Die Token-Auswahlspur des terminalen EOG-Tokens vor der Kotlin-Null-/Terminal-Prüfung erfassen. Die Spur vor jedem nativen Token-Versuch zurücksetzen, damit Schritte ohne Sampling keine veraltete Spur erneut als Duplikat ausgeben (`9bf5f3e`, `d460522`). Das korrigiert nur die Zuordnung der Diagnoseereignisse und belegt nicht die Korrektheit der Modellausgabe.
+- [x] Die selbst verursachte Abschneidung im Korrektheits-Gate beheben: 16 generierte Tokens konnten die Antwort mit fünf Zahlen bei Qwen-/LFM-Tokenizern, die Ziffern einzeln tokenisieren, nicht zuverlässig vollständig ausgeben. Sicherheitslimit auf 32 erhöhen, vollständige exakte Antwort verlangen und natürliches frühes EOG nach der Antwort akzeptieren; CPU-/Vulkan-Trace-Längen müssen übereinstimmen. JVM-Tests prüfen Abschneidung, frühes Stoppen und unterschiedliche Trace-Längen (`2279d37`, `faeea29`, `752e26e`, `11db00b`, `dcd85d7`, `dcb6b4f`, `1f02efb`).
+- [x] Die Zählung im Gate nach Zulassung eines natürlichen frühen EOG korrigieren: `Evaluation.comparedSteps` meldet beim CPU-only-PASS und bei CPU-/Vulkan-Vergleichsfehlern die tatsächliche Trace-Länge statt des Sicherheitslimits von 32 Tokens. Der Abnahmebericht leitet das angezeigte Gate-Limit ebenfalls aus der gemeinsamen Konstante ab, statt eine veraltete Angabe von 16 Tokens zu behalten (`2c6b1ae`, `77b0407`, `5f7ce1e`).
+- [x] Die PASS-Zählung für gepaarte CPU-/Vulkan-Läufe korrigieren: Wenn beide Traces vor dem 32-Token-Limit natürlich enden, muss `candidateSteps.size` gemeldet werden. Regressionstest für einen gepaarten PASS mit natürlichem EOG nach 25 Schritten (`9f9afb6`, `c5131fa`).
+- [x] Für die Annahme im Korrektheits-Gate ein natürliches EOG verlangen: PASS nur, wenn `InferenceResult.finishReason == STOP`. `MAX_TOKENS`, `CANCELLED`, `ERROR` und sämtliche Timeout-Gründe ablehnen, auch wenn Antwort und Token-Trace ansonsten übereinstimmen. Den tatsächlichen Finish-Grund im inhaltsfreien Gate-Ergebnis speichern. JVM-Regressionstest für alle Enum-Werte außer `STOP` (`a73240f`).
+- [ ] Das kompakte Abnahmeergebnis vom 14.11.2026 für LFM3 1.7B Q4_K_M untersuchen: Sowohl CPU-Referenz als auch Vulkan-Kandidat scheiterten an der synthetischen Prüfung der erwarteten Fortsetzung mit `EXPECTED_OUTPUT_MISMATCH`. Da auch die CPU-Referenz scheiterte, belegt dieser Lauf keine Vulkan-spezifische Regression. Die Werte 5,51 gegenüber 3,37 Tokens/s dürfen nicht als akzeptierter Performancevergleich behandelt werden. Bei der nächsten Ausführung anhand der neuen Ausgabeform-Diagnose feststellen, ob die Prompt-/Ausgabeerwartung oder die Modellausgabe falsch ist; Antworttext nicht speichern.
 
-### P1-02 — Stabilize memory/resource handling under repeated failure and recovery
+**Abnahmekriterium:** Jede vorgesehene Modellfamilie besteht wiederholbare Ausgabekorrektheitstests auf CPU. Vulkan erfüllt auf unterstützten Geräten denselben Korrektheitsvertrag. Ursachen und weiterhin nicht unterstützte Kombinationen sind ausdrücklich dokumentiert.
 
-- [ ] Verify model-load peak memory, native heap, Java heap, PSS, graphics PSS and Vulkan heap/budget where available.
-- [ ] Confirm memory-pressure guard behavior under model load, prefill, decode, cancellation and reconnect.
-- [ ] Run at least five load/inference/timeout/kill/reconnect cycles on nubia Z2462N / Android 16 / ARM64 / Mali-G57.
-- [ ] Measure memory from the surviving app process before and after service death; the killed service cannot prove its own resource release.
-- [ ] Check file descriptors, Binder references, native handles, backend contexts and temporary files after every path.
+### P0-02 — Den Mali-G57-Q4_K-Decode-Kernel-Pfad prüfen und korrigieren
 
-**Acceptance:** No resource leak or progressive memory growth across repeated cycles; process isolation and cleanup are verified on hardware.
+**Aktueller Befund aus der Quellcodeprüfung (15.11.2026):** Mali Q4_K Batch-1 AUTO wählt aktuell den Basis-DMMV-Pfad: `local_llm_mali_auto_prefers_mmvq` ist im generierten Vulkan-Overlay ausdrücklich auf `false` gesetzt. Der abgesicherte Q8_1-/Integer-Dot-MMVQ-Pfad bleibt für explizite diagnostische A/B-Auswahl verfügbar. Andere GPU-Hersteller behalten die festgelegte Upstream-AUTO-Heuristik `ggml_vk_should_use_mmvq()`. Die MMVQ-Laufzeitdaten vom 14.11.2026 sind historische Daten und dürfen nicht als Nachweis der aktuellen Mali-AUTO-Auswahl dargestellt werden. Das festgelegte llama.cpp-Submodul ist unverändert.
 
-### P1-03 — Fix model-import cancellation propagation
+**Gerätedaten (14.11.2026):**
+- Mali-G57 meldet `int dot=1`, `fp16=1`, `bf16=0`, Warp-Größe 16, 32 KiB Shared Memory und keine Matrix-Cores.
+- Das Laufzeitprotokoll für Q4_K-Decode enthält `selected=MMVQ_INTEGER_DOT`, `reason=intDot_q4k_batch1`, `q8_1Eligible=1`, `quantizeY=1` und `yKernelType=q8_1`; beim Prefill wird `Q8_1_MATMUL` protokolliert.
+- Ein Sweep mit sechs Q4_K-Pfadläufen auf LFM3 1.7B Q4_K_M (20 gemessene Tokens je Lauf, Context 2048, Batch 128, 2 Threads) ergab für BASE_DMMV 4,14 und 3,92 Tokens/s, für MMVQ_INTEGER_DOT 2,71 und 2,80 Tokens/s sowie bei AUTO-Wiederholung 3,65 Tokens/s. Der Laufzeitpfad wurde als verifiziert markiert. In diesen Läufen war MMVQ etwa 40–48 % langsamer als BASE_DMMV. Das ist ein starkes Performance-Ergebnis für genau diese Modell-/Gerätekombination, aber noch keine Korrektheitsabnahme für alle Q4_K-Modelle.
+- Beim Laden von LFM3 wurden 25/25 Modell-Layer auf Vulkan ausgelagert. Die Vulkan-Memory-Budget-Erweiterung wurde nicht unterstützt. Der Heap-Wert von 7,78 GB ist daher eine Schätzung der Heap-Größe/des freien Speichers und kein verlässlicher, vom Treiber gemeldeter freier Speicherwert.
 
-**Evidence:** `ModelImportViewModel.importModelsFromSaf()` previously caught `Exception` per file without rethrowing `CancellationException`; the explicit rethrow is now implemented, but lifecycle/cleanup tests remain open.
+- [x] Die Auswahl gegen das festgelegte llama.cpp `a4d4f2f` vergleichen. Q8_1-Eingabe-, Layout-, Alignment- und Präzisionsvoraussetzungen beibehalten und nur die Upstream-Shape-Heuristik umgehen (`a0f1cee`). CMake bricht die Konfiguration jetzt ab, wenn diese Schutzbedingungen verschwinden.
+- [x] Auf dem Integer-Dot-fähigen Mali-G57 den Laufzeitnachweis für Q4_K Batch-1 `MMVQ_INTEGER_DOT` mit `reason=intDot_q4k_batch1`, `quantizeY=1` und `yKernelType=q8_1` erfassen.
+- [x] Wiederholte, den einzelnen Läufen zugeordnete Q4_K-Durchsatzvergleiche zwischen MMVQ und BASE_DMMV mit tatsächlichem Dispatch-Nachweis durchführen. Im aktuellen LFM3-1.7B-Sweep ist MMVQ langsamer. Die Produktions-Standardeinstellung unverändert lassen, bis Korrektheit/Ausgabeparität nachgewiesen ist.
+- [x] Im Vulkan-A/B-Runner die Nachweise für den Fallback bei nicht verfügbarem Q4_K×Q8_1-Pipeline-Pfad validieren: Nur eine ausdrücklich gemeldete BASE-Ausführung mit Integer-Dot-/Q8_1-Eignung, `quantizeY=0` und einem Nicht-Q8_1-Fallback-Kernel akzeptieren. Widersprüchliche oder fälschlich als MMVQ bezeichnete Nachweise ablehnen. Der tatsächliche Gerätetest, dass der festgelegte Treiber diesen Fallback ausführt, ist weiterhin offen.
+- [x] Die Fallback-Nachweisprüfung in `Q4kPipelineFallbackPolicy` auslagern und JVM-Regressionstests für gültigen Fallback, fehlende Integer-Dot-/Q8_1-Eignung, widersprüchliche Quantisierungs-/Kernel-Angaben, falschen ausgewählten Pfad und normalen Dispatch ohne Fallback ergänzen.
+- [x] Die CMake-Konfigurationsprüfung für das generierte Vulkan-Overlay um den expliziten Marker `q8_1_pipeline_unavailable_fallback` erweitern. Sicherstellen, dass er vor dem Zurücksetzen von `quantize_y` protokolliert wird. Upstream-`llama.cpp` bleibt unangetastet.
+- [x] Die Upstream-Vulkan-Decode-Auswahl und das generierte Overlay durchgehend nachverfolgen. Im festgelegten `ggml_vk_mul_mat_vec`-Pfad beeinflusst `ggml_vk_should_use_mmvq()` nur die anfängliche `quantize_y`-Heuristik; danach wendet das Overlay die abgesicherte Q4_K-Batch-1-Regel an. Die einzige spätere Änderung an `quantize_y` ist der Null-Q8_1-Pipeline-Fallback, der vor dem Wechsel zum Basiskernel ausdrücklich protokolliert wird. Der Laufzeitnachweis wird nach dieser Fallback-Entscheidung ausgegeben.
+- [x] Die festgelegte Upstream-MMVQ-Heuristik für AUTO auf Nicht-Mali-Geräten wiederherstellen. Das Q4_K-Overlay überschreibt AUTO nur bei `vendor_id == 0x13B5` (Mali) und erfüllten Q8_1-/Integer-Dot-Voraussetzungen. Nicht-Mali-AUTO behält das Upstream-`quantize_y`. Explizites MMVQ-A/B bleibt verfügbar, explizites BASE bleibt getrennt. Die Prüfung des generierten Quellcodes verlangt den Vendor-Bereichsmarker (`2f1fa1e`).
+- [x] Die vorgesehenen Geltungsbereiche der Pfade durch Quellcode-Audit prüfen und absichern: Q4_K-F16-Prefill nur für Batch>1; Q4_K-Basis-/Mali-AUTO-Decode-Override nur für Batch-1; Q5_K-/Q6_K-Basis-Overrides nur für ihre jeweiligen Batch-1-Tensortypen; explizites MMVQ bleibt an Q8_1-Voraussetzungen gebunden; die festgelegte Upstream-MMVQ-Heuristik bleibt für AUTO auf Nicht-Mali-Geräten erhalten. Das Android-Overlay verändert ausschließlich das generierte `ggml-vulkan.cpp`; CPU-Code und festgelegtes llama.cpp-Submodul bleiben unangetastet.
+- [ ] Diese Pfade zur Laufzeit auf dem Gerät nachweisen, einschließlich Q4_K-Prefill/Batch>1, Q5_K/Q6_K, CPU und explizitem A/B-Basis-Override.
+- [x] Deterministische CMake-Scope-Prüfungen für das Source-Overlay und JVM-Policy-Tests für AUTO, explizites BASE, explizites MMVQ, Fallback bei fehlender Pipeline sowie Mali-/Nicht-Mali-Gründe ergänzen. Den Validator korrigieren: Nicht-Mali-AUTO muss den festgelegten Upstream-Grund `upstream` akzeptieren und darf nicht fälschlich den Mali-spezifischen Grund `intDot_q4k_batch1` verlangen. Der tatsächliche Gerätenachweis für den Pfad bleibt offen. Upstream llama.cpp unangetastet lassen.
+- [x] Unbekannte Q4_K-Dispatch-Pfadnamen auch im AUTO-Modus zurückweisen. AUTO darf nur anhand von Nachweisen zwischen den beiden bekannten nativen Pfaden (BASE DMMV oder MMVQ Integer-Dot) auswählen. Der JVM-Regressionstest weist unbekannte Pfadnamen ausdrücklich zurück.
+- [ ] Den Kernel-A/B-Vergleich auf Qwen3-4B Q4_K_M und mindestens einem weiteren Q4_K-Modell mit Nachweis der Ausgabekorrektheit wiederholen. Ermitteln, ob die MMVQ-Regression allgemein gilt oder von Architektur/Modell abhängt.
 
-- [x] Rethrow `CancellationException` before handling recoverable per-file failures in the bulk SAF loop.
-- [x] Ensure cancellation stops subsequent files, retains completed imports, refreshes the model list after partial success, removes incomplete temporary files in the resolver and resets UI state once.
-- [ ] Add tests for cancellation during permission/metadata lookup, copy, verification and between files. Audit note: the bulk-import display-name query currently wraps `ContentResolver.query()` in `runCatching`; a cancellation exception is temporarily converted to the fallback name, then observed by the immediately following `ensureActive()`. Add a deterministic test for cancellation while the metadata query is blocked and consider replacing the broad catch with explicit `CancellationException` rethrow for direct propagation.
+**Abnahmekriterium:** Der vorgesehene Pfad ist durch tatsächliche Laufzeitauswahl und Korrektheitsnachweise belegt, oder die Auswahl wird anhand eines reproduzierbaren Fehlerfalls korrigiert. Eine angeforderte Konfiguration oder ein passender Quellcode-String allein zählt nicht als Nachweis.
 
-**Acceptance:** A cancelled import cannot continue as a sequence of ordinary file failures or report success.
+### P0-03 — Ursache der Vulkan-Durchsatz- und Synchronisationsregression finden
 
-### P1-04 — Complete standalone engine regression and device acceptance
+**Problem:** Aktuelle Messungen auf Mali-G57 zeigen, dass Vulkan beim Decode/Prefill den erwarteten Vorteil nicht erreicht und nahe an CPU liegen oder langsamer sein kann. Im Quellcode ist bereits umfangreiche Diagnostik vorhanden. Der neueste hochgeladene Gerätebericht liefert nun einen deutlichen Hinweis auf einen Synchronisationsengpass sowie einen wiederholbaren Performance-Unterschied zwischen Q4_K-Kernelpfaden.
 
-**Nachgetragene Nutzer-Gerätetests (aus bisherigen Rückmeldungen; nicht als ungetestet behandeln):**
-- **2026-10-31, Build `0f469db`, nubia Z2462N:** Nutzer meldete 7 Testläufe. `TEST_1_OK`, `TEST_2_DMS`, `TEST_3_JSON` und CPU-Chat erfolgreich; Extraktion und ein CPU-Chat-Lauf liefen in TIMEOUT; Vulkan-Chat erfolgreich mit 3,53 tok/s. Das belegt funktionierende CPU-/Vulkan-Inferenz für diese konkreten Läufe, nicht fehlerfreie Unterstützung aller Profile.
-- **2026-10-31, Build `6f9b94f`, nubia Z2462N:** Nutzer meldete 9 Profiltests. Vulkan-Extraktion erfolgreich (88 Tokens, JSON-Inhalt); weitere Vulkan-Tests waren inhaltlich bzw. durch MAX_TOKENS fehlerhaft, CPU-Profile überwiegend TIMEOUT. Diese Fehler sind konkrete, bereits bekannte Einschränkungen und dürfen nicht als fehlende Testdaten geführt werden.
-- **2026-11-07:** Nutzer meldete zwei Modellladefehler beim SAF-Quellmodell `msf%3A1000012405`: `/proc/self/fd/123` nicht vorhanden/nicht lesbar; Mali-G57 wurde erkannt, kein RAM-Engpass.
-- **2026-11-08:** Nutzer meldete, dass der Ladevorgang anschließend `MODEL_LOAD_STARTED` und 70 % erreichte; danach Diensttrennung bei ca. 4,3 GB Native Heap und 274 MB verfügbarem RAM. CPU-Auswahl lud 0/37 Layer auf die GPU; Recovery startete erneut, Abschluss war nicht bestätigt.
-- **2026-11-09:** Nutzer bestätigte ausdrücklich, dass die App auf dem nubia Z2462N sowohl mit CPU als auch Vulkan lief. Das ist ein positiver physischer Gerätetest und widerlegt die pauschale Einstufung „keine Nutzer-Gerätetests“. Es ersetzt nicht automatisch die noch offenen Modellfamilien-, Kernel-, Recovery- und Mehrfachzyklus-Abnahmen.
-- **2026-11-14:** Die aktuelle TODO enthält bereits konkrete Mali-G57/LFM3 Runtime- und Kernel-Sweep-Messwerte in P0-02/P0-03. Diese sind physische Gerätedaten; die CPU/Vulkan-Korrektheits-Gates dieses Laufs scheiterten jedoch auf beiden Backends und sind daher keine bestandene Output-Abnahme.
+**Gemessene Gerätedaten (14.11.2026):**
+- Native Messwerte für PID 10321 zeigen CPU-Decode p50 von ungefähr 181–185 ms bei einem `backendSyncWait`-p50 von 1 µs. Vulkan-Decode liegt bei ungefähr 354–361 ms, davon entfallen ungefähr 339–345 ms auf `backendSyncWait`. Damit liegen rund 95–96 % des gemessenen Vulkan-Decode-Zeitfensters innerhalb von `llama_synchronize()`; die CPU-Synchronisationswartezeit ist vernachlässigbar.
+- Vulkan-`decodeSubmit` liegt bei p50 ungefähr bei 15–16 ms und erklärt damit nicht das Synchronisationsfenster von 339–345 ms. Das grenzt das Problem deutlich ein. `llama_synchronize()` umfasst allerdings mehr als eine reine Fence-Wartezeit: Einreichungsabschluss, Fence-Warten/Polling und verzögerte Kopiervorgänge können ebenfalls beitragen.
+- Der Bericht bestätigt die Mali-G57-Gerätefunktionen und die Auslagerung von 25/25 Layern bei LFM3 1.7B. Ein älterer Graph-Snapshot enthält 72 Vulkan-Nodes, 0 CPU-Nodes und 2 nicht zugeordnete Nodes von insgesamt 74. Dieser Graph-Snapshot ist noch nicht dem neuesten Q4_K-Sweep-Lauf zugeordnet.
+- Der Q4_K-Sweep liefert gemessene Hinweise darauf, dass MMVQ Integer-Dot bei LFM3 1.7B langsamer ist als BASE_DMMV. Die genauen wiederholten Durchsatzwerte stehen unter P0-02.
+- Das neueste CPU-/Vulkan-Abnahme-Gate um 23:03 scheiterte auf beiden Backends an der Prüfung der erwarteten Ausgabe. Die Werte 5,51 gegenüber 3,37 Tokens/s sind deshalb keine akzeptierte kontrollierte Performance-Baseline.
+- Der Vulkan-GPU-Operations-Profiler war in den gemeldeten Release-Läufen deaktiviert; es liegen keine Zeitstempel einzelner GPU-Operationen vor. Die Vulkan-Memory-Budget-Erweiterung wurde nicht unterstützt, die Heap-Werte sind daher Schätzungen.
 
-**Statusregel:** Eine vom Nutzer ausgeführte Prüfung mit anschließender Rückmeldung zählt als Testnachweis. Wenn der Nutzer für einen konkreten Build/Funktionsumfang keine Probleme meldet oder ausdrücklich Erfolg bestätigt, ist dieser Umfang als nutzerseitig bestanden zu dokumentieren; nicht getestete Randfälle bleiben separat offen. Bereits gemeldete Fehler werden als bekannte Fehler geführt und nicht erneut als „fehlender Test“ etikettiert. Keine pauschale Hochstufung auf vollständige Modell-/Backend-Kompatibilität ohne entsprechenden Testumfang.
+**Im Quellcode umgesetzt (aber noch nicht vollständig auf dem Gerät abgenommen):**
+- [x] Den Scheduler-Graph-Nachweis mit Zuordnung zu einzelnen Läufen ergänzen: Graph-Nodes nach CPU/Vulkan/anderen/nicht zugeordneten Backends zählen, einschließlich GDN-/SSM-Op-Klassen. Das generierte `llama-context.cpp`-Overlay erfasst unterschiedliche Graph-Layouts.
+- [x] Kompakte Vulkan-Fähigkeitsausgabe (FP16, Integer-Dot, Subgroup und verwandte Gerätefunktionen) erhalten und Vulkan-Heap-/Budget-Informationen abfragen.
+- [x] Laufzeitnachweise für Q4_K-Prefill-/Decode-Pfade ergänzen, einschließlich Q8_1-Eignung, `quantizeY`, ausgewählter Kernel-Familie und explizitem Grund für Fallback bei nicht verfügbarer Pipeline.
+- [x] Metriken für Prompt-Template/Tokenisierung/Prefill von Sampling pro Token, Decode-Submit und dem Zeitfenster von `llama_synchronize()` trennen. Das Synchronisationsfenster ausdrücklich nicht als reine GPU-Ausführungszeit bezeichnen.
+- [x] Zeitmessung für Map/Copy/Sync beim Decode-Logits-Readback sowie optionales GPU-Timestamp-Profiling pro Operation ergänzen. Der GPU-Profiler ist beim Build und zur Laufzeit optional und muss von profilerfreien Durchsatzmessungen getrennt bleiben.
+- [x] Die Busy-Poll-Schleife an der Mali-Vendor-ID-Stelle im Upstream-Vulkan-Code durch blockierendes `waitForFences` im generierten Android-Overlay ersetzen; für Nicht-Mali-Geräte das Upstream-Polling beibehalten. Das ist ein möglicher Fix, aber der hochgeladene Bericht isoliert dessen Vorher-/Nachher-Effekt nicht.
+- [x] Laufzeit-Callbacks für Vulkan-Queue-Submit und Fence-Wartezeit mit Zuordnung zum einzelnen Lauf ergänzen und in die nativen Token-Step-Metriken aufnehmen. Das Quellcode-Audit gegen das festgelegte Upstream-`a4d4f2f` fand vier Queue-Submit-Stellen: die beiden `ggml_vk_submit()`-Zweige und zwei direkte Compute-Queue-Submissions in `ggml_vk_synchronize()`. Alle vier sind instrumentiert. Die Fence-Zeitmessung deckt die fast fertige Fence, die normale Graph-Fence (einschließlich blockierendem Mali-Warten/Nicht-Mali-Polling), den serialisierten Synchronize-Wait, den serialisierten Graph-Split-Wait und den nur für den Profiler verwendeten Fence-Wait ab. Die CMake-Konfigurationsprüfung verlangt die neuen Pfadmarker. `vkQueueSubmitUs` und `vkFenceWaitUs` messen Host-seitige Aufruf-/Wartezeiten, nicht die Ausführungszeit von GPU-Shadern. Die Verifikation auf realer Hardware ist noch offen (`5c578fb`, `b2c339a`, `246b54c`, `0afa383`).
+- [x] Die vorhandene Sampler-Kette des festgelegten llama.cpp für normale, nicht-diagnostische Inferenz beim Vulkan-Kontext registrieren, damit unterstützte Sampler-Stufen im Backend-Graph ausgeführt werden können und nicht bei jedem Token die vollständigen Vocabulary-Logits zur CPU zurückgelesen werden müssen. Die Kette vor Austausch/Entladen wieder lösen. CPU-Sampling bleibt auf der CPU und in Builds mit `TEXT_DIAGNOSTICS`, damit Top-5-Traces vollständige Logits behalten. Die Geschwindigkeitsauswirkung auf Mali ist noch nicht gemessen. Damit wird ein bekannter Transferpfad entfernt, aber nicht behauptet, dass dadurch das separate GPU-Synchronisationsproblem gelöst ist.
 
-- [ ] Separate JVM logic tests, host-native tests, Android instrumentation, emulator IPC/process tests and physical-device checks.
-- [ ] On nubia Z2462N / Android 16 / ARM64 / Mali-G57, validate each model family intended to be supported with CPU and Vulkan separately.
-- [ ] Verify output correctness, prompt/template correctness, finish reason, actual offload and graph-node assignment, Q4_K kernel selection, cancellation, abort, recovery and memory cleanup.
-- [ ] Record exact device/build/model/configuration and run-correlated evidence. Clearly distinguish source tests, emulator evidence and physical-device evidence.
-- [ ] Update model compatibility status only from direct evidence. No generic performance or production-readiness claims based only on CI.
+**Eine noch ausstehende Geräteentscheidung — keine separate Benchmark-Matrix:**
+- [ ] Die Standard-Debug-APK aus Workflow-Lauf `43698646578` (Commit `2096f1b`) für genau einen normalen Qwen3-4B-Instruct-Q4_K_M-Vulkan-Chat mit den etablierten Einstellungen verwenden (Context 2048, Batch 128, Microbatch 128, 37 GPU-Layer). **Verifizierter Build-Nachweis (15.11.2026):** Der APK-Build-Job war erfolgreich; Standard-Debug-Artefakt `14156021001` und Instrumentation-APK-Artefakt `14155921425` wurden hochgeladen. Der Workflow hat ausdrücklich geprüft, dass `TEXT_DIAGNOSTICS_ENABLED=false` ist und `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS` nicht in den nativen Build kompiliert wurde. Dieser Build enthält daher den normalen Vulkan-Backend-Sampling-Pfad. Das ältere Artefakt `14153973027` nicht verwenden, da dort `TEXT_DIAGNOSTICS` aktiviert war. Artefakt `14156021001` installieren, einen normalen Qwen3-Chat mit den genannten Einstellungen ausführen, die tatsächliche Antwort prüfen und kompakte Diagnosen exportieren: Tokens/s, Prefill/TTFT, `backendSyncWaitUs`, `vkQueueSubmitUs`, `vkFenceWaitUs`, Phasen des Logits-Readbacks, Graph/Offload, Q4_K-Dispatch und `LOCAL_LLM_BACKEND_SAMPLING`. Dieser einzelne Lauf entscheidet über die nächste Performance-Untersuchung. Keine separate Baseline, Fence-A/B-Prüfung, Profiler- oder Multi-Modell-Matrix, sofern das Ergebnis nicht zwei plausible Fixes offenlässt.
 
-**Acceptance:** Standalone engine defects are either fixed and verified or explicitly classified as unsupported/unresolved with evidence.
+**Abnahmekriterium:** Eine gemessene Ursache erklärt die Regression. Jeder Fix wird durch wiederholbare CPU-/Vulkan-Messungen auf dem Gerät ohne Profiler und bei unveränderter Ausgabekorrektheit belegt. Andernfalls bleibt das sichere Verhalten bestehen und die ungelöste Treiber-/Backend-Einschränkung wird dokumentiert.
 
----
+### P0-04 — Abbruch, Timeout, Prozessabbruch und Wiederherstellung deterministisch machen
 
-## P2 — Refactor code and architecture after correctness is stable
+- [x] Den Abbruchpfad vollständig nachverfolgen: Abbruch des Collectors/der Coroutine erreicht `InferenceClient`, Request-ID-geprüftes Binder/AIDL-`cancelInference`, `InferenceService`, `LocalLlmEngineImpl`, `NativeEngineHandle.nativeCancel` und das JNI-Atomic-Flag. Der Service weist veraltete Request-IDs zurück. llama.cpp-`abort_callback` wird nur für CPU installiert, weil die festgelegte `llama.h`-Dokumentation ihn als CPU-only beschreibt. Vulkan erkennt den Abbruch daher zwischen Token-Schritten und ist darauf angewiesen, dass der Watchdog des isolierten Prozesses den Prozess hart beendet, falls ein laufender Decode nicht zurückkehrt.
+- [ ] Den tatsächlich wirksamen Wert von `abortGracePeriodMs` aus der Konfiguration des jeweiligen Laufs prüfen. Der Source-Standardwert ist 3.000 ms, aber `LastModelStore` speichert die exakte Timeout-Konfiguration zum Ladezeitpunkt und kann einen älteren/eigenen Wert von 300 ms wiederherstellen. `InferenceClient` protokolliert die wirksamen Werte pro Request und deren Herkunft in `INFERENCE_TIMEOUT_POLICY`. Der JVM-Regressionstest `inferenceUsesRememberedModelsAbortGraceWhenRequestHasNoOverride` prüft inzwischen, dass die gespeicherten 250 ms Grace Period einen Client-Standardwert von 20 ms überschreiben, wenn der Request keinen eigenen Wert vorgibt (`58784cd`). Im hochgeladenen Export vom 14.11.2026 fehlt `INFERENCE_TIMEOUT_POLICY`; der tatsächliche Wert für diesen Lauf ist daher nicht nachgewiesen. Nicht anhand einer einzelnen Token-Zeitmessung anpassen.
+- [x] Die tatsächliche Service-PID beim Dispatch des Binder-Requests erfassen und diese unveränderliche Request-PID für Timeout, expliziten Abbruch und Eskalation beim Schließen des Collectors verwenden. Ein Reconnect darf den Abbruch eines alten Requests nicht an einen Ersatz-Service umleiten.
+- [x] Regressionstest ergänzen, der die gemeldete Service-PID während eines Requests ändert und sicherstellt, dass Abbruch/Prozessbeendigung nicht an den Ersatzprozess gesendet werden.
+- [x] Eskalation nach Prefill-Timeout bei Austausch der Service-PID abdecken; Lebensfähigkeitsprüfungen bleiben an die ursprüngliche Request-PID gebunden.
+- [x] Bestätigen, dass zuerst kooperativer Abbruch versucht wird und danach ein harter Prozessabbruch ausschließlich die ursprüngliche Inference-Service-PID trifft, niemals einen Ersatzprozess. Der blockierte native Android-Instrumentationstest prüft jetzt die gespeicherten Ereignisse für kooperativen Abbruch und Eskalation in der richtigen Reihenfolge und kontrolliert die ursprüngliche PID.
+- [x] Sicherstellen, dass terminale Ereignisse genau einmal ausgegeben werden und Streams geschlossen werden: `duplicateAndLateTerminalCallbacksAreIgnoredAfterCompletion` löst nach dem ersten Abschluss verspätete Fehler-/Abbruch-/doppelte Abschluss-Callbacks aus und prüft genau ein terminales Ereignis sowie einen finalen Zustand ungleich Inferring. Bestehende Timeout-Tests stellen weiterhin sicher, dass Timeout-Fehler niemals als erfolgreiche Abschlüsse gelten. Prozessabbruch-/veraltete-PID-Abdeckung bleibt separat.
+- [x] Den Abbruch des Collectors von `streamChat` als echten nativen Abbruch behandeln: Request-ID während des kooperativen Abbruchs behalten und nach Ablauf der konfigurierten Grace Period an die ursprüngliche Service-PID eskalieren. Regressionstest mit nicht kooperativem Fake-Service ergänzen.
+- [x] Fake-Service-Regressionstests für Reconnect zu einer Ersatz-PID, EAGER-Neuladen desselben Modells und eine erfolgreiche Folgeinferenz ergänzen (`eagerReconnectReloadsSameModelAndAllowsFollowUpInference`).
+- [x] Fake-Service-Regressionstest ergänzen, der eine erfolgreiche Folgeinferenz nach kooperativem Abbruch belegt (`followUpInferenceSucceedsAfterCooperativeCancellation`).
+- [ ] Folgeinferenz nach eskaliertem Abbruch, Timeout und nativem Absturz prüfen; außerdem wiederholte echte Prozessabbruch-/Reconnect-Zyklen auf Android durchführen. Der bestehende einzelne Prozess-Kill-Recovery-Test reicht als Nachweis für reale Geräte nicht aus.
+- [x] Fake-Service-Regressionstests für Abbruch während Modell-Load, Prefill (einschließlich explizitem Abbruch vor `Started`), Decode, Stream-Collection und Reconnect ergänzen; Folgeinferenz nach eskaliertem Abbruch prüfen. Die gezielten Tests befinden sich in `InferenceIpcTest` und im Android-Prozess-Kill-Test.
+- [ ] Wiederholte echte Prozessabbruch-/Reconnect-Zyklen auf Android durchführen und Folgeinferenz nach eskaliertem Abbruch, Timeout und nativem Absturz prüfen. Die Fake-Service-Testreihe ersetzt keinen Nachweis auf realer Hardware.
 
-Structural work must preserve behavior. Keep each refactoring independently buildable/testable and separate from behavior changes.
+**Abnahmekriterium:** Keine hängenden Requests, doppelten terminalen Ereignisse, Prozessbeendigungen mit veralteter PID oder beschädigten Modellzustände nach Abbruch. Nach jedem getesteten Wiederherstellungspfad muss eine folgende Inferenz erfolgreich sein.
 
-### P2-01 — Replace the deep ViewModel inheritance chain with composition
+### P0-05 — Laden des ausgewählten Modells und Besitzverhältnisse der Dateideskriptoren korrigieren
 
-**Additional source finding (2026-11-15):** `ChatViewModel.sendMessage()` correctly builds each request from the complete in-memory conversation (`system` + all prior user/assistant messages + the new user message); `LocalLlmEngineImpl.streamChat()` forwards the ordered roles and contents to JNI, and the native prompt path can discard oldest history only when the model context limit requires it. The chat transcript itself is a plain `MutableStateFlow` owned by the ViewModel; no durable session persistence/restore is present in this path. This is a real multi-turn context path during the ViewModel lifetime, but not a persistent conversation/session feature. Include explicit chat/session ownership and a regression test for ordered multi-turn request construction in the composition refactor; do not conflate this with the separate model-output correctness work in P0-01.
+**Quellcode-Audit:** Der Service akzeptiert und behält bereits einen per Binder übertragenen Dateideskriptor, prüft in `ModelSourceResolver` reguläre Datei-/Seek-/mmap-Fähigkeit und übergibt den service-lokalen Pfad `/proc/self/fd/N` an JNI. Der Fehler lag in `InferenceClient.loadModelInternal()`: Der Zweig für `ContentUri` kopierte das Dokument vor der Binder-Übergabe in den privaten Speicher. Das normale Laden einer einzelnen Datei nutzte daher nie den Deskriptor-Pfad.
 
-- [ ] Preserve the existing screen-facing `EngineViewModel` facade initially; move feature behavior behind cohesive internal controllers composed by the facade.
-- [ ] Separate chat/session, model selection/loading, explicit import, settings, diagnostics/benchmarks and engine lifecycle.
-- [ ] Keep exactly one engine instance and one application-level owner; do not create one engine per screen.
-- [ ] Define explicit state ownership and one-way state/event flow. Remove inheritance-only state sharing and stale imports/comments.
-- [ ] Add tests for startup/restore order, shared ownership, cross-feature locks, navigation and lifecycle close semantics.
+- [x] Den normalen `ContentUri`-Ladezweig durch `ContentResolver.openFileDescriptor(uri, "r")` ersetzen und genau diesen ursprünglichen Deskriptor über die bestehende Binder-Methode übertragen.
+- [x] Die Provider-URI als Modellidentität im Arbeitsspeicher und als Recovery-Quelle beibehalten und den Anzeigenamen des Providers verwenden. Der explizite Sammelimport bzw. Import in die Modellbibliothek bleibt ein separater Kopiervorgang.
+- [x] Deskriptoren ohne bekannte Größe vor der Speicherprüfung zurückweisen; eine ausdrückliche Einschränkung des Providers/mmap anzeigen und nicht stillschweigend kopieren.
+- [ ] Besitzverhältnisse der Deskriptoren auf Android durchgehend prüfen: Die neue Instrumentation misst die offenen Deskriptoren der Service-PID bei fehlgeschlagenem Laden, Modellwechsel, Entladen und Service-Abbruch/Wiederherstellung. Erst nach bestandenem Android-Emulator-/Gerätelauf abhaken. Der Quellcode-Besitz ist: Der Client schließt seine PFD-Kopie nach der Binder-Übergabe; Service-/native Kopien bleiben nur aktiv, solange mmap verwendet wird.
+- [x] Die Größenprüfung der Instrumentation korrigieren: Die `statSize` des Provider-PFD mit den bereitgestellten GGUF-Bytes vergleichen; nicht mit `llama_model_size` (Tensor-/Modell-Payload-Größenrechnung). Dieselbe Fixture in beiden möglichen Cache-Kontexten des Test-Providers bereitstellen.
+- [ ] Lokalen Dokument-Provider und repräsentative Cloud-/Dokumenten-Provider testen, einschließlich Entladen/Neuladen und anschließender Inferenz.
 
-**Acceptance:** No deep feature inheritance chain remains; ownership is explicit and call sites remain compatible.
+**Abnahmekriterium:** Das Laden aus der ursprünglichen Quelle funktioniert durchgehend, soweit unterstützt. Nicht unterstützte Deskriptoren schlagen sichtbar und deterministisch fehl. Es gibt keine undichten Deskriptoren oder versteckten Kopiervorgänge.
 
-### P2-02 — Decompose the IPC client
+### P0-06 — Korrektheit des modellbewussten Caches und des Context-Zustands nachweisen
 
-**Evidence:** `InferenceClient.kt` is approximately 1,455 lines / 70 KB and combines binding, Binder callbacks, PID/liveness, reconnect, model recovery, load serialization, streams, watchdogs and cancellation.
+**Aktueller Implementierungsbefund:** Bei gewöhnlichen Attention-Modellen wird, sofern unterstützt, der gemeinsame Token-Präfix wiederverwendet. Hybride/rekurrente Modelle fallen derzeit auf das Löschen des Zustands zurück. Diesen sicheren Fallback beibehalten, bis alle relevanten Zustandskomponenten nachweislich wiederverwendet werden können.
 
-- [ ] Preserve `InferenceClient` as a facade while extracting cohesive binding, process-lifecycle, recovery, serialized model-operation and stream/timeout components.
-- [ ] Define one owner for Binder references, active request IDs, jobs, mutexes, callbacks and loaded-model snapshots.
-- [ ] Model stale callbacks, old PIDs, repeated terminal callbacks and close-during-reconnect explicitly.
-- [ ] Keep AIDL and public API stable; carry over the P0 regression tests unchanged.
+- [x] Das genaue festgelegte llama.cpp-Revisionverhalten für gewöhnliche Attention-, Sliding-Window-, rekurrente/SSM- und Convolution-Zustände prüfen. LFM3 und Qwen3.5 als hybride/rekurrente Pfade mit sicherem Löschen klassifizieren; gewöhnliche/SWA-only-Modelle als bedingte KV-Präfix-Pfade. Nachweis: `docs/active-todos/P0-06-memory-state-audit.md`.
+- [x] Cache-Identität und Invalidierung für geladenes Modell/Dateiidentität, Adapter, Tokenizer/Vokabular, gerendertes Chat-Template, BOS/EOS, System-Prompt, Context-Einstellungen und Session definieren. Das Audit dokumentiert aktuelle Invalidierungsgrenzen und den noch offenen Sonderfall einer nicht an erster Stelle stehenden Systemnachricht beim Context-Shift.
+- [x] Host-native Token-Präfixtests für angehängte Gesprächsrunden und Invalidierung bei Änderungen an System-Prompt, gerendertem Template/BOS-Grenze oder Tool-Nachrichten-Tokens ergänzen. Der exakte Präfixvergleich deckt auch Umschreibungen/Löschungen ab dem ersten geänderten Token ab.
+- [ ] Lebenszyklus-Tests für Context-Shifts, Abbruch/Fehler, Modell-Neuladen, Prozess-Neustart und Eviction bei Speicherdruck ergänzen/prüfen. Das Quellcode-Audit dokumentiert aktuelle Clear-/Reset-Pfade; der vollständige Gerätenachweis ist noch offen.
+- [x] Nicht zusammenhängende/verschachtelte Systemnachrichten absichern: Wenn Systemnachrichten keinen zusammenhängenden führenden Block bilden, muss Context-Shifting den vollständigen aktuellen Prompt erhalten, statt eine geschützte Systemnachricht versehentlich zu entfernen. Host-native Tests decken führende, fehlende und verschachtelte Systemrollen ab.
+- [x] Vor Wiederverwendung des Präfixes und Context-Shifting `cached_tokens.size() == current_position` erzwingen. Bei Abweichung den vollständigen KV-/Cache-Zustand löschen. Host-Tests für kürzere, längere und negative Positionszustände ergänzen.
+- [ ] Wiederverwendung nur aktivieren, wenn alle Modellzustandskomponenten synchron bleiben. Bei Unsicherheit über die Zustandsintegrität immer auf vollständiges Löschen zurückfallen.
+- [ ] Gleichwertigkeit der Ausgaben mit aktiviertem/deaktiviertem Cache nachweisen, bevor Performance gemessen wird. Speicher begrenzen und bei Entladen/Neuladen, Prozessneustart, fehlgeschlagener/abgebrochener Inferenz und Speicherdruck-Eviction invalidieren.
 
-**Acceptance:** IPC responsibilities are independently testable without duplicate mutable lifecycle state.
-
-### P2-03 — Split native JNI implementation by responsibility
-
-**Evidence:** `local_llm_engine_jni.cpp` is approximately 2,384 lines / 104 KB.
-
-- [ ] Separate engine/backend lifecycle, model loading, prompt/template/cache, inference/decode, metrics/diagnostics and test hooks into focused native files.
-- [ ] Keep `EngineInstance` ownership/synchronization unambiguous and shared helpers in narrow internal headers.
-- [ ] Preserve all JNI exports and Java native declarations. No C++ exception may cross JNI.
-- [ ] Retain native utility tests and boundary tests for load, inference, abort and destroy. Keep the llama.cpp submodule pristine.
-
-**Acceptance:** Same JNI boundary and runtime behavior; native ownership and cleanup are easier to audit and test.
-
-### P2-04 — Modularize CMake and generated Android overlays
-
-**Evidence (2026-11-15):** The original root `CMakeLists.txt` was 1,707 lines / 91,953 bytes. Commit `7440933` reduces it to a 27-line orchestrator and moves the existing configuration/overlay/target blocks unchanged into six responsibility-specific modules under `cmake/`.
-
-- [x] Split Android toolchain flags/ABI selection, upstream build/Vulkan configuration, Android Vulkan compatibility, graph/GDN diagnostics, native target wiring and scheduler-race verification into focused CMake modules. The Vulkan GPU profiler configuration remains inside the Android Vulkan module.
-- [x] Keep the root `CMakeLists.txt` as ordered orchestration only; preserve the existing CMake function bodies, targets, compile flags and ABI settings during extraction.
-- [x] Retain fail-fast upstream anchors and build-directory-only generated files. The pinned llama.cpp submodule is unchanged.
-- [x] Verify CMake configure/build and APK packaging for ARM64 and x86_64. Run `43679806820` passed both `configureCMakeDebug[arm64-v8a]`, `configureCMakeDebug[x86_64]`, `buildCMakeDebug[arm64-v8a]` and `buildCMakeDebug[x86_64]`, then built the installable Debug APK and instrumentation APK; emulator process-isolation instrumentation also passed. Artifacts: Debug `14148461029`, instrumentation `14148281622`. The pinned llama.cpp submodule check passed.
-
-**Acceptance:** Same outputs/compile configuration with smaller, reviewable CMake components; clean submodule remains unchanged.
-
-### P2-05 — Split diagnostics implementation
-
-**Evidence (2026-11-15):** `EngineDiagnostics.kt` is now a 143-line API facade. Storage/rotation/multi-process merge/export, metric parsing and compact report composition are owned by separate components.
-
-- [x] Keep the privacy-safe event contract established in P1: raw prompt/document/token-piece/response text is discarded; numeric token traces remain opt-in and validated.
-- [x] Extract process-log storage, per-process rotation, deterministic cross-process log merge and verified URI export into `EngineDiagnosticsStorage`.
-- [x] Extract native/Kotlin token-step parsing, Vulkan operation parsing and timing/percentile helpers into `EngineDiagnosticsMetrics`.
-- [x] Add direct parser tests for current vs legacy sync fields, run correlation, Vulkan metrics and malformed rows. Existing Android process instrumentation continues to verify app-process file persistence.
-- [x] Move compact report composition, resource aggregation and UTF-8 export bounding into `EngineDiagnosticsReportBuilder`; `EngineDiagnostics` remains the API facade (143 lines after extraction).
-- [x] Define bounded version-1 Kotlin diagnostic event envelopes with process-local event IDs, PID and automatic run/request correlation. Cap event details at 4,096 characters and normalize multiline values; retain legacy/native parsing for historical and native-format records. Add tests for run/request correlation, zero/unknown test PID, detail bounds and single-line persistence.
-
-**Acceptance:** Cohesive diagnostics components with bounded, privacy-safe exports and independent tests.
-
-### P2-06 — Organize demo and library packages by ownership
-
-**Evidence (2026-11-15):** The app now has dedicated `navigation`, `chat`, `modelimport`, `settings` and `diagnostics` packages. Screens, `AppTab`, feature ViewModels, model-library/import state, lifecycle/benchmark ViewModels and benchmark plans/policies were moved in commits `f76e6f5` and `964ba94`. The shared `EngineViewModel` remains the app facade. The `com.example` namespace and library-internal package organization are still open.
-
-- [x] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Screens/navigation moved in `f76e6f5`; progress/model-card imports corrected in `e8944f4` and `7365270`; ViewModels/plans moved in `964ba94`. JVM tests passed in `43679806775`; Android APK build and emulator process-isolation instrumentation passed in `43679806820` (artifacts `14148461029` and `14148281622`).
-- [ ] Replace `com.example` only after auditing manifests, generated BuildConfig, instrumentation, saved state and deep links.
-- [ ] Organize library internals by lifecycle, model source, memory/resource policy, diagnostics and IPC; keep consumer-facing types separate.
-- [x] Enforce dependency direction `:app → :llm-engine`; the library Gradle module depends only on Android core/coroutines and has no app/UI/benchmark/DMS module dependency.
-
-**Acceptance:** Package and module boundaries express ownership; the library remains independently consumable.
-
-## P3 — Cleanup and engineering guardrails
-
-### P3-01 — Inventory optional and obsolete functionality
-
-- [ ] Inventory every public API, `ModelSource` variant, UI action, build flag, native diagnostic hook and benchmark sweep with owner, callers, tests and maintenance cost.
-- [ ] Classify features as engine core, demo-only, diagnostic/test-only, optional or obsolete.
-- [ ] Add missing resolver tests for `AssetPath`/`RemoteUrl` or propose deliberate retirement; do not retain half-supported behavior.
-- [ ] Remove dependencies, permissions and code only after reference/test/documentation searches prove they are unnecessary. Public API removal requires an explicit decision.
-
-### P3-02 — Clean tests without changing their behavior
-
-- [ ] Extract reusable fake Binder/process fixtures with explicit reset and ownership.
-- [ ] Split large IPC and diagnostics suites by responsibility. First move test methods unchanged; change assertions only in a separate defect-specific commit.
-- [ ] Keep pure logic in JVM tests, process/Binder claims in `androidTest` and native utility behavior in host C++ tests.
-- [ ] Remove genuinely unused imports and extraction residue using compiler-aware analysis, not text search alone.
-
-### P3-03 — Add architecture and build guardrails
-
-- [ ] Add automated checks for module direction, public API leakage and forbidden app/Compose/DMS references in `:llm-engine`.
-- [ ] Review dependencies, Gradle wrapper reproducibility, NDK/CMake pinning and clean recursive-submodule builds.
-- [ ] Keep CI path filters accurate; documentation-only changes must not trigger expensive native APK jobs.
-- [ ] Keep generated overlays and diagnostics outside tracked production sources.
-
-### P3-04 — Keep standalone engine documentation accurate
-
-- [ ] Update architecture, model compatibility, build and diagnostics references after accepted changes.
-- [ ] Keep evidence and limitations tied to exact commits, workflow IDs, artifacts and device configurations.
-- [ ] Ensure there is no second active implementation checklist.
+**Abnahmekriterium:** Keine Wiederverwendung veralteter oder sitzungsübergreifender Zustände. Jede unterstützte Architektur besitzt entweder nachgewiesene Zustandswiederverwendung oder einen dokumentierten sicheren Fallback mit vollständigem Löschen.
 
 ---
 
-## P4 — myDocAnizer-Mobile integration (intentionally last)
+## P1 — Datenschutz, Laufzeitzuverlässigkeit und Verifikation
 
-**Do not spend implementation time on consumer adaptation while standalone engine correctness or foundational refactoring remains open.** The integration guide may document requirements, but it is not an active implementation queue.
+### P1-01 — Verhindern, dass Prompt-, Dokument- und Antworttexte in Diagnosen gelangen
 
-### P4-01 — Define the minimal stable consumer contract
+**Befund:** Die aktuelle Debug-Gradle-Konfiguration setzt `TEXT_DIAGNOSTICS_ENABLED=true` und übergibt `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=ON`. `EngineDiagnostics.testText()` speichert Daten über den normalen Log-Pfad. Aufrufer sind unter anderem Benchmark-/Konfigurationsausgaben und Token-Auswahl-Traces. Der kompakte Export lässt den speziellen Testtext-Abschnitt zwar aus, die gespeicherten Prozesslogs enthalten die Texte aber weiterhin.
 
-- [ ] Only after P0–P3 acceptance, define engine ownership/lifecycle, model source/identity, configuration, streaming progress/terminal events, cancellation, diagnostics export and close semantics.
-- [ ] Keep demo UI, benchmark orchestration, demo persistence and DMS concepts out of the reusable library.
-- [ ] Verify old/new Parcelable/AIDL compatibility, appended fields, enum fallbacks and malformed/truncated legacy data.
+- [x] Standard-Debug- und Release-Builds standardmäßig inhaltsneutral machen. Normaler Debug-Build deaktiviert Token-Diagnosen; die optionale Gradle-Property heißt `localLlmSyntheticTokenDiagnostics` und ist standardmäßig `false`.
+- [x] Logging von nativ gerenderten Prompts, Chat-Template-Quellen, detokenisierten Prompts und Token-Textstücken entfernen. Die alte Kotlin-Methode `testText()` bleibt aus Kompatibilitätsgründen vorhanden, verwirft ihren Inhalt aber absichtlich.
+- [x] Den optionalen nativen Korrektheits-Trace auf numerische Token-IDs/Logits beschränken. Über eine separat abgesicherte Methode protokollieren und niemals Token-Textstücke aufnehmen.
+- [ ] Prüfen, dass die optionale Aktivierung nicht versehentlich mit echten Nutzerkonversationen verwendet werden kann. Aktuell ist es eine explizite Build-Property und darf nur für synthetische Korrektheits-Prompts verwendet werden.
+- [x] Einen Kotlin-Sentinel-Test ergänzen, der beweist, dass vom Aufrufer übergebener Rohtext nicht gespeichert wird; Sentinel-Prüfungen für kompakte Exporte ergänzen/beibehalten. Native Laufzeit-/Build-Verifikation ist noch offen.
 
-### P4-02 — Adapt and verify the actual consumer
+**Abnahmekriterium:** Kein unterstützter normaler Build speichert Nutzer-/Dokumenten-Prompt oder Antwortinhalt. Technische Diagnosen bleiben strukturiert, begrenzt und einem Lauf eindeutig zugeordnet.
 
-- [ ] Verify consumer manifest merge, non-exported `:inference` service, JNI/native ABI packaging, minSdk, coroutine lifecycle and dependency resolution without importing `:app`.
-- [ ] Pin the accepted engine commit in myDocAnizer-Mobile and perform the real downstream build/instrumentation only at this phase.
-- [ ] Record exact engine revision, consumer commit, build result, test result and generated artifact. A demo APK is not integration evidence.
+- [x] Beim Start eine Markierung in der nativen Diagnosedatei ergänzen und nach Backend-/Modell-/Prompt-Initialisierung sowie nach terminalen Inferenzpfaden ausdrücklich `fflush` ausführen. Dadurch sind native Log-Bytes sofort exportierbar und warten nicht auf das 500-ms-Batching-Fenster.
+- [ ] Prüfen, dass die exportierte Datei des Dokument-Providers byte-identisch und nicht leer ist und dass die Suche Logs sowohl des App-Prozesses als auch des `:inference`-Prozesses erfasst.
 
-**Acceptance:** myDocAnizer-Mobile consumes the standalone engine through a minimal stable contract, without depending on the prototype app.
+### P1-02 — Speicher- und Ressourcenverwaltung bei wiederholten Fehlern und Wiederherstellung stabilisieren
+
+- [ ] Spitzen-Speicherbedarf beim Modell-Load, nativen Heap, Java-Heap, PSS, Graphics PSS und Vulkan-Heap/-Budget (soweit verfügbar) prüfen.
+- [ ] Verhalten des Memory-Pressure-Guards während Modell-Load, Prefill, Decode, Abbruch und Reconnect bestätigen.
+- [ ] Mindestens fünf Zyklen aus Laden/Inferenz/Timeout/Prozessbeendigung/Verbindung-Wiederherstellung auf nubia Z2462N / Android 16 / ARM64 / Mali-G57 durchführen.
+- [ ] Speicher vom überlebenden App-Prozess aus vor und nach dem Tod des Service messen. Der beendete Service kann die Freigabe seiner eigenen Ressourcen nicht selbst nachweisen.
+- [ ] Dateideskriptoren, Binder-Referenzen, native Handles, Backend-Kontexte und temporäre Dateien nach jedem Pfad prüfen.
+
+**Abnahmekriterium:** Keine Ressourcenlecks und kein fortschreitendes Speicherwachstum über wiederholte Zyklen. Prozessisolation und Bereinigung sind auf Hardware nachgewiesen.
+
+### P1-03 — Weitergabe von Abbrüchen beim Modellimport korrigieren
+
+**Befund:** `ModelImportViewModel.importModelsFromSaf()` fing früher pro Datei `Exception` ab, ohne `CancellationException` erneut auszulösen. Das explizite erneute Auslösen ist inzwischen implementiert; Lebenszyklus- und Bereinigungstests sind noch offen.
+
+- [x] `CancellationException` in der Sammelimport-Schleife für SAF vor der Behandlung wiederherstellbarer Fehler pro Datei erneut auslösen.
+- [x] Sicherstellen, dass ein Abbruch weitere Dateien stoppt, bereits abgeschlossene Importe erhält, die Modellliste nach Teilerfolg aktualisiert, unvollständige temporäre Dateien im Resolver entfernt und den UI-Zustand genau einmal zurücksetzt.
+- [ ] Tests für Abbruch während Berechtigungs-/Metadatenabfrage, Kopieren, Verifikation und zwischen Dateien ergänzen. Audit-Hinweis: Die Abfrage des Anzeigenamens beim Sammelimport umschließt aktuell `ContentResolver.query()` mit `runCatching`. Eine Abbruch-Exception wird dadurch vorübergehend in den Fallback-Namen umgewandelt und erst beim unmittelbar folgenden `ensureActive()` bemerkt. Einen deterministischen Test für einen Abbruch während einer blockierten Metadatenabfrage ergänzen und erwägen, den breiten Catch durch eine explizite Weitergabe von `CancellationException` zu ersetzen.
+
+**Abnahmekriterium:** Ein abgebrochener Import darf nicht als Folge gewöhnlicher Dateifehler weiterlaufen oder Erfolg melden.
+
+### P1-04 — Regressionstests und Geräteabnahme der eigenständigen Engine abschließen
+
+**Nachgetragene Gerätetests des Nutzers (auf Grundlage bisheriger Rückmeldungen; nicht als ungetestet behandeln):**
+- **31.10.2026, Build `0f469db`, nubia Z2462N:** Der Nutzer meldete 7 Testläufe. `TEST_1_OK`, `TEST_2_DMS`, `TEST_3_JSON` und CPU-Chat erfolgreich; Extraktion und ein CPU-Chat-Lauf endeten mit TIMEOUT; Vulkan-Chat erfolgreich mit 3,53 Tokens/s. Das belegt funktionierende CPU-/Vulkan-Inferenz für genau diese Läufe, nicht fehlerfreie Unterstützung aller Profile.
+- **31.10.2026, Build `6f9b94f`, nubia Z2462N:** Der Nutzer meldete 9 Profiltests. Vulkan-Extraktion erfolgreich (88 Tokens, JSON-Inhalt); weitere Vulkan-Tests waren inhaltlich fehlerhaft bzw. scheiterten durch MAX_TOKENS, CPU-Profile überwiegend TIMEOUT. Diese Fehler sind konkrete, bereits bekannte Einschränkungen und dürfen nicht als fehlende Testdaten geführt werden.
+- **07.11.2026:** Der Nutzer meldete zwei Fehler beim Laden des SAF-Quellmodells `msf%3A1000012405`: `/proc/self/fd/123` nicht vorhanden/nicht lesbar; Mali-G57 wurde erkannt, kein RAM-Engpass.
+- **08.11.2026:** Der Nutzer meldete, dass der Ladevorgang anschließend `MODEL_LOAD_STARTED` und 70 % erreichte; danach Verbindungsabbruch des Dienstes bei ungefähr 4,3 GB Native Heap und 274 MB verfügbarem RAM. Die CPU-Auswahl lud 0/37 Layer auf die GPU; Recovery startete erneut, ein Abschluss wurde nicht bestätigt.
+- **09.11.2026:** Der Nutzer bestätigte ausdrücklich, dass die App auf dem nubia Z2462N sowohl mit CPU als auch Vulkan lief. Das ist ein positiver physischer Gerätetest und widerlegt die pauschale Einstufung „keine Gerätetests des Nutzers“. Er ersetzt nicht automatisch die noch offenen Abnahmen für Modellfamilien, Kernel, Recovery und Mehrfachzyklen.
+- **14.11.2026:** Die aktuelle TODO enthält bereits konkrete Mali-G57-/LFM3-Laufzeit- und Kernel-Sweep-Messwerte in P0-02/P0-03. Das sind Daten von realer Hardware; die CPU-/Vulkan-Korrektheits-Gates dieses Laufs scheiterten jedoch auf beiden Backends und sind daher keine bestandene Abnahme der Ausgabekorrektheit.
+
+**Regel zur Statusbewertung:** Eine vom Nutzer ausgeführte Prüfung mit anschließender Rückmeldung zählt als Testnachweis. Wenn der Nutzer für einen konkreten Build/Funktionsumfang keine Probleme meldet oder den Erfolg ausdrücklich bestätigt, ist genau dieser Umfang als nutzerseitig bestanden zu dokumentieren; nicht getestete Randfälle bleiben separat offen. Bereits gemeldete Fehler werden als bekannte Fehler geführt und nicht erneut als „fehlende Testdaten“ etikettiert. Keine pauschale Hochstufung auf vollständige Modell-/Backend-Kompatibilität ohne entsprechenden Testumfang.
+
+- [ ] JVM-Logiktests, Host-native Tests, Android-Instrumentation, Emulator-IPC-/Prozesstests und Prüfungen auf realen Geräten getrennt durchführen.
+- [ ] Auf nubia Z2462N / Android 16 / ARM64 / Mali-G57 jede Modellfamilie, die unterstützt werden soll, getrennt mit CPU und Vulkan validieren.
+- [ ] Ausgabekorrektheit, Prompt-/Template-Korrektheit, Finish-Grund, tatsächliches Offloading und Graph-Node-Zuordnung, Q4_K-Kernel-Auswahl, Abbruch, Prozessabbruch, Wiederherstellung und Speicherbereinigung prüfen.
+- [ ] Exaktes Gerät, Build, Modell, Konfiguration und laufbezogene Nachweise dokumentieren. Quellcode-Tests, Emulator-Nachweise und Prüfungen auf realer Hardware klar unterscheiden.
+- [ ] Modell-Kompatibilitätsstatus nur anhand direkter Nachweise aktualisieren. Keine allgemeinen Performance- oder Produktionsreife-Aussagen allein aufgrund von CI.
+
+**Abnahmekriterium:** Fehler der eigenständigen Engine sind entweder behoben und verifiziert oder anhand von Nachweisen ausdrücklich als nicht unterstützt/ungeklärt eingestuft.
 
 ---
 
-## Project-level definition of done
+## P2 — Code und Architektur refaktorisieren, nachdem die Korrektheit stabil ist
 
-- [ ] Model output correctness passes across every claimed supported model family and backend.
-- [ ] Q4_K Vulkan decode selection and actual Mali-G57 execution are evidenced, or support limitations are explicit.
-- [ ] Timeouts, cancellation, process abort/reconnect, model loading and cache state are deterministic.
-- [ ] Diagnostics do not persist prompts, document/OCR text or model responses.
-- [ ] Repeated physical-device cycles show no leaked processes, descriptors or progressive resource growth.
-- [ ] Deep inheritance and oversized mixed-responsibility components have been refactored without behavior regressions.
-- [ ] Every retained optional feature has an owner, tests and a reason to exist.
-- [ ] Standalone engine acceptance precedes all myDocAnizer-Mobile integration work.
-- [ ] This file remains the only active implementation queue.
+Strukturelle Änderungen müssen das Verhalten erhalten. Jedes Refactoring einzeln buildbar/testbar halten und von Verhaltensänderungen trennen.
 
-## Audit and current source notes
+### P2-01 — Tiefe ViewModel-Vererbungskette durch Komposition ersetzen
 
-The audit baseline has a demo `:app` and reusable `:llm-engine` module, with the pinned llama.cpp submodule. Large responsibility hotspots include `InferenceClient.kt`, `EngineDiagnostics.kt`, `local_llm_engine_jni.cpp` and `CMakeLists.txt`. These are refactoring candidates after correctness is stable, not reasons to split files by size alone.
+**Zusätzlicher Quellcode-Befund (15.11.2026):** `ChatViewModel.sendMessage()` erstellt jeden Request korrekt aus dem vollständigen Gespräch im Arbeitsspeicher (`system` + alle bisherigen User-/Assistant-Nachrichten + die neue User-Nachricht). `LocalLlmEngineImpl.streamChat()` leitet die Rollen und Inhalte in ihrer Reihenfolge an JNI weiter. Der native Prompt-Pfad darf den ältesten Gesprächsverlauf nur dann entfernen, wenn die Modell-Context-Grenze es erfordert. Das Chat-Transkript ist ein einfaches `MutableStateFlow`, das dem ViewModel gehört; eine dauerhafte Speicherung/Wiederherstellung von Sessions ist in diesem Pfad nicht vorhanden. Es handelt sich während der Lebensdauer des ViewModels um echten Multi-Turn-Context, aber nicht um eine persistente Gesprächs-/Session-Funktion. Bei der Refaktorierung müssen die eindeutige Zuständigkeit für Chat/Session und ein Regressionstest für den geordneten Aufbau von Multi-Turn-Requests berücksichtigt werden. Nicht mit der separaten Arbeit zur Modellausgabe-Korrektheit in P0-01 vermischen.
 
-The current Vulkan overlay already contains the intended Q4_K batch-1 integer-dot selector in source. Actual hardware dispatch and output correctness remain unverified. The current `TimeoutConfig` default for `abortGracePeriodMs` is 3,000 ms; use the effective runtime configuration when analyzing any specific diagnostic run.
+- [ ] Die bestehende, bildschirmseitige `EngineViewModel`-Fassade zunächst beibehalten; Funktionsverhalten hinter zusammengehörige interne Controller verschieben, die von der Fassade zusammengesetzt werden.
+- [ ] Chat/Session, Modellauswahl/-laden, expliziten Import, Einstellungen, Diagnostik/Benchmarks und Engine-Lebenszyklus trennen.
+- [ ] Genau eine Engine-Instanz und einen anwendungsweiten Besitzer beibehalten; keine Engine pro Bildschirm erzeugen.
+- [ ] Eindeutige Zuständigkeit für Zustände sowie einen einseitigen State-/Event-Fluss definieren. Vererbungsbedingte Zustandsweitergabe und veraltete Imports/Kommentare entfernen.
+- [ ] Tests für Start-/Wiederherstellungsreihenfolge, gemeinsame Zuständigkeit, funktionsübergreifende Sperren, Navigation und Lifecycle-Close-Verhalten ergänzen.
 
-This list is a plan and source-audit snapshot. A checkbox may be completed only when the named acceptance evidence exists. No task should be marked done merely because a code path or test name is present.
+**Abnahmekriterium:** Es gibt keine tiefe Vererbungskette zwischen Features mehr. Zuständigkeiten sind eindeutig und Aufrufstellen bleiben kompatibel.
+
+### P2-02 — IPC-Client aufteilen
+
+**Befund:** `InferenceClient.kt` umfasst ungefähr 1.455 Zeilen bzw. 70 KB und vereint Binding, Binder-Callbacks, PID/Liveness, Reconnect, Modell-Wiederherstellung, Serialisierung von Ladevorgängen, Streams, Watchdogs und Abbruch.
+
+- [ ] `InferenceClient` als Fassade beibehalten und gleichzeitig zusammengehörige Komponenten für Binding, Prozesslebenszyklus, Recovery, serialisierte Modelloperationen sowie Stream-/Timeout-Verarbeitung auslagern.
+- [ ] Einen eindeutigen Besitzer für Binder-Referenzen, aktive Request-IDs, Jobs, Mutexes, Callbacks und Snapshots geladener Modelle definieren.
+- [ ] Veraltete Callbacks, alte PIDs, wiederholte terminale Callbacks und Schließen während eines Reconnects ausdrücklich modellieren.
+- [ ] AIDL und öffentliche API stabil halten; die P0-Regressionstests unverändert übernehmen.
+
+**Abnahmekriterium:** IPC-Verantwortlichkeiten sind unabhängig testbar, ohne doppelte veränderliche Zustandsverwaltung.
+
+### P2-03 — Native JNI-Implementierung nach Verantwortlichkeiten aufteilen
+
+**Befund:** `local_llm_engine_jni.cpp` umfasst ungefähr 2.384 Zeilen bzw. 104 KB.
+
+- [ ] Engine-/Backend-Lebenszyklus, Modellladen, Prompt/Template/Cache, Inferenz/Decode, Metriken/Diagnostik und Test-Hooks in gezielte native Dateien aufteilen.
+- [ ] Besitz und Synchronisierung von `EngineInstance` eindeutig halten; gemeinsame Hilfsfunktionen in schmalen internen Headern bündeln.
+- [ ] Alle JNI-Exports und Java-Native-Deklarationen erhalten. Keine C++-Exception darf JNI überqueren.
+- [ ] Native Utility-Tests und Grenzfalltests für Laden, Inferenz, Abbruch und Zerstörung beibehalten. Das llama.cpp-Submodul muss unverändert bleiben.
+
+**Abnahmekriterium:** Dieselbe JNI-Grenze und dasselbe Laufzeitverhalten; nativer Besitz und Bereinigung sind leichter zu prüfen.
+
+### P2-04 — CMake und generierte Android-Overlays modularisieren
+
+**Befund (15.11.2026):** Die ursprüngliche Root-`CMakeLists.txt` hatte 1.707 Zeilen bzw. 91.953 Bytes. Commit `7440933` reduziert sie auf einen 27-zeiligen Orchestrator und verschiebt die bestehenden Konfigurations-/Overlay-/Target-Blöcke unverändert in sechs zuständigkeitsbezogene Module unter `cmake/`.
+
+- [x] Android-Toolchain-Flags/ABI-Auswahl, Upstream-Build-/Vulkan-Konfiguration, Android-Vulkan-Kompatibilität, Graph-/GDN-Diagnostik, native Target-Verdrahtung und Prüfung von Scheduler-Races in fokussierte CMake-Module aufteilen. Die Konfiguration des Vulkan-GPU-Profilers bleibt im Android-Vulkan-Modul.
+- [x] Die Root-`CMakeLists.txt` als reine, geordnete Orchestrierung beibehalten. Bestehende CMake-Funktionskörper, Targets, Compiler-Flags und ABI-Einstellungen bei der Auslagerung erhalten.
+- [x] Fail-fast-Upstream-Anker und ausschließlich im Build-Verzeichnis erzeugte Dateien beibehalten. Das festgelegte llama.cpp-Submodul bleibt unverändert.
+- [x] CMake-Konfiguration/-Build und APK-Paketierung für ARM64 und x86_64 verifizieren. Lauf `43679806820` bestand sowohl `configureCMakeDebug[arm64-v8a]`, `configureCMakeDebug[x86_64]`, `buildCMakeDebug[arm64-v8a]` als auch `buildCMakeDebug[x86_64]`. Danach wurden die installierbare Debug-APK und die Instrumentation-APK erstellt; auch die Emulator-Prozessisolation-Instrumentation war erfolgreich. Artefakte: Debug `14148461029`, Instrumentation `14148281622`. Die Prüfung des festgelegten llama.cpp-Submoduls war erfolgreich.
+
+**Abnahmekriterium:** Gleiche Ausgaben/Compiler-Konfiguration mit kleineren, leichter überprüfbaren CMake-Komponenten; das Submodul bleibt unverändert.
+
+### P2-05 — Diagnostik-Implementierung aufteilen
+
+**Befund (15.11.2026):** `EngineDiagnostics.kt` ist jetzt eine 143-zeilige API-Fassade. Speicherung/Rotation/Zusammenführung mehrerer Prozesse/Export, Metrik-Parsing und Aufbau kompakter Berichte liegen in separaten Komponenten.
+
+- [x] Den in P1 festgelegten datenschutzfreundlichen Event-Vertrag beibehalten: Rohtext von Prompts/Dokumenten/Token-Teilstücken/Antworten wird verworfen; numerische Token-Traces bleiben optional und validiert.
+- [x] Speicherung der Prozesslogs, Rotation pro Prozess, deterministische Zusammenführung prozessübergreifender Logs und verifizierten URI-Export in `EngineDiagnosticsStorage` auslagern.
+- [x] Parsing nativer/Kotlin-Token-Steps, Vulkan-Operationen und Zeit-/Perzentil-Hilfsfunktionen in `EngineDiagnosticsMetrics` auslagern.
+- [x] Direkte Parser-Tests für aktuelle und ältere Sync-Felder, Run-Zuordnung, Vulkan-Metriken und fehlerhafte Zeilen ergänzen. Bestehende Android-Prozess-Instrumentation prüft weiterhin die Dateispeicherung im App-Prozess.
+- [x] Aufbau kompakter Berichte, Ressourcenaggregation und UTF-8-Exportbegrenzung in `EngineDiagnosticsReportBuilder` verschieben. `EngineDiagnostics` bleibt die API-Fassade (nach dem Auslagern 143 Zeilen).
+- [x] Begrenzte Kotlin-Diagnose-Event-Hüllen der Version 1 mit prozesslokalen Event-IDs, PID und automatischer Zuordnung zu Run/Request definieren. Event-Details auf 4.096 Zeichen begrenzen und mehrzeilige Werte normalisieren; Legacy-/Native-Parsing für historische und native Formate beibehalten. Tests für Run-/Request-Zuordnung, Test-PID 0/unbekannt, Detailbegrenzung und Speicherung in einer einzelnen Zeile ergänzen.
+
+**Abnahmekriterium:** Zusammengehörige Diagnostik-Komponenten mit begrenzten, datenschutzfreundlichen Exporten und unabhängigen Tests.
+
+### P2-06 — Demo- und Bibliothekspakete nach Zuständigkeit organisieren
+
+**Befund (15.11.2026):** Die App besitzt jetzt eigene Pakete für `navigation`, `chat`, `modelimport`, `settings` und `diagnostics`. Screens, `AppTab`, Feature-ViewModels, Modellbibliothek-/Import-Zustand, Lifecycle-/Benchmark-ViewModels sowie Benchmark-Pläne/-Policies wurden in den Commits `f76e6f5` und `964ba94` verschoben. Das gemeinsame `EngineViewModel` bleibt die App-Fassade. Der Namespace `com.example` und die interne Paketorganisation der Bibliothek sind noch offen.
+
+- [x] Demo-Chat, Modellbibliothek/-import, Einstellungen, Diagnostik/Benchmarks und Navigation in Feature-Pakete aufteilen. Screens/Navigation in `f76e6f5` verschoben; Progress-/Model-Card-Imports in `e8944f4` und `7365270` korrigiert; ViewModels/Pläne in `964ba94` verschoben. JVM-Tests in `43679806775` bestanden; Android-APK-Build und Emulator-Prozessisolation-Instrumentation in `43679806820` bestanden (Artefakte `14148461029` und `14148281622`).
+- [ ] `com.example` erst ersetzen, nachdem Manifeste, generiertes BuildConfig, Instrumentation, Saved State und Deep Links geprüft wurden.
+- [ ] Interne Bibliothekskomponenten nach Lifecycle, Modellquelle, Speicher-/Ressourcen-Policy, Diagnostik und IPC organisieren; verbraucherseitige Typen getrennt halten.
+- [x] Abhängigkeitsrichtung `:app → :llm-engine` erzwingen. Das Gradle-Bibliotheksmodul hängt nur von Android Core/Coroutines ab und besitzt keine Abhängigkeit zu App/UI/Benchmark/DMS-Modulen.
+
+**Abnahmekriterium:** Paket- und Modulgrenzen bilden Zuständigkeiten ab; die Bibliothek bleibt unabhängig nutzbar.
+
+## P3 — Bereinigung und technische Leitplanken
+
+### P3-01 — Optionale und veraltete Funktionen erfassen
+
+- [ ] Jede öffentliche API, jede `ModelSource`-Variante, UI-Aktion, Build-Flag, native Diagnose-Schnittstelle und jeden Benchmark-Sweep mit Besitzer, Aufrufern, Tests und Wartungsaufwand erfassen.
+- [ ] Funktionen als Engine-Kern, Demo-only, Diagnose/Test-only, optional oder veraltet klassifizieren.
+- [ ] Fehlende Resolver-Tests für `AssetPath`/`RemoteUrl` ergänzen oder deren bewusste Entfernung vorschlagen. Keine nur halb unterstützten Funktionen behalten.
+- [ ] Abhängigkeiten, Berechtigungen und Code erst entfernen, wenn Referenz-/Test-/Dokumentationssuchen ihre Entbehrlichkeit belegen. Öffentliche APIs dürfen nur nach ausdrücklicher Entscheidung entfernt werden.
+
+### P3-02 — Tests bereinigen, ohne ihr Verhalten zu verändern
+
+- [ ] Wiederverwendbare Fake-Binder-/Prozess-Fixtures mit explizitem Reset und klarer Zuständigkeit auslagern.
+- [ ] Große IPC- und Diagnostik-Testsuiten nach Zuständigkeit aufteilen. Zuerst Testmethoden unverändert verschieben; Assertions nur in einem separaten, konkreten Fehlerbehebungs-Commit ändern.
+- [ ] Reine Logik in JVM-Tests, Aussagen über Prozesse/Binder in `androidTest` und Verhalten nativer Hilfsfunktionen in Host-C++-Tests halten.
+- [ ] Tatsächlich ungenutzte Imports und Überreste des Auslagerns mit compilerbewusster Analyse entfernen, nicht allein anhand einer Textsuche.
+
+### P3-03 — Architektur- und Build-Leitplanken ergänzen
+
+- [ ] Automatisierte Prüfungen für Modul-Abhängigkeitsrichtung, Lecks öffentlicher APIs und verbotene App-/Compose-/DMS-Referenzen in `:llm-engine` ergänzen.
+- [ ] Abhängigkeiten, Reproduzierbarkeit des Gradle-Wrappers, NDK-/CMake-Festlegung und saubere rekursive Submodul-Builds überprüfen.
+- [ ] CI-Pfadfilter korrekt halten; reine Dokumentationsänderungen dürfen keine teuren nativen APK-Jobs auslösen.
+- [ ] Generierte Overlays und Diagnostik außerhalb versionierter Produktionsquellen halten.
+
+### P3-04 — Dokumentation der eigenständigen Engine aktuell halten
+
+- [ ] Architektur-, Modellkompatibilitäts-, Build- und Diagnostik-Dokumentation nach akzeptierten Änderungen aktualisieren.
+- [ ] Nachweise und Einschränkungen an konkrete Commits, Workflow-IDs, Artefakte und Gerätekonfigurationen binden.
+- [ ] Sicherstellen, dass es keine zweite aktive Implementierungs-Checklist gibt.
+
+---
+
+## P4 — Integration in myDocAnizer-Mobile (bewusst als letzter Schritt)
+
+**Keine Umsetzungszeit in Anpassungen für die Zielanwendung investieren, solange Korrektheit der eigenständigen Engine oder grundlegendes Refactoring noch offen sind.** Der Integrationsleitfaden darf Anforderungen dokumentieren, ist aber keine aktive Umsetzungswarteschlange.
+
+### P4-01 — Minimalen stabilen Schnittstellenvertrag für die Zielanwendung definieren
+
+- [ ] Erst nach Abnahme von P0–P3 Zuständigkeit/Lebenszyklus der Engine, Modellquelle/-identität, Konfiguration, Streaming-Fortschritt/terminalen Events, Abbruch, Diagnostik-Export und Close-Semantik definieren.
+- [ ] Demo-UI, Benchmark-Orchestrierung, Demo-Speicherung und DMS-Konzepte aus der wiederverwendbaren Bibliothek heraushalten.
+- [ ] Kompatibilität alter/neuer Parcelable-/AIDL-Strukturen prüfen, einschließlich angehängter Felder, Enum-Fallbacks und fehlerhafter/abgeschnittener Legacy-Daten.
+
+### P4-02 — Tatsächliche Zielanwendung anpassen und verifizieren
+
+- [ ] Manifest-Merge der Zielanwendung, nicht exportierten `:inference`-Service, JNI-/Native-ABI-Paketierung, minSdk, Coroutine-Lebenszyklus und Dependency-Auflösung prüfen, ohne `:app` zu importieren.
+- [ ] Den akzeptierten Engine-Commit in myDocAnizer-Mobile festlegen und den tatsächlichen nachgelagerten Build samt Instrumentation erst in dieser Phase ausführen.
+- [ ] Exakte Engine-Revision, Consumer-Commit, Build-Ergebnis, Testergebnis und erzeugtes Artefakt dokumentieren. Eine Demo-APK ist kein Integrationsnachweis.
+
+**Abnahmekriterium:** myDocAnizer-Mobile verwendet die eigenständige Engine über einen minimalen, stabilen Schnittstellenvertrag, ohne von der Prototyp-App abhängig zu sein.
+
+---
+
+## Projektweite Definition von „fertig“
+
+- [ ] Die Korrektheit der Modellausgabe besteht für jede als unterstützt ausgewiesene Modellfamilie und jedes Backend.
+- [ ] Die Q4_K-Vulkan-Decode-Auswahl und die tatsächliche Ausführung auf Mali-G57 sind belegt oder Einschränkungen der Unterstützung ausdrücklich dokumentiert.
+- [ ] Timeouts, Abbruch, Prozessabbruch/Reconnect, Modellladen und Cache-Zustand verhalten sich deterministisch.
+- [ ] Diagnostik speichert keine Prompts, Dokument-/OCR-Texte oder Modellantworten.
+- [ ] Wiederholte Zyklen auf realen Geräten zeigen keine zurückbleibenden Prozesse/Deskriptoren und kein fortschreitendes Ressourcenwachstum.
+- [ ] Tiefe Vererbung und übergroße Komponenten mit gemischten Zuständigkeiten wurden ohne Verhaltensregressionen refaktorisiert.
+- [ ] Jede beibehaltene optionale Funktion besitzt einen Verantwortlichen, Tests und einen nachvollziehbaren Zweck.
+- [ ] Die Abnahme der eigenständigen Engine erfolgt vor jeglicher Integration in myDocAnizer-Mobile.
+- [ ] Diese Datei bleibt die einzige aktive Umsetzungswarteschlange.
+
+## Audit- und aktuelle Quellcode-Hinweise
+
+Die Audit-Baseline enthält eine Demo-`:app` und ein wiederverwendbares `:llm-engine`-Modul sowie das festgelegte llama.cpp-Submodul. Große Bereiche mit mehreren Zuständigkeiten sind unter anderem `InferenceClient.kt`, `EngineDiagnostics.kt`, `local_llm_engine_jni.cpp` und `CMakeLists.txt`. Sie sind Kandidaten für Refactoring nach Stabilisierung der Korrektheit, aber allein ihre Größe ist kein Grund, Dateien aufzuteilen.
+
+Das aktuelle Vulkan-Overlay enthält den vorgesehenen Q4_K-Batch-1-Integer-Dot-Selector bereits im Quellcode. Die tatsächliche Hardware-Auswahl und Ausgabekorrektheit sind weiterhin nicht vollständig verifiziert. Der aktuelle Standardwert von `TimeoutConfig` für `abortGracePeriodMs` beträgt 3.000 ms; bei der Analyse eines konkreten Diagnoselaufs muss die tatsächlich wirksame Laufzeitkonfiguration verwendet werden.
+
+Diese Liste ist ein Planungs- und Quellcode-Audit-Snapshot. Ein Punkt darf nur dann als erledigt markiert werden, wenn die genannten Abnahmenachweise vorliegen. Keine Aufgabe allein deshalb als erledigt markieren, weil ein Codepfad oder ein Testname vorhanden ist.
