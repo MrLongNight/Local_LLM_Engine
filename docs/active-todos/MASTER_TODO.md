@@ -9,7 +9,7 @@
 
 ## Audit control — 2026-11-15
 
-- [x] Source-audit every item currently marked `[x]` against the implementation and its named tests at HEAD `aadcbd3fa70981a89cbaa0e2625e31fada0d3314`; findings: `docs/active-todos/COMPLETED_ITEMS_AUDIT.md`.
+- [x] Source-audit all 55 pre-existing implementation checklist items marked `[x]` against the implementation and named tests at code HEAD `07b56cd6a3d7417016b1771ae84d11202419ef38` (excluding this audit-control checkbox); findings: `docs/active-todos/COMPLETED_ITEMS_AUDIT.md`.
 - [ ] Resolve the source/documentation mismatch and the additional regression gaps recorded in the audit before treating the affected acceptance areas as fully verified.
 - [ ] Re-run and record JVM, host-native, Android instrumentation and APK workflows separately after code changes; the current-head Unit Tests workflow is green, while the APK workflow is still running at audit time.
 - [ ] Complete the physical-device checks that remain open in P0/P1; source review and CI do not substitute for hardware acceptance.

@@ -4,7 +4,7 @@
 **Repository:** `MrLongNight/Local_LLM_Engine`  
 **Branch:** `main`  
 **Audited source HEAD:** `07b56cd6a3d7417016b1771ae84d11202419ef38`  
-**Scope:** Every checklist item marked `[x]` in `docs/active-todos/MASTER_TODO.md` at the audited HEAD. This is a source/test/documentation audit, not a claim that every workflow or device test was executed.
+**Scope:** All 55 pre-existing implementation checklist items marked `[x]` in `docs/active-todos/MASTER_TODO.md` at the audited HEAD (excluding the later audit-control meta checkbox). This is a source/test/documentation audit, not a claim that every workflow or device test was executed.
 
 ## Executive result
 
