@@ -102,7 +102,7 @@ internal object CorrectnessGatePlan {
             }
             return Evaluation(
                 Status.PASS, "TOP1_IDENTICAL_TOP5_OVERLAP_GE_4",
-                BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, minimumOverlap,
+                candidateSteps.size, minimumOverlap,
                 maxConsecutiveRepeat(candidateSteps)
             )
         }
