@@ -49,6 +49,30 @@ int main() {
         assert(local_llm::utf16_to_utf8(input, 0).empty());
     }
     {
+        const std::string input("ASCII \xC3\xA4 \xE2\x82\xAC \xF0\x9F\x98\x80", 17);
+        const std::u16string expected = {
+            u'A', u'S', u'C', u'I', u'I', u' ', static_cast<char16_t>(0x00E4), u' ',
+            static_cast<char16_t>(0x20AC), u' ', static_cast<char16_t>(0xD83D),
+            static_cast<char16_t>(0xDE00)
+        };
+        assert(local_llm::utf8_to_utf16(input) == expected);
+    }
+    {
+        // Standard UTF-8 NUL is length-aware and becomes a Java U+0000 code unit.
+        const std::string input("A\0B", 3);
+        const std::u16string expected = {u'A', u'\0', u'B'};
+        assert(local_llm::utf8_to_utf16(input) == expected);
+    }
+    {
+        // Malformed, overlong, surrogate and out-of-range sequences are replaced.
+        const std::string invalid("\xC0\xAF\xED\xA0\x80\xF4\x90\x80\x80", 9);
+        const std::u16string converted = local_llm::utf8_to_utf16(invalid);
+        assert(converted.size() == 9);
+        for (const char16_t code_unit : converted) {
+            assert(code_unit == static_cast<char16_t>(0xFFFD));
+        }
+    }
+    {
         // A four-byte code point split over two model tokens must remain pending,
         // then be emitted once the final continuation bytes arrive.
         std::string pending;

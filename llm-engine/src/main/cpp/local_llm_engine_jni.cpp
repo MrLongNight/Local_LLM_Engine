@@ -706,45 +706,15 @@ static bool java_string_to_utf8(JNIEnv* env, jstring value, std::string& output)
 }
 
 static jstring new_java_string_from_utf8(JNIEnv* env, const std::string& utf8) {
-    if (utf8.empty()) return env->NewStringUTF("");
-
-    std::vector<jchar> utf16;
-    utf16.reserve(utf8.size());
-    size_t offset = 0;
-    while (offset < utf8.size()) {
-        const auto lead = static_cast<unsigned char>(utf8[offset]);
-        uint32_t code_point = 0;
-        size_t length = 0;
-
-        if (lead <= 0x7F) {
-            code_point = lead;
-            length = 1;
-        } else if (lead <= 0xDF) {
-            code_point = lead & 0x1F;
-            length = 2;
-        } else if (lead <= 0xEF) {
-            code_point = lead & 0x0F;
-            length = 3;
-        } else {
-            code_point = lead & 0x07;
-            length = 4;
-        }
-
-        for (size_t index = 1; index < length; ++index) {
-            code_point = (code_point << 6) |
-                (static_cast<unsigned char>(utf8[offset + index]) & 0x3F);
-        }
-        offset += length;
-
-        if (code_point <= 0xFFFF) {
-            utf16.push_back(static_cast<jchar>(code_point));
-        } else {
-            code_point -= 0x10000;
-            utf16.push_back(static_cast<jchar>(0xD800 + (code_point >> 10)));
-            utf16.push_back(static_cast<jchar>(0xDC00 + (code_point & 0x3FF)));
-        }
+    if (env == nullptr) return nullptr;
+    const std::u16string utf16 = local_llm::utf8_to_utf16(utf8);
+    if (utf16.size() > static_cast<std::size_t>(std::numeric_limits<jsize>::max())) {
+        LOGE("UTF-8 output is too large for a Java string: codeUnits=%zu", utf16.size());
+        return nullptr;
     }
-    return env->NewString(utf16.data(), static_cast<jsize>(utf16.size()));
+    return env->NewString(
+        reinterpret_cast<const jchar*>(utf16.data()),
+        static_cast<jsize>(utf16.size()));
 }
 
 static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {

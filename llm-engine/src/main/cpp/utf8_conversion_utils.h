@@ -57,6 +57,77 @@ inline std::string utf16_to_utf8(const CodeUnit* data, std::size_t length) {
 }
 
 
+
+// Convert standard UTF-8 to UTF-16 code units for JNI NewString(). JNI's
+// NewStringUTF() accepts Modified UTF-8, which is not interchangeable with
+// standard UTF-8 (notably for supplementary code points and embedded NUL).
+// Invalid input is replaced with U+FFFD; valid input is preserved exactly.
+inline std::u16string utf8_to_utf16(const std::string& input) {
+    std::u16string output;
+    output.reserve(input.size());
+    std::size_t offset = 0;
+
+    while (offset < input.size()) {
+        const auto lead = static_cast<unsigned char>(input[offset]);
+        std::uint32_t code_point = 0;
+        std::size_t length = 0;
+        if (lead <= 0x7F) {
+            code_point = lead;
+            length = 1;
+        } else if (lead >= 0xC2 && lead <= 0xDF) {
+            code_point = lead & 0x1F;
+            length = 2;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            code_point = lead & 0x0F;
+            length = 3;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            code_point = lead & 0x07;
+            length = 4;
+        } else {
+            output.push_back(static_cast<char16_t>(0xFFFD));
+            ++offset;
+            continue;
+        }
+
+        if (input.size() - offset < length) {
+            output.push_back(static_cast<char16_t>(0xFFFD));
+            ++offset;
+            continue;
+        }
+
+        bool valid = true;
+        for (std::size_t index = 1; index < length; ++index) {
+            const auto continuation = static_cast<unsigned char>(input[offset + index]);
+            if ((continuation & 0xC0) != 0x80 ||
+                (index == 1 &&
+                 ((lead == 0xE0 && continuation < 0xA0) ||
+                  (lead == 0xED && continuation > 0x9F) ||
+                  (lead == 0xF0 && continuation < 0x90) ||
+                  (lead == 0xF4 && continuation > 0x8F)))) {
+                valid = false;
+                break;
+            }
+            code_point = (code_point << 6) | (continuation & 0x3F);
+        }
+
+        if (!valid) {
+            output.push_back(static_cast<char16_t>(0xFFFD));
+            ++offset;
+            continue;
+        }
+
+        offset += length;
+        if (code_point <= 0xFFFF) {
+            output.push_back(static_cast<char16_t>(code_point));
+        } else {
+            code_point -= 0x10000;
+            output.push_back(static_cast<char16_t>(0xD800 + (code_point >> 10)));
+            output.push_back(static_cast<char16_t>(0xDC00 + (code_point & 0x3FF)));
+        }
+    }
+    return output;
+}
+
 // Normalize token-piece bytes while retaining only a valid incomplete UTF-8 suffix.
 // This prevents a multi-byte code point split across successive llama tokens from
 // being replaced prematurely, and rejects overlong/surrogate/out-of-range sequences.
