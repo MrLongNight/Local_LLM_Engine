@@ -482,6 +482,11 @@ abstract class VulkanDiagnosticsViewModel(
                         )
                     }
                     val selectedKernelPath = observedKernelPaths.single()
+                    if (!Q4kDecodePathPolicy.isKnownKernelPath(selectedKernelPath)) {
+                        throw IllegalStateException(
+                            "Unbekannter Q4_K-Kernelpfad: $selectedKernelPath (nativeRunId=$nativeRunId)"
+                        )
+                    }
                     val isMaliDevice = loaded.activeBackend.contains("Mali", ignoreCase = true)
                     val expectedKernelPath = Q4kDecodePathPolicy.expectedKernelPath(
                         requestedWorkgroup = workgroup,

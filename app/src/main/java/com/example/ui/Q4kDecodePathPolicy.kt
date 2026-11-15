@@ -12,6 +12,8 @@ internal object Q4kDecodePathPolicy {
     const val MMVQ_PATH = "MMVQ_INTEGER_DOT"
     const val FALLBACK_REASON = "q8_1_pipeline_unavailable_fallback"
 
+    fun isKnownKernelPath(path: String): Boolean = path == BASE_PATH || path == MMVQ_PATH
+
     fun expectedKernelPath(
         requestedWorkgroup: VulkanMatvecWorkgroup,
         observedKernelPath: String,
