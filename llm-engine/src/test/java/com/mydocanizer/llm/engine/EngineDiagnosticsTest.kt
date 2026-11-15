@@ -371,7 +371,8 @@ class EngineDiagnosticsTest {
                     "gpuAvg p50=600.000us p90=616.000us max=620.000us gpuPerGraphUs=600.000"
             )
         )
-        assertTrue(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
+        assertFalse(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
+        assertTrue(report.contains("op=mul_mat_vec_q4_K snapshots=3 samples=3"))
     }
 
     @Test
