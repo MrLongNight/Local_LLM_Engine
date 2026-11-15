@@ -67,7 +67,7 @@ class CorrectnessGatePlanTest {
 
         assertFalse(result.passed)
         assertEquals("TOKEN_REPEAT_OVER_8", result.reason)
-        assertEquals(16, result.maxConsecutiveRepeat)
+        assertEquals(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, result.maxConsecutiveRepeat)
     }
 
     @Test
