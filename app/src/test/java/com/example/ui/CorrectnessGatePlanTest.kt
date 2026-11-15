@@ -1,6 +1,7 @@
 package com.example.ui
 
 import com.example.ui.diagnostics.CorrectnessGatePlan
+import com.example.ui.diagnostics.BackendBenchmarkPlan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
