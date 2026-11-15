@@ -3,8 +3,9 @@ plugins {
 }
 
 // Profiler builds are intentionally opt-in: timestamp queries perturb throughput.
-// Token-ID/logit diagnostics are also opt-in because they can reveal text when
-// decoded with the model tokenizer. Enable them only for synthetic test prompts.
+// The legacy-named localLlmSyntheticTokenDiagnostics property now enables full
+// prompt/token/response traces in Debug builds and defaults on for P0 diagnosis.
+// Release builds explicitly keep every text-diagnostic compile flag disabled.
 val localLlmVulkanPerfProfiler = providers.gradleProperty("localLlmVulkanPerfProfiler")
     .map { it.equals("true", ignoreCase = true) }
     .getOrElse(false)
