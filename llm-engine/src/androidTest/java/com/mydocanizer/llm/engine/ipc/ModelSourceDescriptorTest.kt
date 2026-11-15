@@ -329,7 +329,6 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             val recoveredPid = client.remotePid.value
                 ?: throw AssertionError("Inference service PID missing after descriptor recovery")
             assertTrue("Service death must create a replacement process", recoveredPid != killedPid)
-            val recoveredBaseline = descriptorCountFor(recoveredPid, secondFiles)
             awaitDescriptorCount(recoveredPid, secondFiles, minimumCount = 1)
 
             assertTrue("Unloading the recovered model must release its descriptor", client.unloadModel().isSuccess)
@@ -389,7 +388,7 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
                 minimumCount?.let { actual >= it } == true
             ) return
             SystemClock.sleep(20L)
-            actual = descriptorCountFor(pid, file)
+            actual = descriptorCountFor(pid, files)
         }
         assertTrue(
             "Descriptor count for pid=\$pid file=${file.name} expected=\$expectedCount minimum=\$minimumCount actual=\$actual",
