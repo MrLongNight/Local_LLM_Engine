@@ -224,7 +224,8 @@ class EngineDiagnosticsTest {
         }
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(capability, actualOffload, prefillPath, decodePath, memoryBudget, memoryHeap) +
-                noisyErrors + noisyPerformance + noisyTokenMetrics
+                noisyErrors + noisyPerformance + noisyTokenMetrics,
+            includeFullDebugTrace = false
         )
 
         assertTrue(report.contains("int dot: 1"))
