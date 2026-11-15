@@ -1,5 +1,7 @@
 package com.example.ui.diagnostics
 
+import com.mydocanizer.llm.engine.FinishReason
+
 /**
  * Pure evaluator for the Debug/TEXT_DIAGNOSTICS greedy correctness gate.
  * Trace rows contain token IDs and logits only; prompt and token-piece text is not parsed.
@@ -15,6 +17,7 @@ internal object CorrectnessGatePlan {
     data class TokenStep(val step: Int, val selectedId: Int, val top5: List<Candidate>)
     data class GateRun(
         val output: String,
+        val finishReason: FinishReason,
         val outputShape: String,
         val outputCharacters: Int,
         val runId: String,
@@ -36,7 +39,11 @@ internal object CorrectnessGatePlan {
         val passed: Boolean get() = status == Status.PASS
     }
 
-    fun parse(output: String, traceLines: List<String>): GateRun {
+    fun parse(
+        output: String,
+        traceLines: List<String>,
+        finishReason: FinishReason
+    ): GateRun {
         val payloads = traceLines.map { it.substringAfter("TOKEN_SELECTION_TRACE - ", "") }
         val parsed = traceLines.mapNotNull(::parseTraceLine).sortedBy { it.step }
         val runIds = payloads.mapNotNull { field(it, "runId") }.distinct()
@@ -45,6 +52,7 @@ internal object CorrectnessGatePlan {
             payloads.all { !field(it, "runId").isNullOrBlank() && !field(it, "backend").isNullOrBlank() }
         return GateRun(
             output = output,
+            finishReason = finishReason,
             outputShape = classifyOutput(output),
             outputCharacters = output.count { !it.isWhitespace() },
             runId = runIds.firstOrNull().orEmpty(),
@@ -142,6 +150,9 @@ internal object CorrectnessGatePlan {
         }
         if (!run.traceMetadataConsistent) return "TRACE_METADATA_INCONSISTENT"
         if (run.invalidTraceRows > 0) return "TRACE_ROW_INVALID"
+        // The 32-token ceiling is a safety budget, not an acceptable terminal condition.
+        // Only a natural EOG/stop after the exact answer proves the gate completed cleanly.
+        if (run.finishReason != FinishReason.STOP) return "FINISH_REASON_NOT_STOP"
         val steps = run.steps
         // The model may emit the complete answer and EOG before exhausting the 32-token
         // safety budget. Validate the actual contiguous trace, not an artificial exact length.

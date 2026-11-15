@@ -147,7 +147,11 @@ abstract class BackendBenchmarkViewModel(
                         val gateTraceLines = EngineDiagnostics.tokenSelectionTraceLines(
                             getApplication(), gateNativeRunId
                         )
-                        val gateRun = CorrectnessGatePlan.parse(gateSample.result.text, gateTraceLines)
+                        val gateRun = CorrectnessGatePlan.parse(
+                            gateSample.result.text,
+                            gateTraceLines,
+                            gateSample.result.finishReason
+                        )
                         val gateKey = Triple(profile.microBatchSize, profile.flashAttention, profile.config.gdnPolicy)
                         val cpuReference = cpuGateReferences[gateKey]
                         val gateEvaluation = CorrectnessGatePlan.evaluate(
@@ -167,7 +171,7 @@ abstract class BackendBenchmarkViewModel(
                                 "gateRunId=$gateNativeRunId,nativeRunId=$gateNativeRunId," +
                                 "resourceRunId=${gateSample.result.diagnosticRunId}," +
                                 "cpuReferenceRunId=${cpuReference?.runId.orEmpty()},status=${gateEvaluation.status}," +
-                                "reason=${gateEvaluation.reason},outputShape=${gateRun.outputShape}," +
+                                "reason=${gateEvaluation.reason},finishReason=${gateRun.finishReason},outputShape=${gateRun.outputShape}," +
                                 "outputChars=${gateRun.outputCharacters},steps=${gateEvaluation.comparedSteps}," +
                                 "minimumTop5Overlap=${gateEvaluation.minimumTop5Overlap}/5," +
                                 "maxConsecutiveRepeat=${gateEvaluation.maxConsecutiveRepeat}"

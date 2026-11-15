@@ -2,6 +2,7 @@ package com.example.ui
 
 import com.example.ui.diagnostics.CorrectnessGatePlan
 import com.example.ui.diagnostics.BackendBenchmarkPlan
+import com.mydocanizer.llm.engine.FinishReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,7 +11,7 @@ import org.junit.Test
 class CorrectnessGatePlanTest {
     @Test
     fun acceptsCpuReferenceWithExpectedContinuationAndThirtyTwoValidGreedySteps() {
-        val run = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-run", "CPU"))
+        val run = parseGateRun(expectedOutput, trace("cpu-run", "CPU"))
         val result = CorrectnessGatePlan.evaluate(run, expectedBackend = "CPU")
 
         assertTrue(result.passed)
@@ -21,8 +22,8 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun acceptsVulkanOnlyWhenTop1MatchesCpuAndEveryTopFiveOverlapsByAtLeastFour() {
-        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-run", "CPU"))
-        val vulkan = CorrectnessGatePlan.parse(expectedOutput, trace("vulkan-run", "Vulkan", replaceFifth = true))
+        val cpu = parseGateRun(expectedOutput, trace("cpu-run", "CPU"))
+        val vulkan = parseGateRun(expectedOutput, trace("vulkan-run", "Vulkan", replaceFifth = true))
         val result = CorrectnessGatePlan.evaluate(vulkan, cpu, expectedBackend = "Vulkan")
 
         assertTrue(result.passed)
@@ -32,8 +33,8 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsVulkanWhenTop1DiffersFromCpu() {
-        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-run", "CPU"))
-        val vulkan = CorrectnessGatePlan.parse(
+        val cpu = parseGateRun(expectedOutput, trace("cpu-run", "CPU"))
+        val vulkan = parseGateRun(
             expectedOutput,
             trace("vulkan-run", "Vulkan", changeSelectedAtStep = 9)
         )
@@ -45,8 +46,8 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsVulkanWhenTopFiveOverlapIsBelowFour() {
-        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-run", "CPU"))
-        val vulkan = CorrectnessGatePlan.parse(
+        val cpu = parseGateRun(expectedOutput, trace("cpu-run", "CPU"))
+        val vulkan = parseGateRun(
             expectedOutput,
             trace("vulkan-run", "Vulkan", overlapOnlyTop1 = true)
         )
@@ -58,13 +59,33 @@ class CorrectnessGatePlanTest {
     }
 
     @Test
+    fun rejectsEveryNonStopFinishReasonEvenWhenTheExpectedAnswerAndTraceAreExact() {
+        FinishReason.values()
+            .filter { it != FinishReason.STOP }
+            .forEach { finishReason ->
+                val run = parseGateRun(
+                    expectedOutput,
+                    trace("finish-${finishReason.name}", "CPU"),
+                    finishReason
+                )
+                val result = CorrectnessGatePlan.evaluate(run, expectedBackend = "CPU")
+
+                assertFalse(
+                    "A gate run ending with ${finishReason.name} must not pass",
+                    result.passed
+                )
+                assertEquals("FINISH_REASON_NOT_STOP", result.reason)
+            }
+    }
+
+    @Test
     fun rejectsRepeatedTokenRunLongerThanEight() {
         val lines = (1..BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS).map { step ->
             "2026-11-13 12:00:00.000 [INFO] [inference] TOKEN_SELECTION_TRACE - " +
                 "runId=repeat-run,backend=CPU,step=$step,selectedId=77," +
                 "top5=77:10.0|78:9.0|79:8.0|80:7.0|81:6.0"
         }
-        val run = CorrectnessGatePlan.parse(expectedOutput, lines)
+        val run = parseGateRun(expectedOutput, lines)
         val result = CorrectnessGatePlan.evaluate(run, expectedBackend = "CPU")
 
         assertFalse(result.passed)
@@ -74,7 +95,7 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun acceptsCompleteAnswerWhenModelStopsBeforeTheThirtyTwoTokenSafetyLimit() {
-        val run = CorrectnessGatePlan.parse(
+        val run = parseGateRun(
             expectedOutput,
             trace("natural-stop", "CPU").take(25)
         )
@@ -85,8 +106,8 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun reportsActualStepCountWhenCpuAndVulkanPassWithNaturalEarlyEog() {
-        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-natural-pass", "CPU").take(25))
-        val vulkan = CorrectnessGatePlan.parse(
+        val cpu = parseGateRun(expectedOutput, trace("cpu-natural-pass", "CPU").take(25))
+        val vulkan = parseGateRun(
             expectedOutput,
             trace("vulkan-natural-pass", "Vulkan", replaceFifth = true).take(25)
         )
@@ -100,8 +121,8 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsCpuAndVulkanTracesWithDifferentNaturalStopLengths() {
-        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-stop", "CPU").take(25))
-        val vulkan = CorrectnessGatePlan.parse(expectedOutput, trace("vulkan-stop", "Vulkan").take(24))
+        val cpu = parseGateRun(expectedOutput, trace("cpu-stop", "CPU").take(25))
+        val vulkan = parseGateRun(expectedOutput, trace("vulkan-stop", "Vulkan").take(24))
         val result = CorrectnessGatePlan.evaluate(vulkan, cpu, expectedBackend = "Vulkan")
         assertFalse(result.passed)
         assertEquals("CPU_TRACE_LENGTH_MISMATCH", result.reason)
@@ -110,12 +131,12 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsWrongExpectedAnswerAndIncompleteTrace() {
-        val wrongOutput = CorrectnessGatePlan.parse("322, 324, 325, 328, 330", trace("wrong", "CPU"))
+        val wrongOutput = parseGateRun("322, 324, 325, 328, 330", trace("wrong", "CPU"))
         val wrongResult = CorrectnessGatePlan.evaluate(wrongOutput, expectedBackend = "CPU")
         assertFalse(wrongResult.passed)
         assertEquals("EXPECTED_OUTPUT_MISMATCH", wrongResult.reason)
 
-        val incomplete = CorrectnessGatePlan.parse(expectedOutput, emptyList())
+        val incomplete = parseGateRun(expectedOutput, emptyList())
         val incompleteResult = CorrectnessGatePlan.evaluate(incomplete, expectedBackend = "CPU")
         assertFalse(incompleteResult.passed)
         assertEquals("TRACE_INCOMPLETE", incompleteResult.reason)
@@ -127,7 +148,7 @@ class CorrectnessGatePlanTest {
         val lines = trace("malformed", "CPU").toMutableList()
         lines += "2026-11-13 12:00:01.000 [INFO] [inference] TOKEN_SELECTION_TRACE - runId=malformed,backend=CPU,step=x"
         val result = CorrectnessGatePlan.evaluate(
-            CorrectnessGatePlan.parse(expectedOutput, lines),
+            parseGateRun(expectedOutput, lines),
             expectedBackend = "CPU"
         )
         assertFalse(result.passed)
@@ -139,7 +160,7 @@ class CorrectnessGatePlanTest {
         val lines = trace("extra", "CPU").toMutableList()
         lines += lines.last()
         val result = CorrectnessGatePlan.evaluate(
-            CorrectnessGatePlan.parse(expectedOutput, lines),
+            parseGateRun(expectedOutput, lines),
             expectedBackend = "CPU"
         )
         assertFalse(result.passed)
@@ -151,7 +172,7 @@ class CorrectnessGatePlanTest {
         val lines = trace("mixed", "CPU").toMutableList()
         lines[7] = lines[7].replace("runId=mixed", "runId=foreign")
         val result = CorrectnessGatePlan.evaluate(
-            CorrectnessGatePlan.parse(expectedOutput, lines),
+            parseGateRun(expectedOutput, lines),
             expectedBackend = "CPU"
         )
         assertFalse(result.passed)
@@ -163,7 +184,7 @@ class CorrectnessGatePlanTest {
         val nonFinite = trace("nonfinite", "CPU").toMutableList()
         nonFinite[0] = nonFinite[0].replace("102:9.0", "102:NaN")
         val nonFiniteResult = CorrectnessGatePlan.evaluate(
-            CorrectnessGatePlan.parse(expectedOutput, nonFinite),
+            parseGateRun(expectedOutput, nonFinite),
             expectedBackend = "CPU"
         )
         assertFalse(nonFiniteResult.passed)
@@ -172,7 +193,7 @@ class CorrectnessGatePlanTest {
         val unsorted = trace("unsorted", "CPU").toMutableList()
         unsorted[0] = unsorted[0].replace("102:9.0|103:8.0", "102:7.0|103:8.0")
         val unsortedResult = CorrectnessGatePlan.evaluate(
-            CorrectnessGatePlan.parse(expectedOutput, unsorted),
+            parseGateRun(expectedOutput, unsorted),
             expectedBackend = "CPU"
         )
         assertFalse(unsortedResult.passed)
@@ -190,13 +211,19 @@ class CorrectnessGatePlanTest {
         assertEquals("EMPTY", parseOutput("").outputShape)
     }
 
+    private fun parseGateRun(
+        output: String,
+        traceLines: List<String>,
+        finishReason: FinishReason = FinishReason.STOP
+    ): CorrectnessGatePlan.GateRun = CorrectnessGatePlan.parse(output, traceLines, finishReason)
+
     private fun parseOutput(output: String): CorrectnessGatePlan.GateRun =
-        CorrectnessGatePlan.parse(output, trace("output-shape", "CPU"))
+        parseGateRun(output, trace("output-shape", "CPU"))
 
     @Test
     fun rejectsCpuReferenceReusedAsCandidateRun() {
-        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("same-run", "CPU"))
-        val candidate = CorrectnessGatePlan.parse(expectedOutput, trace("same-run", "Vulkan"))
+        val cpu = parseGateRun(expectedOutput, trace("same-run", "CPU"))
+        val candidate = parseGateRun(expectedOutput, trace("same-run", "Vulkan"))
         val result = CorrectnessGatePlan.evaluate(candidate, cpu, expectedBackend = "Vulkan")
         assertFalse(result.passed)
         assertEquals("CPU_REFERENCE_RUN_ID_REUSED", result.reason)
@@ -229,7 +256,7 @@ class CorrectnessGatePlanTest {
     }
     @Test
     fun rejectsVulkanWhenCpuReferenceIsMissing() {
-        val vulkan = CorrectnessGatePlan.parse(expectedOutput, trace("vulkan-run", "Vulkan"))
+        val vulkan = parseGateRun(expectedOutput, trace("vulkan-run", "Vulkan"))
         val result = CorrectnessGatePlan.evaluate(vulkan, expectedBackend = "Vulkan")
 
         assertFalse(result.passed)
@@ -238,7 +265,7 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsAdditionalNumbersOrExplanatoryTextAfterExpectedFiveNumbers() {
-        val extraNumber = CorrectnessGatePlan.parse(
+        val extraNumber = parseGateRun(
             "322, 324, 326, 328, 330, 332",
             trace("extra", "CPU")
         )
@@ -246,7 +273,7 @@ class CorrectnessGatePlanTest {
         assertFalse(extraResult.passed)
         assertEquals("EXPECTED_OUTPUT_MISMATCH", extraResult.reason)
 
-        val explanation = CorrectnessGatePlan.parse(
+        val explanation = parseGateRun(
             "Die Antwort lautet: 322, 324, 326, 328, 330",
             trace("explanation", "CPU")
         )
@@ -258,7 +285,7 @@ class CorrectnessGatePlanTest {
     @Test
     fun rejectsAnswerTruncatedByTheTokenBudgetEvenWhenItIsAnExpectedPrefix() {
         // The 32-token budget must be sufficient for the complete answer; partial output is a failure.
-        val truncated = CorrectnessGatePlan.parse("322, 324, 326, 3", trace("budget-cut", "CPU"))
+        val truncated = parseGateRun("322, 324, 326, 3", trace("budget-cut", "CPU"))
         val result = CorrectnessGatePlan.evaluate(truncated, expectedBackend = "CPU")
         assertFalse(result.passed)
         assertEquals("EXPECTED_OUTPUT_MISMATCH", result.reason)
@@ -266,8 +293,8 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsTruncatedVulkanOutputBeforeComparingAgainstTheCpuReference() {
-        val cpu = CorrectnessGatePlan.parse("322, 324, 326, 3", trace("cpu-cut", "CPU"))
-        val vulkan = CorrectnessGatePlan.parse(
+        val cpu = parseGateRun("322, 324, 326, 3", trace("cpu-cut", "CPU"))
+        val vulkan = parseGateRun(
             "322, 324, 326, 3",
             trace("vulkan-cut", "Vulkan", changeSelectedAtStep = 5)
         )
@@ -278,7 +305,7 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsTwoNumberPrefixAsInsufficientCorrectnessEvidence() {
-        val twoNumbers = CorrectnessGatePlan.parse(
+        val twoNumbers = parseGateRun(
             "322, 324",
             trace("two-numbers", "CPU")
         )
@@ -290,17 +317,17 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsTooShortOrWrongTruncatedAnswers() {
-        val tooShort = CorrectnessGatePlan.parse("322,3", trace("stub", "CPU"))
+        val tooShort = parseGateRun("322,3", trace("stub", "CPU"))
         assertEquals(
             "EXPECTED_OUTPUT_MISMATCH",
             CorrectnessGatePlan.evaluate(tooShort, expectedBackend = "CPU").reason
         )
-        val wrongDigits = CorrectnessGatePlan.parse("322, 325, 326, 3", trace("wrong-cut", "CPU"))
+        val wrongDigits = parseGateRun("322, 325, 326, 3", trace("wrong-cut", "CPU"))
         assertEquals(
             "EXPECTED_OUTPUT_MISMATCH",
             CorrectnessGatePlan.evaluate(wrongDigits, expectedBackend = "CPU").reason
         )
-        val empty = CorrectnessGatePlan.parse("", trace("empty", "CPU"))
+        val empty = parseGateRun("", trace("empty", "CPU"))
         assertEquals(
             "EXPECTED_OUTPUT_MISMATCH",
             CorrectnessGatePlan.evaluate(empty, expectedBackend = "CPU").reason
