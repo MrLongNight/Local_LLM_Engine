@@ -203,9 +203,19 @@ class GgufRecoveryTest : InferenceServiceProcessTestBase() {
             }
             assertTrue("A real follow-up inference must succeed after reload: ${followup.exceptionOrNull()}",
                 followup.isSuccess)
+            val followupResult = followup.getOrThrow()
             assertTrue(
                 "Follow-up must generate at least one token from the reloaded GGUF",
-                followup.getOrThrow().tokensGenerated > 0
+                followupResult.tokensGenerated > 0
+            )
+            assertTrue(
+                "Follow-up must return visible, non-blank model text",
+                followupResult.text.isNotBlank()
+            )
+            assertTrue(
+                "Successful follow-up must have a normal generation finish reason: ${followupResult.finishReason}",
+                followupResult.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP ||
+                    followupResult.finishReason == com.mydocanizer.llm.engine.FinishReason.MAX_TOKENS
             )
             assertEquals("The same model source must remain active after follow-up",
                 modelFile.absolutePath, client.currentModel.value?.path)
