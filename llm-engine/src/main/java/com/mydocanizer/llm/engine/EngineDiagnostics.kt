@@ -99,10 +99,8 @@ object EngineDiagnostics {
 
 
 
-    internal fun buildCompactReportForTest(
-        lines: List<String>,
-        includeFullDebugTrace: Boolean = BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED
-    ): String = EngineDiagnosticsReportBuilder.buildCompactReport(lines, includeFullDebugTrace)
+    internal fun buildCompactReportForTest(lines: List<String>): String =
+        EngineDiagnosticsReportBuilder.buildCompactReport(lines)
 
     fun exportTo(context: Context, destination: Uri): Result<Long> {
         return runCatching {
