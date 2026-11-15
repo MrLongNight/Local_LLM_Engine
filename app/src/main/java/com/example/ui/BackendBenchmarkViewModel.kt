@@ -313,7 +313,7 @@ abstract class BackendBenchmarkViewModel(
                     appendLine("Kompakter CPU/Vulkan-Abnahmetest – ${successfulRuns}/${profiles.size} Profile mit bestandenem Gate und gültiger Messung")
                     appendLine("Modell: ${model.name} (${model.sizeMb.toInt()} MB); SHA-256: ${model.sha256 ?: "nicht verfügbar"}")
                     appendLine("Umfang: ${profiles.size / 2} CPU/Vulkan-Paare mit identischem Modell und identischen Parametern; Qwen3.5 prüft zusätzlich ARCH_DEFAULT und alle vier GDN-Fusionsmodi.")
-                    appendLine("Vor jeder Messung: 16-Token-Greedy-Gate; je GDN-Policy CPU-Referenz zuerst, Vulkan nur bei Top-1-Identität und mindestens 4/5 Top-5-Überschneidung.")
+                    appendLine("Vor jeder Messung: ${BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS}-Token-Greedy-Gate (vollständige Antwort, natürlicher EOG erlaubt); je GDN-Policy CPU-Referenz zuerst, Vulkan nur bei Top-1-Identität und mindestens 4/5 Top-5-Überschneidung.")
                     appendLine("Profile ohne Gate PASS sind ungültig; für sie werden keine tok/s ausgewiesen.")
                     appendLine("Je gültigem Profil: Modell-Load, Prefill, TTFT, 4 Warm-up- und 20 Mess-Tokens, Decode tok/s.")
                     appendLine("Graph-Splits stehen direkt in jeder Profilzeile. diagnosticRunId verbindet jede Zeile mit dem exakten INFERENCE_<runId>-Peak-PSS/RAM-/Thermal-Summary.")
