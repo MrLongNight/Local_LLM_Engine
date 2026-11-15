@@ -3,7 +3,7 @@ package com.example
 import android.app.Application
 import android.os.Parcel
 import androidx.test.core.app.ApplicationProvider
-import com.example.ui.AppTab
+import com.example.ui.navigation.AppTab
 import com.example.ui.EngineViewModel
 import com.mydocanizer.llm.engine.BackendPreference
 import org.junit.Assert.assertEquals
