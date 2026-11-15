@@ -21,11 +21,12 @@ internal object BackendBenchmarkPlan {
     val BACKENDS = listOf(BackendPreference.VULKAN, BackendPreference.CPU)
 
     /**
-     * Compact deterministic continuation prompt. The previous 2..320 enumeration
-     * exceeded small preflight-reduced contexts and invalidated otherwise usable gates.
+     * Exact-copy fixture for backend correctness. It deliberately avoids arithmetic or
+     * model-reasoning requirements so CPU/Vulkan mismatches isolate prompt/template,
+     * token selection, decoding or output handling rather than a model's math ability.
      */
     fun correctnessGatePrompt(): String =
-        "Continue the even-number sequence: 2, 4, 6, ..., 320. Output only the next five numbers, separated by commas."
+        "Copy exactly this text and output nothing else: 322, 324, 326, 328, 330"
 
     data class FullMatrixProfile(
         val id: String,
