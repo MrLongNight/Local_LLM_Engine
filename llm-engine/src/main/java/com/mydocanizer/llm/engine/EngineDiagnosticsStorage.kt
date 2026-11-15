@@ -72,9 +72,7 @@ internal object EngineDiagnosticsStorage {
             val partEvent = if (chunks.size == 1) event else "${event}_PART_${index + 1}_OF_${chunks.size}"
             val entry = formatLog("ERROR", tag, partEvent, chunk)
             logQueue.add(entry)
-            if (!preserveAllDebugDetails) {
-                while (logQueue.size > MAX_LOG_ENTRIES) logQueue.poll()
-            }
+            while (logQueue.size > MAX_LOG_ENTRIES) logQueue.poll()
             persist(entry)
             Log.e(TAG, "[$tag] $partEvent: $chunk", if (index == 0) throwable else null)
         }
@@ -122,6 +120,7 @@ internal object EngineDiagnosticsStorage {
         }
         val retained = tail.lineSequence()
             .filter { it.isNotBlank() }
+            .toList()
             .takeLast(MAX_LOG_ENTRIES)
             .joinToString(separator = "\\n", postfix = "\\n")
         file.writeText(retained, Charsets.UTF_8)
