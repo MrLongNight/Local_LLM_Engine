@@ -145,7 +145,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [x] Replace the normal `ContentUri` load branch with `ContentResolver.openFileDescriptor(uri, "r")` and transfer that original descriptor through the existing Binder method.
 - [x] Keep the provider URI as the in-memory model identity/recovery source and use the provider display name; explicit bulk/model-library import remains a separate copy operation.
 - [x] Reject descriptors without a known size before the memory guard; show an explicit provider/mmap limitation and do not silently copy.
-- [ ] Verify descriptor ownership end to end on Android: client copy closes only after Binder handoff, service copy survives while native mmap is active, and service closes exactly once on unload/failure/timeout/process death.
+- [ ] Verify descriptor ownership end to end on Android: the new instrumentation coverage measures the service PID's open descriptors across failed load, model replacement, unload and service death/recovery. Keep this unchecked until the Android emulator/device run passes; source ownership is client-copy close after Binder handoff and service/native copies retained only while mmap is active.
 - [x] Correct the instrumentation size assertion: compare the provider PFD's `statSize` to the staged GGUF bytes; do not compare container-file size to `llama_model_size` (tensor/model payload accounting). Stage the same fixture in both possible test-provider cache contexts.
 - [ ] Test local document provider and representative cloud/document providers, including unload/reload and follow-up inference.
 

@@ -12,6 +12,8 @@ import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.TimeoutConfig
 import android.os.ParcelFileDescriptor
+import android.os.Process
+import android.system.Os
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.mydocanizer.llm.engine.ModelSource
@@ -166,6 +168,181 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
     }
 
     @Test
+    fun failedProviderLoadClosesTransferredDescriptorBeforeNextLoad() = runBlocking {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        val testContext = InstrumentationRegistry.getInstrumentation().context
+        val invalidName = "invalid-provider-\${System.nanoTime()}.gguf"
+        val invalidFiles = listOf(testContext.cacheDir, appContext.cacheDir)
+            .distinct()
+            .map { File(it, invalidName).also { file -> file.writeBytes(byteArrayOf(0x42, 0x41, 0x44, 0x21)) } }
+        val validName = "valid-after-failure-\${System.nanoTime()}.gguf"
+        val validFiles = listOf(testContext.cacheDir, appContext.cacheDir)
+            .distinct()
+            .map { cacheDir ->
+                File(cacheDir, validName).also { file ->
+                    testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }
+        val invalidUri = Uri.parse("content://com.mydocanizer.llm.engine.test-model-provider/$invalidName")
+        val validUri = Uri.parse("content://com.mydocanizer.llm.engine.test-model-provider/$validName")
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 15_000L,
+            modelLoadMs = 30_000L,
+            prefillMs = 30_000L,
+            firstTokenMs = 30_000L,
+            interTokenMs = 10_000L,
+            totalInferenceMs = 60_000L,
+            abortGracePeriodMs = 500L,
+            reconnectMs = 20_000L
+        )
+        val config = EngineConfig(
+            contextSize = 256,
+            batchSize = 64,
+            threads = 2,
+            temperature = 0f,
+            topP = 1f,
+            maxPredictTokens = 16,
+            backendPreference = BackendPreference.CPU,
+            gpuLayers = 0,
+            timeoutConfig = timeoutConfig
+        )
+        val resolverContext = object : ContextWrapper(appContext) {
+            override fun getContentResolver(): ContentResolver = testContext.contentResolver
+        }
+        val client = InferenceClient(resolverContext, timeoutConfig = timeoutConfig)
+        var binding: BoundInferenceService? = null
+        try {
+            assertTrue(client.initialize().isSuccess)
+            binding = bindInferenceService(appContext)
+            val pid = binding.pid
+            val invalidBaseline = descriptorCountFor(pid, invalidFiles.first())
+            val failed = client.loadModel(
+                ModelSource.ContentUri(invalidUri.toString(), invalidName),
+                config
+            )
+            assertTrue("Invalid provider GGUF must fail before native model ownership: \${failed.exceptionOrNull()}",
+                failed.isFailure)
+            awaitDescriptorCount(pid, invalidFiles.first(), expectedCount = invalidBaseline)
+
+            val loaded = client.loadModel(
+                ModelSource.ContentUri(validUri.toString(), validName),
+                config
+            )
+            assertTrue("A valid provider model must load after the failed descriptor handoff: \${loaded.exceptionOrNull()}",
+                loaded.isSuccess)
+            val validBaseline = descriptorCountFor(pid, validFiles.first())
+            awaitDescriptorCount(pid, validFiles.first(), minimumCount = validBaseline + 1)
+            assertTrue(client.unloadModel().isSuccess)
+            awaitDescriptorCount(pid, validFiles.first(), expectedCount = validBaseline)
+        } finally {
+            client.close()
+            binding?.let { runCatching { appContext.unbindService(it.connection) } }
+            invalidFiles.forEach { it.delete() }
+            validFiles.forEach { it.delete() }
+        }
+    }
+
+    @Test
+    fun providerDescriptorOwnershipSurvivesReplacementAndCleansUpOnServiceDeath() = runBlocking {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        val testContext = InstrumentationRegistry.getInstrumentation().context
+        val firstName = "provider-first-\${System.nanoTime()}.gguf"
+        val secondName = "provider-second-\${System.nanoTime()}.gguf"
+        fun stage(name: String): List<File> =
+            listOf(testContext.cacheDir, appContext.cacheDir).distinct().map { cacheDir ->
+                File(cacheDir, name).also { file ->
+                    testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }
+        val firstFiles = stage(firstName)
+        val secondFiles = stage(secondName)
+        val firstUri = Uri.parse("content://com.mydocanizer.llm.engine.test-model-provider/$firstName")
+        val secondUri = Uri.parse("content://com.mydocanizer.llm.engine.test-model-provider/$secondName")
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 15_000L,
+            modelLoadMs = 30_000L,
+            prefillMs = 30_000L,
+            firstTokenMs = 30_000L,
+            interTokenMs = 10_000L,
+            totalInferenceMs = 60_000L,
+            abortGracePeriodMs = 500L,
+            reconnectMs = 20_000L
+        )
+        val config = EngineConfig(
+            contextSize = 256,
+            batchSize = 64,
+            threads = 2,
+            temperature = 0f,
+            topP = 1f,
+            maxPredictTokens = 16,
+            backendPreference = BackendPreference.CPU,
+            gpuLayers = 0,
+            timeoutConfig = timeoutConfig
+        )
+        val resolverContext = object : ContextWrapper(appContext) {
+            override fun getContentResolver(): ContentResolver = testContext.contentResolver
+        }
+        val client = InferenceClient(resolverContext, timeoutConfig = timeoutConfig)
+        var binding: BoundInferenceService? = null
+        try {
+            assertTrue(client.initialize().isSuccess)
+            binding = bindInferenceService(appContext)
+            val originalPid = binding.pid
+            val firstBaseline = descriptorCountFor(originalPid, firstFiles.first())
+            val secondBaseline = descriptorCountFor(originalPid, secondFiles.first())
+
+            val firstLoaded = client.loadModel(
+                ModelSource.ContentUri(firstUri.toString(), firstName),
+                config
+            )
+            assertTrue("First provider model must load: \${firstLoaded.exceptionOrNull()}", firstLoaded.isSuccess)
+            awaitDescriptorCount(originalPid, firstFiles.first(), minimumCount = firstBaseline + 1)
+
+            val secondLoaded = client.loadModel(
+                ModelSource.ContentUri(secondUri.toString(), secondName),
+                config
+            )
+            assertTrue("Replacing a provider model must succeed: \${secondLoaded.exceptionOrNull()}",
+                secondLoaded.isSuccess)
+            assertEquals(secondUri.toString(), client.currentModel.value?.path)
+            awaitDescriptorCount(originalPid, firstFiles.first(), expectedCount = firstBaseline)
+            awaitDescriptorCount(originalPid, secondFiles.first(), minimumCount = secondBaseline + 1)
+
+            val replacementInference = client.generateChat(
+                InferenceRequest.single("Reply with one short word.").copy(timeoutConfig = timeoutConfig)
+            )
+            assertTrue("Inference must continue while the replacement descriptor is retained",
+                replacementInference.isSuccess)
+
+            val killedPid = client.remotePid.value ?: originalPid
+            Process.killProcess(killedPid)
+            val recoveredInference = client.generateChat(
+                InferenceRequest.single("Reply with one short word after recovery.")
+                    .copy(timeoutConfig = timeoutConfig)
+            )
+            assertTrue("Recovery must reopen the original provider URI after service death: \${recoveredInference.exceptionOrNull()}",
+                recoveredInference.isSuccess)
+            val recoveredPid = client.remotePid.value
+                ?: throw AssertionError("Inference service PID missing after descriptor recovery")
+            assertTrue("Service death must create a replacement process", recoveredPid != killedPid)
+            val recoveredBaseline = descriptorCountFor(recoveredPid, secondFiles.first())
+            awaitDescriptorCount(recoveredPid, secondFiles.first(), minimumCount = recoveredBaseline + 1)
+
+            assertTrue("Unloading the recovered model must release its descriptor", client.unloadModel().isSuccess)
+            awaitDescriptorCount(recoveredPid, secondFiles.first(), expectedCount = recoveredBaseline)
+        } finally {
+            client.close()
+            binding?.let { runCatching { appContext.unbindService(it.connection) } }
+            firstFiles.forEach { it.delete() }
+            secondFiles.forEach { it.delete() }
+        }
+    }
+
+    @Test
     fun directSeekableProcDescriptorIsAcceptedWithoutCopying() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val sourceFile = File(context.cacheDir, "direct-saf-descriptor-${System.nanoTime()}.gguf")
@@ -185,6 +362,38 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             descriptor.close()
             sourceFile.delete()
         }
+    }
+
+    private fun descriptorCountFor(pid: Int, file: File): Int {
+        val fdDirectory = File("/proc/\$pid/fd")
+        val expectedTarget = file.canonicalFile
+        return fdDirectory.listFiles().orEmpty().count { descriptor ->
+            runCatching {
+                File(Os.readlink(descriptor.absolutePath)).canonicalFile == expectedTarget
+            }.getOrDefault(false)
+        }
+    }
+
+    private fun awaitDescriptorCount(
+        pid: Int,
+        file: File,
+        expectedCount: Int? = null,
+        minimumCount: Int? = null
+    ) {
+        require((expectedCount == null) != (minimumCount == null))
+        val deadline = SystemClock.elapsedRealtime() + 10_000L
+        var actual = descriptorCountFor(pid, file)
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (expectedCount?.let { actual == it } == true ||
+                minimumCount?.let { actual >= it } == true
+            ) return
+            SystemClock.sleep(20L)
+            actual = descriptorCountFor(pid, file)
+        }
+        assertTrue(
+            "Descriptor count for pid=\$pid file=\${file.name} expected=\$expectedCount minimum=\$minimumCount actual=\$actual",
+            expectedCount?.let { actual == it } ?: (actual >= requireNotNull(minimumCount))
+        )
     }
 
     @Test
