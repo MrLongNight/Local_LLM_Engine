@@ -19,7 +19,7 @@ val localLlmSyntheticTokenDiagnostics = providers.gradleProperty("localLlmSynthe
             )
         }
     }
-    .getOrElse(false)
+    .getOrElse(true)
 
 android {
     namespace = "com.mydocanizer.llm.engine"
