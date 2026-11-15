@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.modelimport
 
 import android.app.ActivityManager
 import android.app.Application

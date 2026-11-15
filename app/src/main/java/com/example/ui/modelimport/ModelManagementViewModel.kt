@@ -1,5 +1,6 @@
-package com.example.ui
+package com.example.ui.modelimport
 
+import com.example.ui.chat.ChatViewModel
 import android.app.Application
 import androidx.lifecycle.viewModelScope
 import com.mydocanizer.llm.engine.BackendInfo

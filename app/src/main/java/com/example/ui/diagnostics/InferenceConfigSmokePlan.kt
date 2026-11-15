@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.diagnostics
 
 import com.mydocanizer.llm.engine.EngineConfig
 

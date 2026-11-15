@@ -1,5 +1,6 @@
 package com.example.ui
 
+import com.example.ui.diagnostics.Q4kDecodePathPolicy
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

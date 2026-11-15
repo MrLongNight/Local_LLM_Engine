@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.diagnostics
 
 /**
  * Accepts a Q8_1 pipeline fallback only when native evidence proves that the

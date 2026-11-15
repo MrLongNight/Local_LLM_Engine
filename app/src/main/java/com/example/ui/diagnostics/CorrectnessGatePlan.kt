@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.diagnostics
 
 /**
  * Pure evaluator for the Debug/TEXT_DIAGNOSTICS greedy correctness gate.

@@ -1,5 +1,6 @@
 package com.example.ui
 
+import com.example.ui.diagnostics.BackendBenchmarkPlan
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup

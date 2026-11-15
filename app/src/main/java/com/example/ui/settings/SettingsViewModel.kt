@@ -1,5 +1,6 @@
-package com.example.ui
+package com.example.ui.settings
 
+import com.example.ui.modelimport.ModelImportViewModel
 import android.app.ActivityManager
 import android.app.Application
 import android.net.Uri

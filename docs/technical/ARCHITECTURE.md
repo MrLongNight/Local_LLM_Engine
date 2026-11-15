@@ -119,10 +119,15 @@ sequenceDiagram
 | Area | Responsibility |
 |---|---|
 | `app/src/main/java/com/example/ui/navigation/` | Main navigation screen and `AppTab` navigation contract. |
-| `app/src/main/java/com/example/ui/chat/` | Chat screen, chat bubbles and inference/model-load progress UI. |
-| `app/src/main/java/com/example/ui/modelimport/` | Model-import screen and model-library/import UI sections. |
-| `app/src/main/java/com/example/ui/settings/` | Settings screen and focused settings sections. |
-| `app/src/main/java/com/example/ui/` | Shared `EngineViewModel` facade and feature ViewModels/plans pending the composition refactor. |
+| `app/src/main/java/com/example/ui/chat/` | Chat screen, chat ViewModel, chat bubbles and inference/model-load progress UI. |
+| `app/src/main/java/com/example/ui/modelimport/` | Model-import screen/ViewModels, model-library state, last-model persistence and SAF folder scanning. |
+| `app/src/main/java/com/example/ui/settings/` | Settings screen/ViewModel and focused settings sections. |
+| `app/src/main/java/com/example/ui/diagnostics/` | Lifecycle/configuration/Vulkan/benchmark ViewModels and their pure plans/policies. |
+| `app/src/main/java/com/example/ui/` | Shared `EngineViewModel` facade and app entry point. |
+
+
+
+
 | `app/src/main/java/com/example/ui/settings/sections/` | Focused composable sections used by `SettingsScreen`. |
 | App-side model helpers/ViewModels | Prototype-only model selection, app persistence and import orchestration. |
 | `llm-engine/src/main/java/com/mydocanizer/llm/engine/` | Public API, request/config/state/result/model types, diagnostics facade, and bounded event-envelope/storage/metrics/report components. |

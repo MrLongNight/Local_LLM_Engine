@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.ui.EngineViewModel
-import com.example.ui.ImportedModelEntry
 import com.mydocanizer.llm.engine.ModelInfo
 
 @Composable

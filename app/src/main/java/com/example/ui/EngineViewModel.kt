@@ -1,5 +1,7 @@
 package com.example.ui
 
+import com.example.ui.diagnostics.EngineLifecycleViewModel
+import com.example.ui.settings.SettingsViewModel
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.viewModelScope
