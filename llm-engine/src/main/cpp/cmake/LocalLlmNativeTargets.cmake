@@ -92,7 +92,7 @@ if(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     target_compile_definitions(localllm_engine PRIVATE LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=1)
     message(STATUS "LocalLLM: full text and numeric inference diagnostics ENABLED")
 else()
-    message(STATUS "LocalLLM: synthetic numeric token-ID/logit diagnostics disabled")
+    message(STATUS "LocalLLM: full text and numeric inference diagnostics disabled")
 endif()
 
 option(LOCAL_LLM_ENABLE_TEST_HOOKS "Enable debug-only native inference fault injection" OFF)
