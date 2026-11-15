@@ -290,9 +290,9 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 ### P2-06 — Organize demo and library packages by ownership
 
-**Evidence (2026-11-15):** The app now has dedicated `navigation`, `chat`, `modelimport` and `settings` screen packages. `AppTab` belongs to navigation, and model-load progress UI belongs to chat. Feature ViewModels/plans and the remaining root `com.example.ui` files are still awaiting ownership-based migration.
+**Evidence (2026-11-15):** The app now has dedicated `navigation`, `chat`, `modelimport`, `settings` and `diagnostics` packages. Screens, `AppTab`, feature ViewModels, model-library/import state, lifecycle/benchmark ViewModels and benchmark plans/policies were moved in commits `f76e6f5` and `964ba94`. The shared `EngineViewModel` remains the app facade. The `com.example` namespace and library-internal package organization are still open.
 
-- [ ] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Primary screens and navigation contract were moved in commit `f76e6f5`; the progress-indicator import was corrected in `e8944f4`. JVM tests pass; APK verification is running in `43675717767`. Remaining ViewModels and benchmark plans must be moved without changing the shared ViewModel/engine ownership.
+- [ ] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Primary screens and navigation contract were moved in commit `f76e6f5`; the progress-indicator import was corrected in `e8944f4`. The ViewModel/plan package move is in `964ba94`; JVM/APK verification is running in `43676244426` / `43676244423`.
 - [ ] Replace `com.example` only after auditing manifests, generated BuildConfig, instrumentation, saved state and deep links.
 - [ ] Organize library internals by lifecycle, model source, memory/resource policy, diagnostics and IPC; keep consumer-facing types separate.
 - [x] Enforce dependency direction `:app → :llm-engine`; the library Gradle module depends only on Android core/coroutines and has no app/UI/benchmark/DMS module dependency.
