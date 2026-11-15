@@ -248,7 +248,7 @@ class CorrectnessGatePlanTest {
     }
 
     @Test
-    fun truncatedPrefixStillComparesVulkanAgainstTheCpuReference() {
+    fun rejectsTruncatedVulkanOutputBeforeComparingAgainstTheCpuReference() {
         val cpu = CorrectnessGatePlan.parse("322, 324, 326, 3", trace("cpu-cut", "CPU"))
         val vulkan = CorrectnessGatePlan.parse(
             "322, 324, 326, 3",
@@ -256,7 +256,7 @@ class CorrectnessGatePlanTest {
         )
         val result = CorrectnessGatePlan.evaluate(vulkan, cpu, expectedBackend = "Vulkan")
         assertFalse(result.passed)
-        assertEquals("CPU_TOP1_MISMATCH", result.reason)
+        assertEquals("EXPECTED_OUTPUT_MISMATCH", result.reason)
     }
 
     @Test
