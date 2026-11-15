@@ -20,7 +20,6 @@ import com.example.ui.settings.sections.BackendSettingsSection
 import com.example.ui.settings.sections.BenchmarkResultSection
 import com.example.ui.settings.sections.InferenceSettingsSection
 import com.example.ui.settings.sections.SystemPromptSection
-import com.example.ui.settings.sections.VulkanQ4kDiagnosticsSection
 
 @Composable
 fun SettingsScreen(
@@ -69,18 +68,9 @@ fun SettingsScreen(
             )
         }
 
-        // Two-stage acceptance flow: one combined CPU/Vulkan gate, then an optional targeted Q4_K diagnosis.
+        // One compact, model-agnostic Vulkan diagnostic run.
         item {
             BackendAcceptanceTestSection(
-                currentModel = currentModel,
-                isBenchmarking = isBenchmarking,
-                isGenerating = isGenerating,
-                isImporting = isImporting,
-                viewModel = viewModel
-            )
-        }
-        item {
-            VulkanQ4kDiagnosticsSection(
                 currentModel = currentModel,
                 isBenchmarking = isBenchmarking,
                 isGenerating = isGenerating,
