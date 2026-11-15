@@ -11,7 +11,7 @@
 
 - [x] Source-audit all 55 pre-existing implementation checklist items marked `[x]` against the implementation and named tests at code HEAD `07b56cd6a3d7417016b1771ae84d11202419ef38` (excluding this audit-control checkbox); findings: `docs/active-todos/COMPLETED_ITEMS_AUDIT.md`.
 - [ ] Resolve the source/documentation mismatch and the additional regression gaps recorded in the audit before treating the affected acceptance areas as fully verified.
-- [ ] Re-run and record JVM, host-native, Android instrumentation and APK workflows separately after code changes; the current-head Unit Tests workflow is green, while the APK workflow is still running at audit time.
+- [x] Re-run and record the current-head JVM and Android APK/instrumentation workflows separately: Unit Tests run `43679806775` passed; APK + process-isolation instrumentation run `43679806820` passed on commit `5a87d8f90b24f36c5ba893ba14eea27e50cc73f1`. Both ARM64 and x86_64 CMake configure/build tasks succeeded. Debug APK artifact `14148461029` (37,010,982 bytes; SHA-256 `821f4aaa60bf6034dcca1aa203c7201dcf244655a8e3f6665c3fe439b28b018e`) and instrumentation APK artifact `14148281622` (24,341,340 bytes; SHA-256 `a9f44b1a2311a024093598f9754e4adecb55b35b7bfc13e66f88f51d38f9e77c`) are uploaded. Host-native tests remain a separately tracked verification item where applicable.
 - [ ] Complete the physical-device checks that remain open in P0/P1; source review and CI do not substitute for hardware acceptance.
 
 ## Execution order and invariants
@@ -234,6 +234,8 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 ### P2-01 — Replace the deep ViewModel inheritance chain with composition
 
+**Additional source finding (2026-11-15):** `ChatViewModel.sendMessage()` correctly builds each request from the complete in-memory conversation (`system` + all prior user/assistant messages + the new user message); `LocalLlmEngineImpl.streamChat()` forwards the ordered roles and contents to JNI, and the native prompt path can discard oldest history only when the model context limit requires it. The chat transcript itself is a plain `MutableStateFlow` owned by the ViewModel; no durable session persistence/restore is present in this path. This is a real multi-turn context path during the ViewModel lifetime, but not a persistent conversation/session feature. Include explicit chat/session ownership and a regression test for ordered multi-turn request construction in the composition refactor; do not conflate this with the separate model-output correctness work in P0-01.
+
 - [ ] Preserve the existing screen-facing `EngineViewModel` facade initially; move feature behavior behind cohesive internal controllers composed by the facade.
 - [ ] Separate chat/session, model selection/loading, explicit import, settings, diagnostics/benchmarks and engine lifecycle.
 - [ ] Keep exactly one engine instance and one application-level owner; do not create one engine per screen.
@@ -271,7 +273,7 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 - [x] Split Android toolchain flags/ABI selection, upstream build/Vulkan configuration, Android Vulkan compatibility, graph/GDN diagnostics, native target wiring and scheduler-race verification into focused CMake modules. The Vulkan GPU profiler configuration remains inside the Android Vulkan module.
 - [x] Keep the root `CMakeLists.txt` as ordered orchestration only; preserve the existing CMake function bodies, targets, compile flags and ABI settings during extraction.
 - [x] Retain fail-fast upstream anchors and build-directory-only generated files. The pinned llama.cpp submodule is unchanged.
-- [ ] Verify generated compile commands, configure overlays and APK builds for ARM64 and x86_64. Current verification: Android APK workflow `43676244423` is running for the combined CMake and feature-package refactor; do not mark acceptance complete until it succeeds.
+- [x] Verify CMake configure/build and APK packaging for ARM64 and x86_64. Run `43679806820` passed both `configureCMakeDebug[arm64-v8a]`, `configureCMakeDebug[x86_64]`, `buildCMakeDebug[arm64-v8a]` and `buildCMakeDebug[x86_64]`, then built the installable Debug APK and instrumentation APK; emulator process-isolation instrumentation also passed. Artifacts: Debug `14148461029`, instrumentation `14148281622`. The pinned llama.cpp submodule check passed.
 
 **Acceptance:** Same outputs/compile configuration with smaller, reviewable CMake components; clean submodule remains unchanged.
 
@@ -292,7 +294,7 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 **Evidence (2026-11-15):** The app now has dedicated `navigation`, `chat`, `modelimport`, `settings` and `diagnostics` packages. Screens, `AppTab`, feature ViewModels, model-library/import state, lifecycle/benchmark ViewModels and benchmark plans/policies were moved in commits `f76e6f5` and `964ba94`. The shared `EngineViewModel` remains the app facade. The `com.example` namespace and library-internal package organization are still open.
 
-- [x] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Screens/navigation moved in `f76e6f5`; progress/model-card imports corrected in `e8944f4` and `7365270`; ViewModels/plans moved in `964ba94`. JVM tests pass in `43676537999`; APK verification is still running in `43676409777`.
+- [x] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Screens/navigation moved in `f76e6f5`; progress/model-card imports corrected in `e8944f4` and `7365270`; ViewModels/plans moved in `964ba94`. JVM tests passed in `43679806775`; Android APK build and emulator process-isolation instrumentation passed in `43679806820` (artifacts `14148461029` and `14148281622`).
 - [ ] Replace `com.example` only after auditing manifests, generated BuildConfig, instrumentation, saved state and deep links.
 - [ ] Organize library internals by lifecycle, model source, memory/resource policy, diagnostics and IPC; keep consumer-facing types separate.
 - [x] Enforce dependency direction `:app → :llm-engine`; the library Gradle module depends only on Android core/coroutines and has no app/UI/benchmark/DMS module dependency.
