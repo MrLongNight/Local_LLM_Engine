@@ -15,7 +15,7 @@ internal object BackendBenchmarkPlan {
     const val MEASURED_TOKENS = 20
     const val TOTAL_TOKENS = WARMUP_TOKENS + MEASURED_TOKENS
     const val COOLDOWN_MS = 500L
-    const val CORRECTNESS_GATE_STEPS = 16
+    const val CORRECTNESS_GATE_STEPS = 32
     val CORRECTNESS_GATE_EXPECTED = listOf("322", "324", "326", "328", "330")
 
     val BACKENDS = listOf(BackendPreference.VULKAN, BackendPreference.CPU)
