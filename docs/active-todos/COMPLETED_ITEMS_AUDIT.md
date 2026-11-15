@@ -14,7 +14,7 @@
   1. **P0-02 documentation mismatch:** the current Mali Q4_K AUTO selector prefers BASE DMMV because `local_llm_mali_auto_prefers_mmvq=false`. The previous summary incorrectly described current AUTO as selecting MMVQ Integer-Dot. The 2026-11-14 MMVQ runtime result is historical and does not prove the current AUTO choice.
   2. **P0-01 paired-pass accounting gap:** CPU-only pass and CPU/Vulkan comparison failures report actual trace length, but a paired CPU/Vulkan PASS still returns the 32-token ceiling. Add an early-EOG paired-PASS test and report the actual compared length.
   3. **P1-03 metadata-cancellation edge:** `ModelImportViewModel.importModelsFromSaf()` wraps the display-name `ContentResolver.query()` in `runCatching`. The following `ensureActive()` does observe a cancelled job before processing the file, so it does not silently advance the bulk loop; however, cancellation is not rethrown directly from the query and may wait for the query to return. Add a deterministic blocked-query cancellation test and prefer explicit cancellation propagation.
-  4. **Execution evidence is separate:** current-head Unit Tests workflow succeeded; the current-head APK workflow was still in progress at audit time. No new APK success, Android instrumentation success or physical-device acceptance is claimed by this source audit.
+  4. **Execution evidence is separate:** at audited HEAD `07b56cd`, both Unit Tests and Android APK Build workflows were still in progress. The preceding `aadcbd3` Unit Tests run succeeded, but that is not a result for `07b56cd`; its APK workflow was cancelled. No successful APK, Android instrumentation success or physical-device acceptance is claimed by this source audit.
 
 ## Item-by-item audit
 
@@ -56,6 +56,7 @@ Status meanings:
 | End-to-end upstream/overlay selector trace | Source audit present | The pinned upstream heuristic, guarded override and null-pipeline fallback are traced in CMake overlay logic. |
 | Non-Mali AUTO retains upstream heuristic | Source/test present | AUTO override is scoped to vendor ID `0x13B5`; configure-time checks require vendor-scope markers. |
 | Type/batch scope enforcement | Source audit present | Q4_K prefill/batch and Q4_K/Q5_K/Q6_K decode override scopes are constrained in generated overlay source; submodule is a gitlink at the pinned revision. |
+| Deterministic overlay scope guards and decode-path policy tests | Source/test present | Latest P0-02 addition introduces `Q4kDecodePathPolicy` plus JVM cases for non-Mali upstream AUTO reason, Mali MMVQ reason, explicit BASE/MMVQ overrides, missing-pipeline fallback and Mali AUTO base-reason selection. The policy is evidence-driven: AUTO's observed path is checked against its recorded reason/eligibility, not hard-coded to one universal kernel. |
 
 **Correction:** the current Mali AUTO default is BASE DMMV, not MMVQ Integer-Dot. The previous “Current source finding” text has been corrected in MASTER_TODO. Re-run the actual AUTO dispatch on the device after the latest source change; the historical MMVQ run does not satisfy that check.
 
