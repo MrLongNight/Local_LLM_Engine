@@ -261,7 +261,13 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
         const size_t line_length = line_end
             ? static_cast<size_t>(line_end - cursor)
             : std::strlen(cursor);
-        if (line_length > 0) {
+        const bool keep_empty_line =
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+            true;
+#else
+            line_length > 0;
+#endif
+        if (keep_empty_line) {
 #if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
             const long current_size = std::ftell(g_native_log_file);
             const long incoming_size = static_cast<long>(line_length) + 64L;
@@ -301,6 +307,18 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
 // EngineDiagnostics. The message contains timings and backend only, never prompt text.
 static void log_native_info_message(const std::string& message) {
     local_llm_native_log_callback(GGML_LOG_LEVEL_INFO, message.c_str(), nullptr);
+}
+
+// The native logger API is C-string based. Render embedded NUL bytes explicitly so
+// debug traces preserve their position instead of silently truncating at the first NUL.
+static void log_native_text_trace(const std::string& message) {
+    std::string escaped;
+    escaped.reserve(message.size());
+    for (const char value : message) {
+        if (value == '\\0') escaped += "\\\\0";
+        else escaped.push_back(value);
+    }
+    log_native_info_message(escaped);
 }
 
 // Force pending stdio bytes into the shared file so the app process can read the
@@ -772,7 +790,7 @@ static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {
 static jstring finish_native_generation(JNIEnv* env, EngineInstance* engine) {
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     if (engine != nullptr && !engine->assistant_ss.str().empty()) {
-        log_native_info_message(
+        log_native_text_trace(
             "LOCAL_LLM_TEXT_TRACE - runId=" + engine->inference_run_id +
             ",kind=FINAL_ASSISTANT_OUTPUT\n" + engine->assistant_ss.str());
     }
@@ -1711,7 +1729,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             input_trace << "--- message " << i << " role=" << messages[i].role << " ---\n"
                         << messages[i].content << "\n";
         }
-        log_native_info_message(input_trace.str());
+        log_native_text_trace(input_trace.str());
     }
 #endif
 
@@ -1855,7 +1873,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         std::ostringstream rendered_trace;
         rendered_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
                        << ",kind=RENDERED_PROMPT\n" << full_prompt;
-        log_native_info_message(rendered_trace.str());
+        log_native_text_trace(rendered_trace.str());
 
         std::ostringstream token_trace;
         token_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
@@ -2226,7 +2244,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         token_piece_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
                           << ",kind=TOKEN_PIECE,step=" << engine->tokens_generated
                           << ",tokenId=" << new_token_id << "\n" << valid_output;
-        log_native_info_message(token_piece_trace.str());
+        log_native_text_trace(token_piece_trace.str());
     }
 #endif
     const int64_t token_total_duration_us = llama_time_us() - token_step_start_us;
