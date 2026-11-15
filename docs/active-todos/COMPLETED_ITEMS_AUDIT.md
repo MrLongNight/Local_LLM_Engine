@@ -11,9 +11,8 @@
 - All checked items were located in the current source tree and reviewed against the implementation and/or the named test evidence.
 - Most checked items are correctly represented as implemented source changes with matching tests or explicit historical device evidence.
 - **Not all completed work is fully verified.** The following audit findings must remain visible:
-  1. **P0-02 documentation mismatch:** the current Mali Q4_K AUTO selector prefers BASE DMMV because `local_llm_mali_auto_prefers_mmvq=false`. The previous summary incorrectly described current AUTO as selecting MMVQ Integer-Dot. The 2026-11-14 MMVQ runtime result is historical and does not prove the current AUTO choice.
-  2. **P0-01 paired-pass accounting gap:** CPU-only pass and CPU/Vulkan comparison failures report actual trace length, but a paired CPU/Vulkan PASS still returns the 32-token ceiling. Add an early-EOG paired-PASS test and report the actual compared length.
-  3. **P1-03 metadata-cancellation edge:** `ModelImportViewModel.importModelsFromSaf()` wraps the display-name `ContentResolver.query()` in `runCatching`. The following `ensureActive()` does observe a cancelled job before processing the file, so it does not silently advance the bulk loop; however, cancellation is not rethrown directly from the query and may wait for the query to return. Add a deterministic blocked-query cancellation test and prefer explicit cancellation propagation.
+  1. **P0-02 device evidence remains open:** current `MASTER_TODO.md` correctly documents that Mali Q4_K AUTO selects BASE DMMV (`local_llm_mali_auto_prefers_mmvq=false`). The 2026-11-14 MMVQ runtime result is historical and does not prove the current AUTO choice; only a fresh device dispatch trace can close this item.
+  2. **P1-03 metadata-cancellation edge:** `ModelImportViewModel.importModelsFromSaf()` wraps the display-name `ContentResolver.query()` in `runCatching`. The following `ensureActive()` does observe a cancelled job before processing the file, so it does not silently advance the bulk loop; however, cancellation is not rethrown directly from the query and may wait for the query to return. Add a deterministic blocked-query cancellation test and prefer explicit cancellation propagation.
   4. **Execution evidence is separate:** at audited HEAD `07b56cd`, both Unit Tests and Android APK Build workflows were still in progress. The preceding `aadcbd3` Unit Tests run succeeded, but that is not a result for `07b56cd`; its APK workflow was cancelled. No successful APK, Android instrumentation success or physical-device acceptance is claimed by this source audit.
 
 ## Item-by-item audit
@@ -39,7 +38,8 @@ Status meanings:
 | Content-safe output classification | Source/test present | JVM tests cover EMPTY, PREFIX_TOO_SHORT, EXPECTED_PREFIX, EXACT_SEQUENCE, SEQUENCE_MISMATCH, NON_SEQUENCE_TEXT and EXTRA_SUFFIX; only shape/count are persisted. |
 | Terminal EOG trace attribution | Source/test present | Native trace is cleared before each token attempt and Kotlin reads it before the null terminal check. |
 | 32-token correctness safety budget / natural EOG | Source/test present | Gate uses shared 32-token ceiling and requires the complete exact answer; tests cover truncation, natural stop and CPU/Vulkan trace-length mismatch. |
-| Gate compared-step accounting | **Follow-up** | CPU-only pass and paired comparison failures use actual lengths, but paired CPU/Vulkan PASS returns the constant 32. See new open P0-01 item in MASTER_TODO. |
+| Gate compared-step accounting | Source/test present (current-main recheck) | Paired CPU/Vulkan PASS returns `candidateSteps.size`; `reportsActualStepCountWhenCpuAndVulkanPassWithNaturalEarlyEog` verifies a 25-step paired early-EOG pass (`9f9afb6`, `c5131fa`). The earlier follow-up text was stale. |
+| Gate terminal finish reason | Source/test present (current-main recheck) | The correctness gate requires `FinishReason.STOP` and rejects every other enum value, even with exact output and a valid trace; `rejectsEveryNonStopFinishReasonEvenWhenTheExpectedAnswerAndTraceAreExact` covers all non-STOP values (`a73240f`). The actual finish reason is included in the content-free gate result. |
 
 **Boundary:** P0-01 remains open overall. The checked sub-items are not proof of model-family output correctness; current LFM3 CPU and Vulkan acceptance evidence still fails the synthetic expected-output check.
 
@@ -138,6 +138,12 @@ Status meanings:
 
 **Boundary:** bounded versioned event schema and request/run/PID correlation remains open in MASTER_TODO.
 
+## Current-main recheck — 2026-11-15
+
+- Rechecked current main at `a73240fd09efe2bce4631788e6515ffd536f5ba0`; the two P0-01 findings in the original audit are resolved in source and regression tests. Paired early-EOG comparison reports the actual 25 compared steps, and the correctness gate now requires a natural `STOP`/EOG finish rather than accepting a token-budget or error terminal state.
+- The `MASTER_TODO.md` Mali AUTO statement matches the current selector: BASE DMMV is the source default for Mali Q4_K AUTO. The historical MMVQ sweep remains useful for A/B analysis but is not evidence of current AUTO dispatch.
+- P0 acceptance across model families, current Mali runtime dispatch, Vulkan synchronization attribution, real-device timeout/cancellation/reconnect cycles, SAF cloud-provider behavior and cache-on/cache-off equivalence remain separate execution/device requirements. They are deliberately not marked complete by this source recheck.
+
 ## Workflow evidence at audit time
 
 - **Unit Tests:** run `43671275805`, commit `07b56cd6a3d7417016b1771ae84d11202419ef38`, status **in progress** at audit time. The immediately preceding `aadcbd3` run `43670909807` succeeded, but does not verify the newer commit.
@@ -147,7 +153,6 @@ Status meanings:
 
 ## Required follow-up
 
-1. Resolve P0-02 source/docs alignment by keeping the corrected current AUTO statement and adding device evidence for current AUTO.
-2. Fix P0-01 paired-pass `comparedSteps` accounting and add a paired natural-EOG test.
-3. Add P1-03 blocked metadata-query cancellation regression coverage and explicit cancellation propagation.
-4. Keep all hardware and end-to-end items unchecked until the exact device/build/run evidence is attached to the TODO.
+1. Capture current Mali Q4_K AUTO dispatch evidence on the target device; the source/documentation alignment is already corrected, but the 2026-11-14 MMVQ run does not verify current AUTO.
+2. Add the P1-03 blocked metadata-query cancellation regression and direct cancellation propagation.
+3. Keep P0/P1 hardware and end-to-end acceptance items open until exact device/build/run evidence is attached to the TODO.
