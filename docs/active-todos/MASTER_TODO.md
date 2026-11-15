@@ -31,6 +31,22 @@ Es wird ausschließlich auf dem bestehenden Branch `main gearbeitet. Vor jeder �
 
 ### P0-01 — Korrekte Modellausgaben über die unterstützten Modellfamilien hinweg wiederherstellen und absichern
 
+### Neuester Gerätelog und blockierter erster Abnahmetest — 15.11.2026, 19:32
+
+- Der neue Export enthält keinen Lauf des ersten CPU/Vulkan-Abnahmetests: Es gibt keine CORRECTNESS_GATE_RESULT- oder Matrix-Profilzeilen.
+- Beide tatsächlich protokollierten Modellladungen forderten CPU an (backendPreference=CPU) und lagerten folgerichtig 0/26 bzw. 0/25 Layer nach Vulkan aus. Die beiden Graph-Snapshots enthalten 100 % CPU-Nodes und 0 Vulkan-Nodes. Das ist kein Vulkan-Fehlernachweis.
+- Der erste CPU-Lauf wurde nach 125 Tokens mit finishReason=CANCELLED (4,34 tok/s) beendet; der zweite CPU-Lauf endete nach 136 Tokens regulär mit STOP (5,73 tok/s). Beide Logs enthalten keine Antworttexte, daher ist die Ausgabekorrektheit damit nicht beurteilbar.
+- Mali-G57 wird erkannt und meldet int dot=1, fp16=1; der native Vulkan-Profiler war ausgeschaltet. Es gibt keine GPU-Operationszeiten. Der verfügbare RAM lag während der erfassten Inferenzphasen bei mindestens ungefähr 2,25 GB; thermische Samples fehlen.
+- Der erste UI-Abnahmetest war im installierten APK deaktiviert, weil TEXT_DIAGNOSTICS_ENABLED=false gebaut wurde. Das war eine nicht freigegebene Änderung und verhinderte die vom UI angebotene CPU/Vulkan-Korrektheitsprüfung.
+
+**Korrektur der Debug-Diagnostik:**
+- [x] Debug-Builds standardmäßig mit vollständiger Text-/Token-Diagnostik konfigurieren; Release bleibt ohne diese Diagnoseinstrumentierung.
+- [x] Manual-APK-Workflow auf localLlmSyntheticTokenDiagnostics=true umstellen und den nativen Compile-Schalter fail-fast verifizieren.
+- [x] Debug-Logs um Originalnachrichten, gerenderten Prompt, Prompt-Token-IDs, Token-Auswahl/Logits, sichtbare Tokenstücke und vollständige Modellantwort ergänzen.
+- [x] Im Diagnose-Debug-Modus weder native/Kotlin-Logs rotieren noch Ereignisduplikate, lange Zeilen oder den vollständigen Rohlog-Export abschneiden.
+- [ ] Den neuen Actions-Lauf einschließlich APK-Artefakt verifizieren und danach bestätigen, dass der erste Abnahmetest-Button in genau diesem APK aktiv ist.
+- [ ] Den ersten CPU/Vulkan-Abnahmetest mit dem Diagnose-APK ausführen und anhand der vollständigen Ausgabe-Traces die eigentliche Ausgabekorrektheit beurteilen. Die darin enthaltenen Vulkan-Geschwindigkeiten sind wegen CPU-sichtbarer Top-5-Logits nicht als normale Produktions-Performance zu werten.
+
 ### Untersuchungsstand — 2026-11-15
 
 - Die hochgeladenen Abnahme-Daten vom 14.11.2026 für LFM3 1.7B Q4_K_M melden wiederholt `EXPECTED_OUTPUT_MISMATCH` sowohl für die CPU-Referenz als auch für den Vulkan-Kandidaten. Das ist kein Beleg für einen ausschließlich Vulkan-bedingten Fehler. Die Daten unterscheiden noch nicht zwischen einem Problem bei der Modellausgabe und einer ungeeigneten Fixture mit einer exakt erwarteten Antwort.
@@ -168,20 +184,17 @@ Es wird ausschließlich auf dem bestehenden Branch `main gearbeitet. Vor jeder �
 
 ## P1 — Datenschutz, Laufzeitzuverlässigkeit und Verifikation
 
-### P1-01 — Verhindern, dass Prompt-, Dokument- und Antworttexte in Diagnosen gelangen
+### P1-01 — Vollständige Debug-Diagnostik und sichere Release-Grenze
 
-**Befund:** Die aktuelle Debug-Gradle-Konfiguration setzt `TEXT_DIAGNOSTICS_ENABLED=true` und übergibt `LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=ON`. `EngineDiagnostics.testText()` speichert Daten über den normalen Log-Pfad. Aufrufer sind unter anderem Benchmark-/Konfigurationsausgaben und Token-Auswahl-Traces. Der kompakte Export lässt den speziellen Testtext-Abschnitt zwar aus, die gespeicherten Prozesslogs enthalten die Texte aber weiterhin.
+**Befund:** Für die Fehleranalyse müssen echte Modellinputs und -ausgaben sichtbar sein. Die vorherige Inhaltsfilterung und das begrenzte Exportformat verhinderten die Untersuchung der tatsächlichen Modellantwort und werden für Debug-Diagnosebuilds nicht mehr verwendet. Die Anforderung gilt ausdrücklich für Debug; Release bleibt ohne Text-/Token-Diagnoseinstrumentierung.
 
-- [x] Standard-Debug- und Release-Builds standardmäßig inhaltsneutral machen. Normaler Debug-Build deaktiviert Token-Diagnosen; die optionale Gradle-Property heißt `localLlmSyntheticTokenDiagnostics` und ist standardmäßig `false`.
-- [x] Logging von nativ gerenderten Prompts, Chat-Template-Quellen, detokenisierten Prompts und Token-Textstücken entfernen. Die alte Kotlin-Methode `testText()` bleibt aus Kompatibilitätsgründen vorhanden, verwirft ihren Inhalt aber absichtlich.
-- [x] Den optionalen nativen Korrektheits-Trace auf numerische Token-IDs/Logits beschränken. Über eine separat abgesicherte Methode protokollieren und niemals Token-Textstücke aufnehmen.
-- [ ] Prüfen, dass die optionale Aktivierung nicht versehentlich mit echten Nutzerkonversationen verwendet werden kann. Aktuell ist es eine explizite Build-Property und darf nur für synthetische Korrektheits-Prompts verwendet werden.
-- [x] Einen Kotlin-Sentinel-Test ergänzen, der beweist, dass vom Aufrufer übergebener Rohtext nicht gespeichert wird; Sentinel-Prüfungen für kompakte Exporte ergänzen/beibehalten. Native Laufzeit-/Build-Verifikation ist noch offen.
+- [x] Debug-Gradle-Standard auf localLlmSyntheticTokenDiagnostics=true umstellen; Release erzwingt weiterhin TEXT_DIAGNOSTICS_ENABLED=false und LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=OFF.
+- [x] EngineDiagnostics.testText() speichert vollständige Inhalte in Debug-Diagnosebuilds; lange Nutzdaten werden verlustfrei in mehrere Ereignisse aufgeteilt.
+- [x] Im nativen Diagnosepfad Originalnachrichten, final gerenderten Prompt, Prompt-Token-IDs, Token-ID-/Top-5-Logits, Tokenstücke und finale Assistentenantwort protokollieren.
+- [x] Im Diagnose-Debug-Modus Logrotation, Ereignislimit, Deduplizierung, Zeilenkürzung und Exportlimit deaktivieren; vollständige Rohlogs im Export zusätzlich zum strukturierten Überblick ausgeben.
+- [ ] Auf dem Gerät prüfen, dass beide Prozessdateien vollständig und byte-identisch exportiert werden und der Android-Dokumentanbieter lange Mehrzeilenlogs unverändert übernimmt.
 
-**Abnahmekriterium:** Kein unterstützter normaler Build speichert Nutzer-/Dokumenten-Prompt oder Antwortinhalt. Technische Diagnosen bleiben strukturiert, begrenzt und einem Lauf eindeutig zugeordnet.
-
-- [x] Beim Start eine Markierung in der nativen Diagnosedatei ergänzen und nach Backend-/Modell-/Prompt-Initialisierung sowie nach terminalen Inferenzpfaden ausdrücklich `fflush` ausführen. Dadurch sind native Log-Bytes sofort exportierbar und warten nicht auf das 500-ms-Batching-Fenster.
-- [ ] Prüfen, dass die exportierte Datei des Dokument-Providers byte-identisch und nicht leer ist und dass die Suche Logs sowohl des App-Prozesses als auch des `:inference`-Prozesses erfasst.
+**Abnahmekriterium:** Debug-Diagnosebuilds enthalten vollständige, laufkorrelierte Rohdaten ohne stille Kürzung oder Inhaltsfilter. Release enthält weiterhin keine Prompt-/Antwort-Texttraces.
 
 ### P1-02 — Speicher- und Ressourcenverwaltung bei wiederholten Fehlern und Wiederherstellung stabilisieren
 
