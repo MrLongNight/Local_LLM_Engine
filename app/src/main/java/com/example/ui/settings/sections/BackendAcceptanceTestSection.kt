@@ -15,10 +15,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ui.EngineViewModel
-import com.example.ui.diagnostics.BackendBenchmarkPlan
 import com.mydocanizer.llm.engine.ModelInfo
-import com.example.BuildConfig as AppBuildConfig
-import com.mydocanizer.llm.engine.BuildConfig as EngineBuildConfig
+
 @Composable
 internal fun BackendAcceptanceTestSection(
     currentModel: ModelInfo?,
@@ -27,42 +25,29 @@ internal fun BackendAcceptanceTestSection(
     isImporting: Boolean,
     viewModel: EngineViewModel
 ) {
-    val correctnessTraceAvailable =
-        AppBuildConfig.DEBUG && EngineBuildConfig.DEBUG && EngineBuildConfig.TEXT_DIAGNOSTICS_ENABLED
     Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "1. Engine-Abnahmetest: Korrektheit + Leistung",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Ein zusammengefasster Lauf: CPU-Referenz zuerst, danach Vulkan; Qwen3.5 ergänzt die GDN-Fusionsprofile. " +
-                                "Jedes CPU/Vulkan-Paar verwendet dasselbe Modell und dieselben Inferenzparameter. Vor der Geschwindigkeitsmessung " +
-                                "muss Vulkan die ${BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS}-Token-Korrektheitsprüfung bestehen: identische Top-1-Tokens und mindestens " +
-                                "4/5 Top-5-Überschneidung. Nur bestandene Profile erhalten einen Geschwindigkeitswert.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = { viewModel.runBackendAcceptanceTest() },
-                            enabled = correctnessTraceAvailable && currentModel != null &&
-                                !isBenchmarking && !isGenerating && !isImporting,
-                            modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
-                        ) {
-                            Text(if (isBenchmarking) "Abnahmetest läuft…" else "CPU + Vulkan gemeinsam prüfen")
-                        }
-                        if (!correctnessTraceAvailable) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Dieses APK enthält die für den Korrektheitsvergleich benötigte Token-Diagnostik nicht. " +
-                                    "Bitte das aktuelle Diagnose-APK aus dem Manual-APK-Workflow installieren.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Kurzer Vulkan-Diagnoselauf",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Ein Modell-Reload, ein kurzer deterministischer Inferenzlauf mit angefordertem vollständigem GPU-Offload. " +
+                    "Der Export erfasst Backend-Auswahl, tatsächlich ausgelagerte Layer und Graph-Operationen, " +
+                    "Kernelpfade, Tokenzeiten, Synchronisation, RAM und Abbruchstatus. Keine CPU-Matrix oder Parameter-Sweeps.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = { viewModel.runConfigurationSmokeTest() },
+                enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
+            ) {
+                Text(if (isBenchmarking) "Vulkan-Diagnose läuft…" else "Vulkan einmal prüfen")
+            }
+        }
+    }
 }
