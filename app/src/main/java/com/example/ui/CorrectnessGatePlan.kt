@@ -121,6 +121,8 @@ internal object CorrectnessGatePlan {
         return when {
             normalized.isEmpty() -> "EMPTY"
             normalized == expected -> "EXACT_SEQUENCE"
+            expected.startsWith(normalized) && normalized.count { it == ',' } < 2 ->
+                "PREFIX_TOO_SHORT"
             expected.startsWith(normalized) -> "EXPECTED_PREFIX"
             normalized.startsWith(expected) -> "EXTRA_SUFFIX"
             normalized.any { !it.isDigit() && it != ',' } -> "NON_SEQUENCE_TEXT"
