@@ -262,9 +262,9 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
             ? static_cast<size_t>(line_end - cursor)
             : std::strlen(cursor);
         if (line_length > 0) {
+#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
             const long current_size = std::ftell(g_native_log_file);
             const long incoming_size = static_cast<long>(line_length) + 64L;
-#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
             if (current_size >= 0 && current_size + incoming_size > MAX_NATIVE_LOG_FILE_BYTES) {
                 std::fflush(g_native_log_file);
                 if (ftruncate(fileno(g_native_log_file), 0) == 0) {
