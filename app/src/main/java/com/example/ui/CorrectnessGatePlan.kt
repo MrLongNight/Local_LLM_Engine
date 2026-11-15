@@ -134,6 +134,7 @@ internal object CorrectnessGatePlan {
     }
 
     private fun validateRun(run: GateRun, expectedBackend: String): String? {
+        if (run.steps.isEmpty()) return "TRACE_INCOMPLETE"
         if (run.runId.isBlank()) return "RUN_ID_MISSING"
         if (run.backend.isBlank()) return "BACKEND_MISSING"
         if (!run.backend.contains(expectedBackend, ignoreCase = true)) {
@@ -144,7 +145,6 @@ internal object CorrectnessGatePlan {
         val steps = run.steps
         // The model may emit the complete answer and EOG before exhausting the 32-token
         // safety budget. Validate the actual contiguous trace, not an artificial exact length.
-        if (steps.isEmpty()) return "TRACE_INCOMPLETE"
         if (steps.size > BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS) return "TRACE_EXTRA_STEPS"
         if (steps.map { it.step } != (1..steps.size).toList()) return "TRACE_STEP_SEQUENCE_INVALID"
         if (steps.any { it.top5.size != 5 || it.top5.map(Candidate::tokenId).distinct().size != 5 }) {
