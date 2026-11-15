@@ -89,14 +89,14 @@ internal object CorrectnessGatePlan {
             ) {
                 return Evaluation(
                     Status.FAIL, "CPU_TOP1_MISMATCH",
-                    BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, minimumOverlap,
+                    candidateSteps.size, minimumOverlap,
                     maxConsecutiveRepeat(candidateSteps)
                 )
             }
             if (minimumOverlap < 4) {
                 return Evaluation(
                     Status.FAIL, "CPU_TOP5_OVERLAP_BELOW_4",
-                    BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, minimumOverlap,
+                    candidateSteps.size, minimumOverlap,
                     maxConsecutiveRepeat(candidateSteps)
                 )
             }
@@ -109,7 +109,7 @@ internal object CorrectnessGatePlan {
 
         return Evaluation(
             Status.PASS, "EXPECTED_OUTPUT_AND_LOCAL_TRACE_VALID",
-            BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, 5,
+            candidate.steps.size, 5,
             maxConsecutiveRepeat(candidate.steps)
         )
     }
