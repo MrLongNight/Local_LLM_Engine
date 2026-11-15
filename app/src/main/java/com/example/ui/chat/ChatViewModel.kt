@@ -106,11 +106,10 @@ abstract class ChatViewModel(
         _inferenceProgress.value = null
         _errorMessage.value = null
 
-        val messagesWithSystem = mutableListOf<ChatMessage>()
-        if (_systemPrompt.value.isNotBlank()) {
-            messagesWithSystem.add(ChatMessage.system(_systemPrompt.value))
-        }
-        messagesWithSystem.addAll(currentList)
+        val messagesWithSystem = ChatConversationRequestBuilder.build(
+            systemPrompt = _systemPrompt.value,
+            conversation = currentList
+        )
 
         val request = InferenceRequest(
             messages = messagesWithSystem,
