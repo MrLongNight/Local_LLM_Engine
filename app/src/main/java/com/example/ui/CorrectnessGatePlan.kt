@@ -75,6 +75,9 @@ internal object CorrectnessGatePlan {
 
             val candidateSteps = candidate.steps
             val referenceSteps = cpuReference.steps
+            if (candidateSteps.size != referenceSteps.size) {
+                return fail("CPU_TRACE_LENGTH_MISMATCH", candidate)
+            }
             val overlaps = candidateSteps.zip(referenceSteps).map { (actual, reference) ->
                 actual.top5.map { it.tokenId }.toSet()
                     .intersect(reference.top5.map { it.tokenId }.toSet()).size
@@ -138,11 +141,12 @@ internal object CorrectnessGatePlan {
         }
         if (!run.traceMetadataConsistent) return "TRACE_METADATA_INCONSISTENT"
         if (run.invalidTraceRows > 0) return "TRACE_ROW_INVALID"
-        val requiredSteps = BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS
-        if (run.steps.size < requiredSteps) return "TRACE_INCOMPLETE"
-        if (run.steps.size > requiredSteps) return "TRACE_EXTRA_STEPS"
         val steps = run.steps
-        if (steps.map { it.step } != (1..requiredSteps).toList()) return "TRACE_STEP_SEQUENCE_INVALID"
+        // The model may emit the complete answer and EOG before exhausting the 32-token
+        // safety budget. Validate the actual contiguous trace, not an artificial exact length.
+        if (steps.isEmpty()) return "TRACE_INCOMPLETE"
+        if (steps.size > BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS) return "TRACE_EXTRA_STEPS"
+        if (steps.map { it.step } != (1..steps.size).toList()) return "TRACE_STEP_SEQUENCE_INVALID"
         if (steps.any { it.top5.size != 5 || it.top5.map(Candidate::tokenId).distinct().size != 5 }) {
             return "TOP5_INCOMPLETE"
         }
