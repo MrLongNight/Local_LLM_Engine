@@ -38,8 +38,8 @@ internal fun BackendAcceptanceTestSection(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Ein zusammengefasster Lauf mit genau zwei Profilen: CPU-Referenz zuerst, danach Vulkan. " +
-                                "Beide verwenden dasselbe Modell und dieselben Inferenzparameter. Vor der Geschwindigkeitsmessung " +
+                            text = "Ein zusammengefasster Lauf: CPU-Referenz zuerst, danach Vulkan; Qwen3.5 ergänzt die GDN-Fusionsprofile. " +
+                                "Jedes CPU/Vulkan-Paar verwendet dasselbe Modell und dieselben Inferenzparameter. Vor der Geschwindigkeitsmessung " +
                                 "muss Vulkan die ${BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS}-Token-Korrektheitsprüfung bestehen: identische Top-1-Tokens und mindestens " +
                                 "4/5 Top-5-Überschneidung. Nur bestandene Profile erhalten einen Geschwindigkeitswert.",
                             style = MaterialTheme.typography.bodySmall,
