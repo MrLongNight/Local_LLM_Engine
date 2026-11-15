@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <exception>
 #include <iomanip>
+#include <limits>
 #include <stdexcept>
 #include <cstdio>
 #include <fstream>
