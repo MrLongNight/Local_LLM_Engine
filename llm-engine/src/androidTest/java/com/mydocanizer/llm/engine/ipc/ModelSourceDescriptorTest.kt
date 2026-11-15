@@ -391,7 +391,7 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             actual = descriptorCountFor(pid, files)
         }
         assertTrue(
-            "Descriptor count for pid=\$pid file=${file.name} expected=\$expectedCount minimum=\$minimumCount actual=\$actual",
+            "Descriptor count for pid=$pid files=${files.map { it.name }} expected=$expectedCount minimum=$minimumCount actual=$actual",
             expectedCount?.let { actual == it } ?: (actual >= requireNotNull(minimumCount))
         )
     }
