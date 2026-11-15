@@ -155,8 +155,8 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 **Current implementation finding:** Ordinary attention uses common-token-prefix reuse where supported. Hybrid/recurrent models currently fall back to clearing state. Keep this safe fallback until all relevant state components are proven reusable.
 
-- [ ] Audit the exact pinned llama.cpp revision for ordinary attention, sliding-window, recurrent/SSM and convolution state behavior; classify each intended architecture, especially LFM3 and Qwen3.5.
-- [ ] Define cache identity/invalidation for loaded model/file identity, adapters, tokenizer/vocabulary, rendered chat template, BOS/EOS, system prompt, context settings and session.
+- [x] Audit the exact pinned llama.cpp revision for ordinary attention, sliding-window, recurrent/SSM and convolution state behavior; classify LFM3 and Qwen3.5 as hybrid/recurrent-safe-clear paths and ordinary/SWA-only models as conditional KV-prefix paths. Evidence: `docs/active-todos/P0-06-memory-state-audit.md`.
+- [x] Define cache identity/invalidation for loaded model/file identity, adapters, tokenizer/vocabulary, rendered chat template, BOS/EOS, system prompt, context settings and session. The audit documents current invalidation boundaries and the remaining non-leading-system-message context-shift edge case.
 - [ ] Cover appended turns, prompt rewrites/deletions, tool messages, context shifts, cancellation/failure, model reload, process restart and memory pressure.
 - [x] Enforce `cached_tokens.size() == current_position` before prefix reuse and context shift; mismatch forces a full KV/cache clear, with host tests for shorter, longer and negative-position states.
 - [ ] Enable reuse only when all model-state components remain synchronized. Keep full-clear fallback whenever state integrity is uncertain.
