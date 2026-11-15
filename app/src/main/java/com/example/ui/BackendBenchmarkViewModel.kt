@@ -245,7 +245,10 @@ abstract class BackendBenchmarkViewModel(
                                 "benchmark",
                                 "BACKEND_ACCEPTANCE_ROW_INVALID",
                                 "profile=${profile.id},model=${model.name},backend=$actualBackend," +
-                                    "gateStatus=FAIL,reason=$reason,tok/s=n/a,gateRunId=${gateSample.result.diagnosticRunId}"
+                                    "gateStatus=FAIL,reason=$reason,outputShape=${gateRun.outputShape}," +
+                                    "outputChars=${gateRun.outputCharacters},steps=${gateEvaluation.comparedSteps}," +
+                                    "maxConsecutiveRepeat=${gateEvaluation.maxConsecutiveRepeat},tok/s=n/a," +
+                                    "gateRunId=${gateSample.result.diagnosticRunId}"
                             )
                         }
                     } catch (cancelled: CancellationException) {

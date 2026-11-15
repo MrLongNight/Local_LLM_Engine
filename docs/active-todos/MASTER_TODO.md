@@ -23,6 +23,14 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 ### P0-01 — Restore and lock down output correctness across model families
 
+### Investigation update — 2026-11-15
+
+- The uploaded 2026-11-14 LFM3 1.7B Q4_K_M acceptance evidence repeatedly reports `EXPECTED_OUTPUT_MISMATCH` for both CPU reference and Vulkan candidate. This is not evidence of a Vulkan-only defect; it does not yet distinguish a model-response issue from an unsuitable exact-answer fixture.
+- The latest 2026-11-15 user-device log records two completed CPU chat runs (17 generated tokens each, `STOP`, approximately 5.56 tok/s). It proves completed inference for those runs, but the exported summary does not contain the answer text, so semantic correctness cannot be inferred from throughput/finish reason alone.
+- The previous prompt metadata trace recorded template mode, BOS/EOS and token count but omitted model architecture, model name, tokenizer model and thinking mode. These fields are now added to content-free native prompt metadata; failed acceptance rows also carry output-shape/length/repetition classification so the next log directly distinguishes empty, short-prefix, malformed and extra-text answers without persisting response text.
+- **Root cause remains open.** Do not interpret this instrumentation commit as a model-output fix or mark P0-01 complete.
+
+
 **Problem:** There have been incorrect/garbled outputs across Qwen3.5 and other model paths. A successful load or non-empty token stream is not sufficient evidence of correct inference.
 
 - [x] Trace the complete generation path: request/messages → chat-template selection/rendering → tokenization/BOS/EOS → prompt evaluation → sampler/token selection → detokenization/streaming → finish reason. Source trace and unresolved findings: `docs/active-todos/P0-01-generation-path-audit.md`.

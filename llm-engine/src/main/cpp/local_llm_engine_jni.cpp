@@ -475,6 +475,21 @@ struct EngineInstance {
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
 // Diagnostic prompt metadata is deliberately content-free. Never persist the
 // rendered prompt, chat-template source, detokenized prompt or token-piece text.
+static std::string read_model_metadata_value(const llama_model* model, const char* key) {
+    if (model == nullptr || key == nullptr) return "unknown";
+    char value[256] = {};
+    const int32_t length = llama_model_meta_val_str(model, key, value, sizeof(value));
+    if (length < 0) return "unknown";
+    std::string normalized(value);
+    for (char& character : normalized) {
+        if (character == ',' || character == '\\n' || character == '\\r' || character == '\\t') {
+            character = '_';
+        }
+    }
+    if (normalized.size() > 96) normalized.resize(96);
+    return normalized.empty() ? "empty" : normalized;
+}
+
 static void log_prompt_metadata(
         const EngineInstance* engine,
         const llama_tokens& tokens,
@@ -484,10 +499,20 @@ static void log_prompt_metadata(
         bool add_bos,
         llama_token bos_token,
         bool add_eos,
-        llama_token eos_token) {
-    if (engine == nullptr || vocab == nullptr) return;
+        llama_token eos_token,
+        bool thinking_enabled) {
+    if (engine == nullptr || engine->model == nullptr || vocab == nullptr) return;
+    const std::string architecture = read_model_metadata_value(engine->model, "general.architecture");
+    const std::string model_name = read_model_metadata_value(engine->model, "general.name");
+    const std::string tokenizer_model = read_model_metadata_value(engine->model, "tokenizer.ggml.model");
     std::ostringstream metadata;
     metadata << "LOCAL_LLM_PROMPT_METADATA - runId=" << engine->inference_run_id
+             << ",architecture=" << architecture
+             << ",modelName=" << model_name
+             << ",tokenizerModel=" << tokenizer_model
+             << ",modelHybrid=" << (llama_model_is_hybrid(engine->model) ? 1 : 0)
+             << ",modelRecurrent=" << (llama_model_is_recurrent(engine->model) ? 1 : 0)
+             << ",thinkingEnabled=" << (thinking_enabled ? 1 : 0)
              << ",templateMode=" << template_mode
              << ",usedChatTemplate=" << (used_chat_template ? 1 : 0)
              << ",messageCount=" << engine->chat_msgs.size()
@@ -1799,7 +1824,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     log_prompt_metadata(engine, tokens, used_chat_template, template_mode,
-        model_vocab, model_add_bos, model_bos_token, model_add_eos, model_eos_token);
+        model_vocab, model_add_bos, model_bos_token, model_add_eos, model_eos_token,
+        enable_thinking == JNI_TRUE);
 #endif
     PromptEvalProgressContext progress_context{env, progress_listener, nullptr};
     if (progress_listener != nullptr) {
