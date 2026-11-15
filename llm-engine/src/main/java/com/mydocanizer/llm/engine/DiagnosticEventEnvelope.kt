@@ -35,8 +35,8 @@ internal object DiagnosticEventEnvelope {
         require(sequence > 0L) { "Diagnostic event sequence must be positive." }
 
         val normalizedDetails = details
-            .replace("\r\n", "\\n")
-            .replace('\r', ' ')
+            .replace("\r\n", "\\r\\n")
+            .replace("\r", "\\r")
             .replace("\n", "\\n")
         val boundedDetails = if (normalizedDetails.length <= MAX_DETAILS_CHARS) {
             normalizedDetails
