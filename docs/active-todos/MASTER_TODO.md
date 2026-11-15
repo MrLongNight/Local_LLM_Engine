@@ -271,7 +271,7 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 - [x] Split Android toolchain flags/ABI selection, upstream build/Vulkan configuration, Android Vulkan compatibility, graph/GDN diagnostics, native target wiring and scheduler-race verification into focused CMake modules. The Vulkan GPU profiler configuration remains inside the Android Vulkan module.
 - [x] Keep the root `CMakeLists.txt` as ordered orchestration only; preserve the existing CMake function bodies, targets, compile flags and ABI settings during extraction.
 - [x] Retain fail-fast upstream anchors and build-directory-only generated files. The pinned llama.cpp submodule is unchanged.
-- [ ] Verify generated compile commands, configure overlays and APK builds for ARM64 and x86_64. Current verification: Android APK workflow `43675717767` is running for the combined CMake and feature-package refactor; do not mark acceptance complete until it succeeds.
+- [ ] Verify generated compile commands, configure overlays and APK builds for ARM64 and x86_64. Current verification: Android APK workflow `43676244423` is running for the combined CMake and feature-package refactor; do not mark acceptance complete until it succeeds.
 
 **Acceptance:** Same outputs/compile configuration with smaller, reviewable CMake components; clean submodule remains unchanged.
 
