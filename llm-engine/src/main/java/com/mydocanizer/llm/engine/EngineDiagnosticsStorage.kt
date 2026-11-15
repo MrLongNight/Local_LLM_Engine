@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicLong
  * Owns diagnostic log persistence and cross-process file access.
  *
  * Parsing/report composition stays in [EngineDiagnostics]. Each process writes
- * a separate bounded file so the main process can export service events after
- * the :inference process exits.
+ * a separate file so the main process can export service events after the
+ * :inference process exits. Full diagnostic Debug builds preserve the complete log.
  */
 internal object EngineDiagnosticsStorage {
     private const val TAG = "EngineDiagnostics"
@@ -59,8 +59,10 @@ internal object EngineDiagnosticsStorage {
         val details = throwable?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: ""
         val entry = formatLog("ERROR", tag, event, details)
         logQueue.add(entry)
-        while (logQueue.size > MAX_LOG_ENTRIES) {
-            logQueue.poll()
+        if (!preserveAllDebugDetails) {
+            while (logQueue.size > MAX_LOG_ENTRIES) {
+                logQueue.poll()
+            }
         }
         persist(entry)
         Log.e(TAG, "[$tag] $event: $details", throwable)
