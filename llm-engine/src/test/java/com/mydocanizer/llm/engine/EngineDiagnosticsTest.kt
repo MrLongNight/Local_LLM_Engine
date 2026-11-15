@@ -611,7 +611,7 @@ class EngineDiagnosticsTest {
         assertFalse(report.contains("private generated response"))
         assertFalse(report.contains("BACKEND_BENCHMARK_TEST_OUTPUT"))
         assertFalse(report.contains("LOCAL_LLM_TEXT_TRACE"))
-        assertTrue(report.contains("Korrektheits Gate Result"))
+        assertTrue(report.contains("Korrektheitsprüfung [CORRECTNESS_GATE_RESULT]"))
         assertTrue(report.contains("• Backend: Vulkan"))
         assertTrue(report.contains("• Status: PASS"))
     }
