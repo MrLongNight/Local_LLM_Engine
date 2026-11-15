@@ -4,9 +4,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Builds a structured diagnostics overview and, in full diagnostic Debug builds,
- * appends every original log row without filtering or truncation. Resource
- * aggregation lives here; file ownership is handled by [EngineDiagnosticsStorage].
+ * Builds a compact, human-readable diagnostics overview from bounded process logs.
+ * Raw prompt, token-piece and model-response text is never part of the export.
  */
 internal object EngineDiagnosticsReportBuilder {
     private val timestampPrefix = Regex("""^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}""")
@@ -189,6 +188,10 @@ internal object EngineDiagnosticsReportBuilder {
         "MODEL_NATIVE_RUNTIME_READY" -> "Native Laufzeit bereit"
         "INFERENCE_TIMEOUT" -> "Zeitüberschreitung bei der Inferenz"
         "PROCESS_ABORT_CONFIRMED" -> "Inference-Prozess wurde beendet"
+        "CORRECTNESS_GATE_RESULT" -> "Korrektheitsprüfung"
+        "BACKEND_ACCEPTANCE_RESULT" -> "Backend-Abnahmetest abgeschlossen"
+        "BACKEND_BENCHMARK_RESULT" -> "Backend-Benchmark abgeschlossen"
+        "FULL_MATRIX_RESULT" -> "Matrix-Profil abgeschlossen"
         else -> event.lowercase(Locale.GERMAN).split('_')
             .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase(Locale.GERMAN) } }
     }
@@ -329,12 +332,14 @@ internal object EngineDiagnosticsReportBuilder {
                     "FULL_MATRIX_SAFETY_STOP",
                     "FULL_MATRIX_CANCELLED",
                     "FULL_MATRIX_FAILED",
+                    "FULL_MATRIX_PROFILE_STARTED",
                     "FULL_MATRIX_RESTORED",
                     "FULL_MATRIX_RESTORE_FAILED",
                     "BACKEND_ACCEPTANCE_STARTED",
                     "BACKEND_ACCEPTANCE_SAFETY_STOP",
                     "BACKEND_ACCEPTANCE_CANCELLED",
                     "BACKEND_ACCEPTANCE_FAILED",
+                    "BACKEND_ACCEPTANCE_PROFILE_STARTED",
                     "BACKEND_ACCEPTANCE_RESTORED",
                     "BACKEND_ACCEPTANCE_RESTORE_FAILED"
                 )
@@ -689,7 +694,7 @@ internal object EngineDiagnosticsReportBuilder {
             if (gateStatusSummary.isEmpty()) appendLine("Keine Korrektheits-Gate-Ergebnisse vorhanden.")
             else gateStatusSummary.forEach(::appendLine)
             appendLine()
-            appendLine("[1] CPU/VULKAN-TESTS UND PROFILERGEBNISSE")
+            appendLine("[1] CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE")
             if (fullMatrixRows.isEmpty()) {
                 appendLine("Keine Matrix-Profilzeilen vorhanden.")
             } else {
@@ -701,14 +706,14 @@ internal object EngineDiagnosticsReportBuilder {
                 correctnessGateFailures.forEach { appendLine(readableEventLine(it, 520)) }
             }
             appendLine()
-            appendLine("[2] VULKAN-LAUFZEIT UND GPU-OFFLOAD")
+            appendLine("[2] VULKAN-LAUFZEIT – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET")
             if (nativePriorityEvidence.isEmpty()) {
                 appendLine("Keine passende Runtime-Zeile für Mali-Treiberfähigkeiten oder tatsächliche Layer-Zuweisung im nativen Log gefunden.")
             } else {
                 nativePriorityEvidence.map(::readableNativeLine).forEach(::appendLine)
             }
             appendLine()
-            appendLine("[3] VULKAN-GPU-OPERATIONSPROFIL")
+            appendLine("[3] VULKAN-GPU-OPERATIONSPROFIL – LETZTE ${MAX_VULKAN_PROFILE_SNAPSHOTS} GRAPH-SNAPSHOTS")
             vulkanOperationSummary.lineSequence().forEach { appendLine(it) }
             appendLine()
             appendLine("[4] BACKEND- UND INFERENZ-MESSWERTE")
