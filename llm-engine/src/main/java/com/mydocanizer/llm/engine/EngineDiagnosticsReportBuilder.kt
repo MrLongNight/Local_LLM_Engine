@@ -88,7 +88,8 @@ internal object EngineDiagnosticsReportBuilder {
             event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
             event.startsWith("VULKAN_Q4K_PATH_SWEEP_") || event.startsWith("FULL_MATRIX_") ||
             event.startsWith("BACKEND_ACCEPTANCE_") ||
-            event.startsWith("CORRECTNESS_GATE_")
+            event.startsWith("CORRECTNESS_GATE_") ||
+            (event.startsWith("CONFIG_SMOKE_") && !event.endsWith("_TEST_OUTPUT"))
     }
 
     private fun isImportantEvent(line: String): Boolean {
@@ -138,7 +139,17 @@ internal object EngineDiagnosticsReportBuilder {
             "SERVICE_RECONNECTED",
             "SERVICE_CONNECTED",
             "BINDING_DIED",
-            "CANCEL_REQUESTED"
+            "CANCEL_REQUESTED",
+            "CONFIG_SMOKE_STARTED",
+            "CONFIG_SMOKE_RESULT",
+            "CONFIG_SMOKE_SAFETY_STOP",
+            "CONFIG_SMOKE_CANCELLED",
+            "CONFIG_SMOKE_FAILED",
+            "CONFIG_SMOKE_RESTORED",
+            "CONFIG_SMOKE_RESTORE_FAILED",
+            "CONFIG_SMOKE_CANCEL_REQUESTED",
+            "CONFIG_SMOKE_INFERENCE_CANCELLED",
+            "CONFIG_SMOKE_OUTPUT_CHECK_FAILED"
         )
         return event in exactEvents ||
             event.startsWith("MODEL_LOAD_") ||
