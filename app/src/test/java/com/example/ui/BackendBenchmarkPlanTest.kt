@@ -398,9 +398,12 @@ class BackendBenchmarkPlanTest {
         assertTrue(profiles.drop(firstVulkan).all { it.backend == BackendPreference.VULKAN })
         assertEquals(32, BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS)
         val gatePrompt = BackendBenchmarkPlan.correctnessGatePrompt()
-        assertTrue(gatePrompt.contains("2, 4, 6"))
-        assertTrue(gatePrompt.contains("320"))
+        assertEquals(
+            "Continue the even-number sequence: 2, 4, 6, ..., 320. Output only the next five numbers, separated by commas.",
+            gatePrompt
+        )
         assertTrue("Correctness prompt must fit reduced contexts", gatePrompt.length <= 128)
+        assertTrue("Correctness prompt must use plain ASCII punctuation", gatePrompt.all { it.code in 0x20..0x7E })
     }
 
 }

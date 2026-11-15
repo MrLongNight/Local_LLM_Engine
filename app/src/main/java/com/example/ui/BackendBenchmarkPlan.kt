@@ -25,7 +25,7 @@ internal object BackendBenchmarkPlan {
      * exceeded small preflight-reduced contexts and invalidated otherwise usable gates.
      */
     fun correctnessGatePrompt(): String =
-        "Setze fort: 2, 4, 6, …, 320. Gib nur die nächsten fünf geraden Zahlen aus, getrennt durch Komma."
+        "Continue the even-number sequence: 2, 4, 6, ..., 320. Output only the next five numbers, separated by commas."
 
     data class FullMatrixProfile(
         val id: String,
