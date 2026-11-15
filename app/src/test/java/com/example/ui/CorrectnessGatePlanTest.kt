@@ -71,13 +71,33 @@ class CorrectnessGatePlanTest {
     }
 
     @Test
+    fun acceptsCompleteAnswerWhenModelStopsBeforeTheThirtyTwoTokenSafetyLimit() {
+        val run = CorrectnessGatePlan.parse(
+            expectedOutput,
+            trace("natural-stop", "CPU").take(25)
+        )
+        val result = CorrectnessGatePlan.evaluate(run, expectedBackend = "CPU")
+        assertTrue(result.passed)
+        assertEquals(25, result.comparedSteps)
+    }
+
+    @Test
+    fun rejectsCpuAndVulkanTracesWithDifferentNaturalStopLengths() {
+        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-stop", "CPU").take(25))
+        val vulkan = CorrectnessGatePlan.parse(expectedOutput, trace("vulkan-stop", "Vulkan").take(24))
+        val result = CorrectnessGatePlan.evaluate(vulkan, cpu, expectedBackend = "Vulkan")
+        assertFalse(result.passed)
+        assertEquals("CPU_TRACE_LENGTH_MISMATCH", result.reason)
+    }
+
+    @Test
     fun rejectsWrongExpectedAnswerAndIncompleteTrace() {
         val wrongOutput = CorrectnessGatePlan.parse("322, 324, 325, 328, 330", trace("wrong", "CPU"))
         val wrongResult = CorrectnessGatePlan.evaluate(wrongOutput, expectedBackend = "CPU")
         assertFalse(wrongResult.passed)
         assertEquals("EXPECTED_OUTPUT_MISMATCH", wrongResult.reason)
 
-        val incomplete = CorrectnessGatePlan.parse(expectedOutput, trace("short", "CPU").take(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS - 1))
+        val incomplete = CorrectnessGatePlan.parse(expectedOutput, emptyList())
         val incompleteResult = CorrectnessGatePlan.evaluate(incomplete, expectedBackend = "CPU")
         assertFalse(incompleteResult.passed)
         assertEquals("TRACE_INCOMPLETE", incompleteResult.reason)
@@ -85,7 +105,7 @@ class CorrectnessGatePlanTest {
 
 
     @Test
-    fun rejectsAnyMalformedTraceRowEvenWhenSixteenOtherRowsAreValid() {
+    fun rejectsAnyMalformedTraceRowEvenWhenThirtyTwoOtherRowsAreValid() {
         val lines = trace("malformed", "CPU").toMutableList()
         lines += "2026-11-13 12:00:01.000 [INFO] [inference] TOKEN_SELECTION_TRACE - runId=malformed,backend=CPU,step=x"
         val result = CorrectnessGatePlan.evaluate(
