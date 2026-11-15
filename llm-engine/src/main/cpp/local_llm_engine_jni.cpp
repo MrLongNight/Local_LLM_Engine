@@ -482,7 +482,7 @@ static std::string read_model_metadata_value(const llama_model* model, const cha
     if (length < 0) return "unknown";
     std::string normalized(value);
     for (char& character : normalized) {
-        if (character == ',' || character == '\\n' || character == '\\r' || character == '\\t') {
+        if (character == ',' || character == '\n' || character == '\r' || character == '\t') {
             character = '_';
         }
     }
