@@ -128,22 +128,25 @@ abstract class ConfigurationSmokeViewModel(
                         (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
                     ) throw IllegalStateException("Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt.")
 
-                    val warmup = collectConfigurationSmokeSample(
-                        InferenceConfigSmokePlan.WARMUP_TOKENS, profile.id + ":warmup")
-                    delay(InferenceConfigSmokePlan.COOLDOWN_MS)
-                    val measured = collectConfigurationSmokeSample(
-                        InferenceConfigSmokePlan.MEASURED_TOKENS, profile.id + ":measured")
+                    val sample = collectConfigurationSmokeSample(
+                        InferenceConfigSmokePlan.WARMUP_TOKENS + InferenceConfigSmokePlan.MEASURED_TOKENS,
+                        profile.id + ":single"
+                    )
                     val cfg = profile.config
+                    val normalizedOutput = sample.result.text.filterNot { it.isWhitespace() }
+                    val expectedOutput = "322,324,326,328,330"
+                    val outputMatches = normalizedOutput == expectedOutput
+                    val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
                     val report = String.format(
                         java.util.Locale.US,
-                        "%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | warmup=%.3f tok/s",
+                        "%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s",
                         profile.label, backend, loadMs, cfg.threads, cfg.batchThreads,
-                        cfg.batchSize, cfg.microBatchSize, measured.promptTokens,
-                        measured.promptEvaluationMs?.toString() ?: "n/a",
-                        measured.firstTokenMs?.toString() ?: "n/a",
-                        measured.result.durationMs, measured.result.tokensGenerated,
-                        measured.result.tokensPerSecond, measured.result.finishReason.name,
-                        warmup.result.tokensPerSecond
+                        cfg.batchSize, cfg.microBatchSize, sample.promptTokens,
+                        sample.promptEvaluationMs?.toString() ?: "n/a",
+                        sample.firstTokenMs?.toString() ?: "n/a",
+                        sample.result.durationMs, sample.result.tokensGenerated,
+                        sample.result.tokensPerSecond, sample.result.finishReason.name,
+                        outputMatches && completedNormally
                     )
                     rows += report
                     EngineDiagnostics.info(
@@ -152,17 +155,24 @@ abstract class ConfigurationSmokeViewModel(
                         "profile=" + profile.id + ",backend=" + backend + ",loadMs=" + loadMs +
                             ",nThreads=" + cfg.threads + ",nThreadsBatch=" + cfg.batchThreads +
                             ",nBatch=" + cfg.batchSize + ",nUbatch=" + cfg.microBatchSize +
-                            ",promptTokens=" + measured.promptTokens +
-                            ",promptElapsedMs=" + (measured.promptEvaluationMs ?: -1L) +
-                            ",ttftMs=" + (measured.firstTokenMs ?: -1L) +
-                            ",decodeMs=" + measured.result.durationMs +
-                            ",outputTokens=" + measured.result.tokensGenerated +
-                            ",tokensPerSecond=" + measured.result.tokensPerSecond +
-                            ",finishReason=" + measured.result.finishReason.name +
-                            ",warmupTokensPerSecond=" + warmup.result.tokensPerSecond
+                            ",promptTokens=" + sample.promptTokens +
+                            ",promptElapsedMs=" + (sample.promptEvaluationMs ?: -1L) +
+                            ",ttftMs=" + (sample.firstTokenMs ?: -1L) +
+                            ",decodeMs=" + sample.result.durationMs +
+                            ",outputTokens=" + sample.result.tokensGenerated +
+                            ",tokensPerSecond=" + sample.result.tokensPerSecond +
+                            ",finishReason=" + sample.result.finishReason.name +
+                            ",exactOutput=" + outputMatches +
+                            ",normalStop=" + completedNormally
                     )
-                    if (measured.result.tokensGenerated < 4) {
-                        throw IllegalStateException("Zu wenige Mess-Tokens im Profil " + profile.id)
+                    if (sample.result.tokensGenerated < 4) {
+                        throw IllegalStateException("Zu wenige Ausgabetokens im Vulkan-Diagnoselauf.")
+                    }
+                    if (!outputMatches || !completedNormally) {
+                        throw IllegalStateException(
+                            "Korrektheitsprüfung fehlgeschlagen: exactOutput=" + outputMatches +
+                                ", finishReason=" + sample.result.finishReason.name
+                        )
                     }
                     if (index < profiles.lastIndex) delay(InferenceConfigSmokePlan.COOLDOWN_MS)
                 }
