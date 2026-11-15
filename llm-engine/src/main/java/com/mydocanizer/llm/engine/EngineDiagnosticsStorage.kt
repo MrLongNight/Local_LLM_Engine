@@ -9,6 +9,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Owns diagnostic log persistence and cross-process file access.
@@ -24,6 +25,7 @@ internal object EngineDiagnosticsStorage {
 
     private val logQueue = ConcurrentLinkedQueue<String>()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    private val eventSequence = AtomicLong()
     private val persistLock = Any()
 
     @Volatile
@@ -61,17 +63,15 @@ internal object EngineDiagnosticsStorage {
 
     private fun formatLog(level: String, tag: String, event: String, details: String): String {
         val timestamp = synchronized(dateFormat) { dateFormat.format(Date()) }
-        // Throwable messages may contain embedded stack/callbackFlow newlines. Keep each
-        // persisted diagnostic row atomic so it cannot corrupt parsing of later headers.
-        val oneLineDetails = details
-            .replace("\r\n", "\\n")
-            .replace('\r', ' ')
-            .replace("\n", "\\n")
-        return if (oneLineDetails.isNotBlank()) {
-            "$timestamp [$level] [$tag] $event - $oneLineDetails"
-        } else {
-            "$timestamp [$level] [$tag] $event"
-        }
+        return DiagnosticEventEnvelope.format(
+            timestamp = timestamp,
+            level = level,
+            tag = tag,
+            event = event,
+            details = details,
+            pid = Process.myPid(),
+            sequence = eventSequence.incrementAndGet()
+        )
     }
 
     fun getLogs(): List<String> = logQueue.toList()
