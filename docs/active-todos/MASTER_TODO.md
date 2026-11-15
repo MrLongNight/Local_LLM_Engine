@@ -271,7 +271,7 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 - [x] Split Android toolchain flags/ABI selection, upstream build/Vulkan configuration, Android Vulkan compatibility, graph/GDN diagnostics, native target wiring and scheduler-race verification into focused CMake modules. The Vulkan GPU profiler configuration remains inside the Android Vulkan module.
 - [x] Keep the root `CMakeLists.txt` as ordered orchestration only; preserve the existing CMake function bodies, targets, compile flags and ABI settings during extraction.
 - [x] Retain fail-fast upstream anchors and build-directory-only generated files. The pinned llama.cpp submodule is unchanged.
-- [ ] Verify generated compile commands, configure overlays and APK builds for ARM64 and x86_64. Current verification: Android APK workflow `43675036662` is still running; do not mark acceptance complete until it succeeds.
+- [ ] Verify generated compile commands, configure overlays and APK builds for ARM64 and x86_64. Current verification: Android APK workflow `43675478897` is queued/running for the combined CMake and feature-package refactor; do not mark acceptance complete until it succeeds.
 
 **Acceptance:** Same outputs/compile configuration with smaller, reviewable CMake components; clean submodule remains unchanged.
 
@@ -290,14 +290,14 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 ### P2-06 — Organize demo and library packages by ownership
 
-- [ ] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages.
+**Evidence (2026-11-15):** The app now has dedicated `navigation`, `chat`, `modelimport` and `settings` screen packages. `AppTab` belongs to navigation, and model-load progress UI belongs to chat. Feature ViewModels/plans and the remaining root `com.example.ui` files are still awaiting ownership-based migration.
+
+- [ ] Split demo chat, model library/import, settings, diagnostics/benchmarks and navigation into feature packages. Primary screens and navigation contract were moved in commit `f76e6f5`; JVM/APK verification is pending. Remaining ViewModels and benchmark plans must be moved without changing the shared ViewModel/engine ownership.
 - [ ] Replace `com.example` only after auditing manifests, generated BuildConfig, instrumentation, saved state and deep links.
 - [ ] Organize library internals by lifecycle, model source, memory/resource policy, diagnostics and IPC; keep consumer-facing types separate.
-- [ ] Enforce dependency direction `:app → :llm-engine`; no UI, benchmark or DMS dependency may leak into the library.
+- [x] Enforce dependency direction `:app → :llm-engine`; the library Gradle module depends only on Android core/coroutines and has no app/UI/benchmark/DMS module dependency.
 
 **Acceptance:** Package and module boundaries express ownership; the library remains independently consumable.
-
----
 
 ## P3 — Cleanup and engineering guardrails
 
