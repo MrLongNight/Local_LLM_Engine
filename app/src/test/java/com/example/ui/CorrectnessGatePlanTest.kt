@@ -7,12 +7,12 @@ import org.junit.Test
 
 class CorrectnessGatePlanTest {
     @Test
-    fun acceptsCpuReferenceWithExpectedContinuationAndSixteenValidGreedySteps() {
+    fun acceptsCpuReferenceWithExpectedContinuationAndThirtyTwoValidGreedySteps() {
         val run = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-run", "CPU"))
         val result = CorrectnessGatePlan.evaluate(run, expectedBackend = "CPU")
 
         assertTrue(result.passed)
-        assertEquals(16, result.comparedSteps)
+        assertEquals(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS, result.comparedSteps)
         assertEquals(5, result.minimumTop5Overlap)
         assertTrue(result.maxConsecutiveRepeat <= 8)
     }
@@ -57,7 +57,7 @@ class CorrectnessGatePlanTest {
 
     @Test
     fun rejectsRepeatedTokenRunLongerThanEight() {
-        val lines = (1..16).map { step ->
+        val lines = (1..BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS).map { step ->
             "2026-11-13 12:00:00.000 [INFO] [inference] TOKEN_SELECTION_TRACE - " +
                 "runId=repeat-run,backend=CPU,step=$step,selectedId=77," +
                 "top5=77:10.0|78:9.0|79:8.0|80:7.0|81:6.0"
@@ -77,7 +77,7 @@ class CorrectnessGatePlanTest {
         assertFalse(wrongResult.passed)
         assertEquals("EXPECTED_OUTPUT_MISMATCH", wrongResult.reason)
 
-        val incomplete = CorrectnessGatePlan.parse(expectedOutput, trace("short", "CPU").take(15))
+        val incomplete = CorrectnessGatePlan.parse(expectedOutput, trace("short", "CPU").take(BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS - 1))
         val incompleteResult = CorrectnessGatePlan.evaluate(incomplete, expectedBackend = "CPU")
         assertFalse(incompleteResult.passed)
         assertEquals("TRACE_INCOMPLETE", incompleteResult.reason)
@@ -170,7 +170,7 @@ class CorrectnessGatePlanTest {
         replaceFifth: Boolean = false,
         changeSelectedAtStep: Int? = null,
         overlapOnlyTop1: Boolean = false
-    ): List<String> = (1..16).map { step ->
+    ): List<String> = (1..BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS).map { step ->
         val selected = 100 + step
         val ids = when {
             overlapOnlyTop1 -> listOf(selected, 3000 + step, 4000 + step, 5000 + step, 6000 + step)
@@ -218,11 +218,12 @@ class CorrectnessGatePlanTest {
     }
 
     @Test
-    fun acceptsAnswerCutByTheSixteenTokenBudgetWhenItIsAPrefixOfTheExpectedAnswer() {
-        // Digit-per-token tokenizers (Qwen, LFM) cannot emit all five numbers in 16 tokens.
+    fun rejectsAnswerTruncatedByTheTokenBudgetEvenWhenItIsAnExpectedPrefix() {
+        // The 32-token budget must be sufficient for the complete answer; partial output is a failure.
         val truncated = CorrectnessGatePlan.parse("322, 324, 326, 3", trace("budget-cut", "CPU"))
         val result = CorrectnessGatePlan.evaluate(truncated, expectedBackend = "CPU")
-        assertTrue(result.passed)
+        assertFalse(result.passed)
+        assertEquals("EXPECTED_OUTPUT_MISMATCH", result.reason)
     }
 
     @Test
