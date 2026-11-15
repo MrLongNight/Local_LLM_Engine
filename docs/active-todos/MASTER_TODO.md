@@ -277,14 +277,14 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 ### P2-05 — Split diagnostics implementation
 
-**Evidence:** `EngineDiagnostics.kt` is approximately 904 lines / 45 KB and combines storage, rotation, multi-process reading, parsers, aggregation and export.
+**Evidence (2026-11-15):** `EngineDiagnostics.kt` is now a 143-line API facade. Storage/rotation/multi-process merge/export, metric parsing and compact report composition are owned by separate components.
 
 - [x] Keep the privacy-safe event contract established in P1: raw prompt/document/token-piece/response text is discarded; numeric token traces remain opt-in and validated.
 - [x] Extract process-log storage, per-process rotation, deterministic cross-process log merge and verified URI export into `EngineDiagnosticsStorage`.
 - [x] Extract native/Kotlin token-step parsing, Vulkan operation parsing and timing/percentile helpers into `EngineDiagnosticsMetrics`.
 - [x] Add direct parser tests for current vs legacy sync fields, run correlation, Vulkan metrics and malformed rows. Existing Android process instrumentation continues to verify app-process file persistence.
 - [x] Move compact report composition, resource aggregation and UTF-8 export bounding into `EngineDiagnosticsReportBuilder`; `EngineDiagnostics` remains the API facade (143 lines after extraction).
-- [ ] Define bounded versioned events with run/request/PID correlation; keep legacy parsing only when required.
+- [x] Define bounded version-1 Kotlin diagnostic event envelopes with process-local event IDs, PID and automatic run/request correlation. Cap event details at 4,096 characters and normalize multiline values; retain legacy/native parsing for historical and native-format records. Add tests for run/request correlation, zero/unknown test PID, detail bounds and single-line persistence.
 
 **Acceptance:** Cohesive diagnostics components with bounded, privacy-safe exports and independent tests.
 
