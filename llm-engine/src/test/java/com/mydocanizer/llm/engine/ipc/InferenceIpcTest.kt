@@ -517,6 +517,45 @@ class InferenceIpcTest {
     }
 
     @Test
+    fun cooperativeCancellationDuringPromptPrefillCompletesWithoutProcessKill() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangBeforeStarted.set(true)
+            acknowledgeCooperativeCancel.set(true)
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 1_000L,
+            modelLoadMs = 1_000L,
+            prefillMs = 1_000L,
+            firstTokenMs = 1_500L,
+            interTokenMs = 1_000L,
+            totalInferenceMs = 3_000L,
+            abortGracePeriodMs = 250L,
+            reconnectMs = 2_000L
+        )
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+        client.initialize()
+
+        val stream = async { client.streamChat(InferenceRequest.single("cancel during prompt prefill")).toList() }
+        withTimeout(1_000L) {
+            while (fakeService.lastRequestId.get() == null) delay(5L)
+        }
+        client.cancelInference()
+
+        val events = withTimeout(1_000L) { stream.await() }
+        val cancelled = events.filterIsInstance<InferenceEvent.Cancelled>().single()
+        assertEquals("", cancelled.partialText)
+        assertEquals(0, cancelled.tokensGenerated)
+        assertEquals(fakeService.lastRequestId.get(), fakeService.cancelledRequestId.get())
+        assertTrue("Acknowledged prefill cancellation must not kill the inference process", !fakeService.isKilled.get())
+        assertTrue("Prefill cancellation must not become a successful completion", events.none { it is InferenceEvent.Completed })
+        client.close()
+    }
+
+    @Test
     fun explicitCancelUsesTheActiveRequestsAbortGracePeriod() = runBlocking {
         val fakeService = FakeInferenceService().apply {
             hangAfterFirstToken.set(true)

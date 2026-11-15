@@ -123,7 +123,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 ### P0-04 — Make cancellation, timeout, abort and recovery deterministic
 
 - [x] Trace cancellation end to end: collector/coroutine cancellation reaches `InferenceClient`, request-ID-checked Binder/AIDL `cancelInference`, `InferenceService`, `LocalLlmEngineImpl`, `NativeEngineHandle.nativeCancel` and the JNI atomic flag. The service rejects stale request IDs; llama.cpp's `abort_callback` is installed only for CPU because the pinned `llama.h` documents it as CPU-only. Vulkan therefore observes cancellation between token steps and relies on the isolated-process watchdog/hard-kill if an in-flight decode does not unwind.
-- [ ] Verify the effective `abortGracePeriodMs` from the actual run configuration (the current source default is 3,000 ms; older diagnostic runs may override it). Do not tune it based on a single token timing.
+- [ ] Verify the effective `abortGracePeriodMs` from the actual run configuration. The source default is 3,000 ms, but `LastModelStore` persists the exact load-time timeout configuration and can restore an older/custom 300 ms value. `InferenceClient` logs the effective per-request values and their source in `INFERENCE_TIMEOUT_POLICY`; the uploaded 2026-11-14 export does not contain that event, so the actual value for that run remains unproven. Do not tune it based on a single token timing.
 - [x] Capture the actual service PID when the Binder request is dispatched and use that immutable request PID for timeout, explicit cancel and collector-close escalation; a reconnect cannot redirect an old request's abort to a replacement service.
 - [x] Add a regression test that changes the reported service PID mid-request and asserts cancel/kill is not sent to the replacement process.
 - [x] Cover prefill-timeout escalation after a service-PID replacement; liveness checks remain bound to the original request PID.
@@ -133,7 +133,8 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [x] Add fake-service regression coverage for reconnect to a replacement PID, EAGER same-model reload and a successful follow-up inference (`eagerReconnectReloadsSameModelAndAllowsFollowUpInference`).
 - [x] Add fake-service regression coverage proving a successful follow-up inference after cooperative cancellation (`followUpInferenceSucceedsAfterCooperativeCancellation`).
 - [ ] Verify follow-up inference after escalated cancellation, timeout and native crash, plus repeated real process-death/reconnect cycles on Android; the existing single process-kill recovery test is not sufficient physical-device evidence.
-- [ ] Add regression coverage for cancellation during model load, prefill, decode, stream collection and reconnect; include repeated abort/reconnect cycles.
+- [x] Add fake-service regression coverage for cancellation during model load, prefill (including explicit cancellation before `Started`), decode, stream collection and reconnect; verify follow-up inference after escalated cancellation. The focused coverage is in `InferenceIpcTest` and the process-kill Android test.
+- [ ] Run repeated real process-death/reconnect cycles on Android and verify follow-up inference after escalated cancellation, timeout and native crash; the fake-service suite is not a substitute for physical-device proof.
 
 **Acceptance:** No stuck request, duplicate terminal event, stale-PID kill or poisoned post-cancel model state. A following inference succeeds after every tested recovery path.
 

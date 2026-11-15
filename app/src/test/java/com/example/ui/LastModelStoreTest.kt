@@ -64,6 +64,17 @@ class LastModelStoreTest {
     }
 
     @Test
+    fun defaultAbortGraceIsThreeSecondsAndRememberedOverridesAreRestoredExactly() {
+        assertEquals(3_000L, TimeoutConfig().abortGracePeriodMs)
+        val source = ModelSource.FilePath("/private/models/timeout-test.gguf")
+        val config = EngineConfig(timeoutConfig = TimeoutConfig(abortGracePeriodMs = 300L))
+
+        store.save(source, config)
+
+        assertEquals(300L, store.load()?.config?.timeoutConfig?.abortGracePeriodMs)
+    }
+
+    @Test
     fun engineConfigParcelablePreservesVulkanMatvecWorkgroupAcrossIpc() {
         val config = EngineConfig(
             contextSize = 8192,
