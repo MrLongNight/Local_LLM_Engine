@@ -598,9 +598,9 @@ internal class LocalLlmEngineImpl(
                 val tokenStepStartNano = System.nanoTime()
                 val tokenPiece = NativeEngineHandle.nativeGenerateNextToken(handle)
                 val tokenStepDurationUs = (System.nanoTime() - tokenStepStartNano) / 1_000L
-                if (tokenPiece == null) {
-                    break
-                }
+                // Read the trace before checking for null: native returns null after
+                // terminal EOG/STOP, but that sampling step is the most important
+                // evidence when diagnosing an empty first response.
                 if (BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
                     val tokenTrace = NativeEngineHandle.nativeGetLastTokenSelectionTrace(handle)
                     if (tokenTrace.isNotBlank()) {
@@ -610,6 +610,9 @@ internal class LocalLlmEngineImpl(
                             numericTrace = tokenTrace
                         )
                     }
+                }
+                if (tokenPiece == null) {
+                    break
                 }
                 nativeTokenSteps++
                 if (nativeTokenSteps <= 4 || nativeTokenSteps % 8 == 0) {
