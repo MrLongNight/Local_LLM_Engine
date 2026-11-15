@@ -602,23 +602,33 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[RAM-ZEITVERLAUF – AUSGEDÜNNT, SPITZEN UND BACKEND-SAMPLES]")
             memoryTimeline.forEach(::appendLine)
             appendLine()
-            appendLine("[TESTAUSGABEN – IM STANDARD-EXPORT AUSGEBLENDET]")
-            appendLine("Prompt-Inhalte, Token-Text und generierte Testantworten werden nicht exportiert.")
+            if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+                appendLine("[VOLLSTÄNDIGE TEXTTRACES]")
+            } else {
+                appendLine("[TESTAUSGABEN – IM STANDARD-EXPORT AUSGEBLENDET]")
+                appendLine("Prompt-Inhalte, Token-Text und generierte Testantworten werden nicht exportiert.")
+            }
             appendLine()
-            appendLine("[NATIVE / VULKAN – GEFILTERTE MELDUNGEN]")
+            appendLine("[NATIVE / VULKAN – AUSZUG DER ZUSAMMENFASSUNG]")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
             nativeSelected.forEach(::appendLine)
+            if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+                appendLine()
+                appendLine("[VOLLSTÄNDIGES, UNGEFILTERTES PROZESSLOG – ALLE EINTRÄGE IN ZEITREIHENFOLGE]")
+                ordered.forEach(::appendLine)
+            }
             appendLine()
             appendLine(
                 if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
-                    "Hinweis: Debug-Textdiagnostik ist aktiv. Rohdaten bleiben auf Debug-Logs begrenzt; " +
-                        "der Standard-Export enthält keine Prompt-Inhalte, Token-Texte oder Testantworten. Exportlimit: 128 KiB."
+                    "Hinweis: Vollständige Debug-Diagnostik aktiv. Prompts, gerenderte Templates, Token-Auswahl, Token-Texte, Modellantworten und sämtliche Prozesslogzeilen werden unverändert exportiert."
                 } else {
-                    "Hinweis: Chat-Prompts und Modellantworten werden nicht exportiert. " +
-                        "Der Bericht ist auf maximal 128 KiB begrenzt; GPU-Operatorzeiten werden aggregiert und RAM-Samples zusammengefasst."
+                    "Hinweis: Standardexport ist auf 128 KiB begrenzt; Release-Diagnostik enthält keine vollständigen Prompt-/Antwort-Texttraces."
                 }
             )
-        }.let { limitUtf8(it, MAX_EXPORT_BYTES) }
+        }.let {
+            if (BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED) it
+            else limitUtf8(it, MAX_EXPORT_BYTES)
+        }
     }
 
     private fun limitUtf8(value: String, maxBytes: Int): String {
