@@ -157,7 +157,9 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 - [x] Audit the exact pinned llama.cpp revision for ordinary attention, sliding-window, recurrent/SSM and convolution state behavior; classify LFM3 and Qwen3.5 as hybrid/recurrent-safe-clear paths and ordinary/SWA-only models as conditional KV-prefix paths. Evidence: `docs/active-todos/P0-06-memory-state-audit.md`.
 - [x] Define cache identity/invalidation for loaded model/file identity, adapters, tokenizer/vocabulary, rendered chat template, BOS/EOS, system prompt, context settings and session. The audit documents current invalidation boundaries and the remaining non-leading-system-message context-shift edge case.
-- [ ] Cover appended turns, prompt rewrites/deletions, tool messages, context shifts, cancellation/failure, model reload, process restart and memory pressure.
+- [x] Add host-native token-prefix tests for appended turns and invalidation when system-prompt, rendered-template/BOS-boundary or tool-message tokens change. Exact-prefix comparison also covers rewrites/deletions at the first changed token.
+- [ ] Add/verify lifecycle tests for context shifts, cancellation/failure, model reload, process restart and memory-pressure eviction; the source audit documents current clear/reset paths, but full device evidence remains open.
+- [ ] Guard non-leading/interleaved system messages: prompt truncation protects every system message, but the current context-shift boundary only preserves the contiguous leading system prefix. Disable shifting for such requests or preserve all protected ranges explicitly, with a host regression test.
 - [x] Enforce `cached_tokens.size() == current_position` before prefix reuse and context shift; mismatch forces a full KV/cache clear, with host tests for shorter, longer and negative-position states.
 - [ ] Enable reuse only when all model-state components remain synchronized. Keep full-clear fallback whenever state integrity is uncertain.
 - [ ] Prove cache-on/cache-off output equivalence before benchmarking. Bound memory and invalidate on unload/reload, process restart, failed/cancelled inference and pressure eviction.

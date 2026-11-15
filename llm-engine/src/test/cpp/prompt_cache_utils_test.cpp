@@ -37,6 +37,31 @@ int main() {
         assert(local_llm::reusable_prefix_length(cached, prompt) == 0);
     }
     {
+        // An appended conversation turn preserves the exact old prompt prefix.
+        const std::vector<int> cached{1, 10, 11, 20, 21};
+        const std::vector<int> appended_turn{1, 10, 11, 20, 21, 30, 31};
+        assert(local_llm::reusable_prefix_length(cached, appended_turn) == cached.size());
+    }
+    {
+        // A changed system prompt must invalidate reuse from the first token.
+        const std::vector<int> cached{1, 10, 11, 20, 21};
+        const std::vector<int> changed_system{9, 10, 11, 20, 21, 30};
+        assert(local_llm::reusable_prefix_length(cached, changed_system) == 0);
+    }
+    {
+        // A changed template/BOS boundary stops reuse before the changed marker.
+        const std::vector<int> cached{1, 10, 11, 20, 21};
+        const std::vector<int> changed_template{1, 10, 99, 20, 21, 30};
+        assert(local_llm::reusable_prefix_length(cached, changed_template) == 2);
+    }
+    {
+        // A changed tool call/result is ordinary rendered prompt content and
+        // invalidates every token after the first changed tool-message token.
+        const std::vector<int> cached{1, 10, 11, 40, 41, 20, 21};
+        const std::vector<int> changed_tool_result{1, 10, 11, 40, 99, 20, 21, 30};
+        assert(local_llm::reusable_prefix_length(cached, changed_tool_result) == 4);
+    }
+    {
         const std::vector<int> cached{1, 2};
         const std::vector<int> prompt{1};
         assert(local_llm::reusable_prefix_length(cached, prompt) == 0);
