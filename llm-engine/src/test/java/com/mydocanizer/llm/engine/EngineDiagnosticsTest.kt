@@ -370,7 +370,7 @@ class EngineDiagnosticsTest {
                     "gpuAvg p50=600.000us p90=616.000us max=620.000us gpuPerGraphUs=600.000"
             )
         )
-        assertFalse(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
+        assertTrue(report.contains("LOCAL_LLM_VULKAN_OP_TIMING -"))
     }
 
     @Test
@@ -457,7 +457,7 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("decodeTokensPerSecond=2.125"))
         assertTrue(report.contains("gateStatus=FAIL"))
         assertTrue(report.contains("tok/s=n/a"))
-        assertFalse(report.contains("FULL_MATRIX_PROFILE_STARTED"))
+        assertTrue(report.contains("FULL_MATRIX_PROFILE_STARTED"))
         assertFalse(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
     }
 
@@ -497,7 +497,7 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("diagnosticRunId=vulkan-measurement"))
         assertTrue(report.contains("BACKEND_ACCEPTANCE_STARTED"))
         assertTrue(report.contains("BACKEND_ACCEPTANCE_RESTORED"))
-        assertFalse(report.contains("BACKEND_ACCEPTANCE_PROFILE_STARTED"))
+        assertTrue(report.contains("BACKEND_ACCEPTANCE_PROFILE_STARTED"))
         assertFalse(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
     }
 
