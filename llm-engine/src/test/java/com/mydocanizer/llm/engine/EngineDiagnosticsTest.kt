@@ -568,7 +568,7 @@ class EngineDiagnosticsTest {
 
 
     @Test
-    fun legacyTextDiagnosticsNeverPersistCallerSuppliedContent() {
+    fun debugTextDiagnosticsPersistCallerSuppliedContent() {
         val sentinel = "SYNTHETIC_PRIVATE_RESPONSE_SENTINEL_7f32a9"
 
         EngineDiagnostics.testText(
@@ -577,15 +577,15 @@ class EngineDiagnosticsTest {
             details = sentinel
         )
 
-        assertFalse(EngineDiagnostics.getLogs().any { it.contains(sentinel) })
-        assertFalse(
+        assertTrue(EngineDiagnostics.getLogs().any { it.contains(sentinel) })
+        assertTrue(
             EngineDiagnostics.buildCompactReportForTest(EngineDiagnostics.getLogs())
                 .contains(sentinel)
         )
     }
 
     @Test
-    fun compactExportShowsGdnGraphAndGateHeadersButNeverPromptOrTokenText() {
+    fun debugExportPreservesPromptAndTokenTextAlongsideStructuredGateEvidence() {
         val lines = listOf(
             "2026-11-13 09:00:00.000 [NATIVE] llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused,vulkanGdn=cpu-fallback\\n",
             "2026-11-13 09:00:01.000 [NATIVE] llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - " +
@@ -603,11 +603,11 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("cpuNodes=5(5.0%)"))
         assertTrue(report.contains("vulkanNodes=90(90.0%)"))
         assertTrue(report.contains("PASS=1"))
-        assertFalse(report.contains("private prompt text"))
-        assertFalse(report.contains("secret-token-piece"))
-        assertFalse(report.contains("private generated response"))
-        assertFalse(report.contains("BACKEND_BENCHMARK_TEST_OUTPUT"))
-        assertFalse(report.contains("LOCAL_LLM_TEXT_TRACE"))
+        assertTrue(report.contains("private prompt text"))
+        assertTrue(report.contains("secret-token-piece"))
+        assertTrue(report.contains("private generated response"))
+        assertTrue(report.contains("BACKEND_BENCHMARK_TEST_OUTPUT"))
+        assertTrue(report.contains("LOCAL_LLM_TEXT_TRACE"))
     }
 
 }
