@@ -1924,6 +1924,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     std::lock_guard<std::mutex> lock(engine->mtx);
     if (!engine->model || !engine->context) return nullptr;
 
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    // The Kotlin caller reads the trace after every native step, including a
+    // terminal step. Clear first so a non-sampling exit (MAX_TOKENS, cancel,
+    // context-full, etc.) cannot replay the preceding token's trace as a duplicate.
+    engine->last_token_selection_trace.clear();
+#endif
+
     if (engine->generation_finished) return nullptr;
 
     if (engine->cancel_requested.load()) {
