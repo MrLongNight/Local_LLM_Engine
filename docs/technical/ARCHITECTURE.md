@@ -121,11 +121,13 @@ sequenceDiagram
 | `app/src/main/java/com/example/ui/` | Prototype screens, shared `EngineViewModel` facade and feature ViewModels. |
 | `app/src/main/java/com/example/ui/settings/sections/` | Focused composable sections used by `SettingsScreen`. |
 | App-side model helpers/ViewModels | Prototype-only model selection, app persistence and import orchestration. |
-| `llm-engine/src/main/java/com/mydocanizer/llm/engine/` | Public API, request/config/state/result/model types and diagnostics facade. |
+| `llm-engine/src/main/java/com/mydocanizer/llm/engine/` | Public API, request/config/state/result/model types, diagnostics facade, and bounded event-envelope/storage/metrics/report components. |
 | `llm-engine/src/main/java/com/mydocanizer/llm/engine/internal/` | Engine implementation, source resolver, native handle, memory guard and internal helpers. |
 | `llm-engine/src/main/java/com/mydocanizer/llm/engine/ipc/` | Inference client/service, Binder lifecycle and IPC coordination. |
 | `llm-engine/src/main/aidl/` | AIDL interfaces and parcelable declarations crossing the process boundary. |
-| `llm-engine/src/main/cpp/` | CMake, JNI bridge, checked Android overlays and pinned llama.cpp submodule. |
+| `llm-engine/src/main/cpp/CMakeLists.txt` | Native build orchestration, target wiring, compile flags and pinned llama.cpp integration. |
+| `llm-engine/src/main/cpp/cmake/` | Android toolchain and upstream configuration, generated graph/GDN and Vulkan overlays, native target wiring and scheduler-race verification modules. |
+| `llm-engine/src/main/cpp/` (JNI and headers) | JNI bridge, checked native utility/policy headers and pinned llama.cpp submodule. |
 | `app/src/test/`, `llm-engine/src/test/`, `llm-engine/src/androidTest/` | JVM/host tests and Android instrumentation for the corresponding production responsibility. |
 
 ## 4. Architecture documentation gate
