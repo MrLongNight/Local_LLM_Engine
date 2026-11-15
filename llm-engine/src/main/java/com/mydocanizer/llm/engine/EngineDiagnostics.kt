@@ -36,10 +36,10 @@ object EngineDiagnostics {
     }
  
     /**
-     * Persist only numeric token-ID/logit rows for the explicitly enabled synthetic
-     * correctness gate. The native producer must not include token pieces or text.
+     * Persist the numeric token-ID/logit row for one inference step. The raw token
+     * piece is recorded separately by the native text-trace path.
      */
-    internal fun recordSyntheticTokenSelectionTrace(
+    internal fun recordTokenSelectionTrace(
         nativeRunId: String,
         backend: String,
         numericTrace: String
