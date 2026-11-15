@@ -266,12 +266,12 @@ Structural work must preserve behavior. Keep each refactoring independently buil
 
 ### P2-04 — Modularize CMake and generated Android overlays
 
-**Evidence:** `CMakeLists.txt` is approximately 1,231 lines / 62 KB and contains source overlays, validation anchors, native target wiring and build gates.
+**Evidence (2026-11-15):** The original root `CMakeLists.txt` was 1,707 lines / 91,953 bytes. Commit `7440933` reduces it to a 27-line orchestrator and moves the existing configuration/overlay/target blocks unchanged into six responsibility-specific modules under `cmake/`.
 
-- [ ] Split upstream configuration, Android Vulkan compatibility, graph/GDN diagnostics, profiler, native source/target wiring and verification into responsibility-named CMake helpers.
-- [ ] Keep the root `CMakeLists.txt` as orchestration only; preserve targets, compile flags and ABI behavior during the move.
-- [ ] Retain fail-fast upstream anchors and build-directory-only generated files. Never patch the checked-out llama.cpp submodule.
-- [ ] Verify generated compile commands and overlay checks for ARM64 and x86_64.
+- [x] Split Android toolchain flags/ABI selection, upstream build/Vulkan configuration, Android Vulkan compatibility, graph/GDN diagnostics, native target wiring and scheduler-race verification into focused CMake modules. The Vulkan GPU profiler configuration remains inside the Android Vulkan module.
+- [x] Keep the root `CMakeLists.txt` as ordered orchestration only; preserve the existing CMake function bodies, targets, compile flags and ABI settings during extraction.
+- [x] Retain fail-fast upstream anchors and build-directory-only generated files. The pinned llama.cpp submodule is unchanged.
+- [ ] Verify generated compile commands, configure overlays and APK builds for ARM64 and x86_64. Current verification: Android APK workflow `43675036662` is still running; do not mark acceptance complete until it succeeds.
 
 **Acceptance:** Same outputs/compile configuration with smaller, reviewable CMake components; clean submodule remains unchanged.
 
