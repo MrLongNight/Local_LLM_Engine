@@ -482,15 +482,12 @@ abstract class VulkanDiagnosticsViewModel(
                         )
                     }
                     val selectedKernelPath = observedKernelPaths.single()
-                    val requestedMmvqFallback =
-                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE &&
-                            observedReasons == setOf("q8_1_pipeline_unavailable_fallback")
-                    val expectedKernelPath = when {
-                        baseDmmv -> "BASE_TYPE_MMV"
-                        autoPath || requestedMmvqFallback ->
-                            selectedKernelPath // AUTO and an explicitly evidenced missing-pipeline fallback are evidence-driven.
-                        else -> "MMVQ_INTEGER_DOT"
-                    }
+                    val isMaliDevice = loaded.activeBackend.contains("Mali", ignoreCase = true)
+                    val expectedKernelPath = Q4kDecodePathPolicy.expectedKernelPath(
+                        requestedWorkgroup = workgroup,
+                        observedKernelPath = selectedKernelPath,
+                        observedReasons = observedReasons
+                    )
                     if (selectedKernelPath != expectedKernelPath) {
                         throw IllegalStateException(
                             "Q4_K-Kernelpfad nicht bestätigt: erwartet=$expectedKernelPath, beobachtet=$selectedKernelPath " +
@@ -516,13 +513,11 @@ abstract class VulkanDiagnosticsViewModel(
                     val q8PipelineFallback =
                         selectedKernelPath == "BASE_TYPE_MMV" &&
                             selectedReason == "q8_1_pipeline_unavailable_fallback"
-                    val expectedReason = when {
-                        workgroup == com.mydocanizer.llm.engine.VulkanMatvecWorkgroup.MMVQ_FORCE &&
-                            selectedKernelPath == "MMVQ_INTEGER_DOT" -> "explicit_mmvq_override"
-                        baseDmmv -> "explicit_base_override"
-                        selectedKernelPath == "MMVQ_INTEGER_DOT" -> "intDot_q4k_batch1"
-                        else -> null
-                    }
+                    val expectedReason = Q4kDecodePathPolicy.expectedReason(
+                        requestedWorkgroup = workgroup,
+                        selectedKernelPath = selectedKernelPath,
+                        isMaliDevice = isMaliDevice
+                    )
                     if (expectedReason != null && selectedReason != expectedReason) {
                         throw IllegalStateException(
                             "Q4_K-Dispatchgrund weicht ab: erwartet=$expectedReason, beobachtet=$selectedReason"
@@ -544,13 +539,20 @@ abstract class VulkanDiagnosticsViewModel(
                         )
                     }
                     if (selectedKernelPath == "MMVQ_INTEGER_DOT" &&
-                        (!intDotAvailable || !q8Eligible || selectedReason !in setOf(
-                            "intDot_q4k_batch1", "explicit_mmvq_override"
-                        ))
+                        !Q4kDecodePathPolicy.isValidMmvqSelection(
+                            requestedWorkgroup = workgroup,
+                            isMaliDevice = isMaliDevice,
+                            selectedReason = selectedReason,
+                            intDotAvailable = intDotAvailable,
+                            q8Eligible = q8Eligible,
+                            q8EligibilityReason = q8EligibilityReason
+                        )
                     ) {
                         throw IllegalStateException(
-                            "MMVQ wurde ohne bestätigte Integer-Dot/Q8_1-Voraussetzungen ausgewählt: " +
-                                "intDot=$intDotAvailable,q8_1Eligible=$q8Eligible,reason=$selectedReason"
+                            "MMVQ wurde ohne zum angeforderten Profil passende Integer-Dot/Q8_1-Voraussetzungen " +
+                                "oder Dispatch-Begründung ausgewählt: " +
+                                "workgroup=$workgroup,isMali=$isMaliDevice,intDot=$intDotAvailable," +
+                                "q8_1Eligible=$q8Eligible,q8_1Eligibility=$q8EligibilityReason,reason=$selectedReason"
                         )
                     }
                     if (!Q4kPipelineFallbackPolicy.isValid(
@@ -572,17 +574,16 @@ abstract class VulkanDiagnosticsViewModel(
                                 "yKernelType=$observedYKernelTypes"
                         )
                     }
-                    if (autoPath && loaded.activeBackend.contains("Mali", ignoreCase = true) &&
+                    if (autoPath && isMaliDevice &&
                         selectedKernelPath == "BASE_TYPE_MMV" && !q8PipelineFallback
                     ) {
                         // Mali AUTO keeps the base DMMV path. With integer-dot hardware and an
                         // eligible Q8_1 input it does so because MMVQ measured 40-48% slower
                         // on Mali-G57; otherwise the reason names the missing prerequisite.
-                        val expectedMaliAutoReason = when {
-                            !intDotAvailable -> "mali_auto_base_without_intDot"
-                            q8Eligible -> "mali_auto_base_measured_faster"
-                            else -> "mali_auto_base_q8_1_ineligible"
-                        }
+                        val expectedMaliAutoReason = Q4kDecodePathPolicy.expectedMaliAutoReason(
+                            intDotAvailable = intDotAvailable,
+                            q8Eligible = q8Eligible
+                        )
                         if (selectedReason != expectedMaliAutoReason ||
                             (!intDotAvailable && q8EligibilityReason.isBlank())
                         ) {
