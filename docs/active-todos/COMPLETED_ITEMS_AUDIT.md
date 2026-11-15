@@ -140,8 +140,8 @@ Status meanings:
 
 ## Workflow evidence at audit time
 
-- **Unit Tests:** run `43670909807`, commit `07b56cd6a3d7417016b1771ae84d11202419ef38`, conclusion **success**.
-- **Android APK Build:** run `43670909723`, commit `07b56cd6a3d7417016b1771ae84d11202419ef38`, status **in progress** at the time of this audit. No APK artifact or successful APK build is claimed here.
+- **Unit Tests:** run `43671275805`, commit `07b56cd6a3d7417016b1771ae84d11202419ef38`, status **in progress** at audit time. The immediately preceding `aadcbd3` run `43670909807` succeeded, but does not verify the newer commit.
+- **Android APK Build:** run `43671275810`, commit `07b56cd6a3d7417016b1771ae84d11202419ef38`, status **in progress** at audit time. The preceding `aadcbd3` APK run `43670909723` was cancelled. No APK artifact or successful APK build is claimed here.
 - **Android instrumentation / physical device:** no new successful run is claimed by this source audit.
 
 ## Required follow-up
