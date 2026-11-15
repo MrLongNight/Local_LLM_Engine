@@ -604,7 +604,7 @@ internal class LocalLlmEngineImpl(
                 if (BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
                     val tokenTrace = NativeEngineHandle.nativeGetLastTokenSelectionTrace(handle)
                     if (tokenTrace.isNotBlank()) {
-                        EngineDiagnostics.recordSyntheticTokenSelectionTrace(
+                        EngineDiagnostics.recordTokenSelectionTrace(
                             nativeRunId = inferenceRunId,
                             backend = modelInfo.activeBackend,
                             numericTrace = tokenTrace
