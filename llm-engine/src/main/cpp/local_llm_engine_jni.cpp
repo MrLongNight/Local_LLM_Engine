@@ -315,7 +315,7 @@ static void log_native_text_trace(const std::string& message) {
     std::string escaped;
     escaped.reserve(message.size());
     for (const char value : message) {
-        if (value == '\\0') escaped += "\\\\0";
+        if (value == '\0') escaped += "\\0";
         else escaped.push_back(value);
     }
     log_native_info_message(escaped);
