@@ -84,6 +84,21 @@ class CorrectnessGatePlanTest {
     }
 
     @Test
+    fun reportsActualStepCountWhenCpuAndVulkanPassWithNaturalEarlyEog() {
+        val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-natural-pass", "CPU").take(25))
+        val vulkan = CorrectnessGatePlan.parse(
+            expectedOutput,
+            trace("vulkan-natural-pass", "Vulkan", replaceFifth = true).take(25)
+        )
+        val result = CorrectnessGatePlan.evaluate(vulkan, cpu, expectedBackend = "Vulkan")
+
+        assertTrue(result.passed)
+        assertEquals("TOP1_IDENTICAL_TOP5_OVERLAP_GE_4", result.reason)
+        assertEquals(25, result.comparedSteps)
+        assertEquals(4, result.minimumTop5Overlap)
+    }
+
+    @Test
     fun rejectsCpuAndVulkanTracesWithDifferentNaturalStopLengths() {
         val cpu = CorrectnessGatePlan.parse(expectedOutput, trace("cpu-stop", "CPU").take(25))
         val vulkan = CorrectnessGatePlan.parse(expectedOutput, trace("vulkan-stop", "Vulkan").take(24))
