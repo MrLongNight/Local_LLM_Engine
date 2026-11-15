@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ui.EngineViewModel
+import com.example.ui.diagnostics.BackendBenchmarkPlan
 import com.mydocanizer.llm.engine.ModelInfo
 import com.example.BuildConfig as AppBuildConfig
 import com.mydocanizer.llm.engine.BuildConfig as EngineBuildConfig
@@ -39,7 +40,7 @@ internal fun BackendAcceptanceTestSection(
                         Text(
                             text = "Ein zusammengefasster Lauf mit genau zwei Profilen: CPU-Referenz zuerst, danach Vulkan. " +
                                 "Beide verwenden dasselbe Modell und dieselben Inferenzparameter. Vor der Geschwindigkeitsmessung " +
-                                "muss Vulkan die 16-Token-Korrektheitsprüfung bestehen: identische Top-1-Tokens und mindestens " +
+                                "muss Vulkan die ${BackendBenchmarkPlan.CORRECTNESS_GATE_STEPS}-Token-Korrektheitsprüfung bestehen: identische Top-1-Tokens und mindestens " +
                                 "4/5 Top-5-Überschneidung. Nur bestandene Profile erhalten einen Geschwindigkeitswert.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
