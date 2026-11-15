@@ -587,8 +587,11 @@ static void ggml_vk_get_physical_device_features2(
     }]=])
     string(REPLACE "${_q4_prefill_anchor}" "${_q4_prefill_replacement}" _vulkan_contents "${_vulkan_contents}")
 
-    # Prefer integer-dot MMVQ for Q4_K decode at batch 1 only on the measured Mali path.
-    # Other vendors retain the pinned upstream AUTO heuristic; explicit A/B overrides remain isolated.
+    # Q4_K batch-1 decode on Mali. Measured on the target Mali-G57 (LFM3 1.7B Q4_K_M,
+    # repeated, runtime-verified dispatch): base DMMV 4.14/3.92 tok/s versus Q8_1
+    # integer-dot MMVQ 2.71/2.80 tok/s, i.e. MMVQ is 40-48% slower. AUTO on Mali
+    # therefore keeps the base DMMV path; MMVQ stays reachable via override 7.
+    # Other vendors retain the pinned upstream AUTO heuristic.
     set(_q4k_base_dmmv_anchor [=[
     // Check for mmq first
     vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;]=])
@@ -598,7 +601,7 @@ static void ggml_vk_get_physical_device_features2(
     endif()
     set(_q4k_base_dmmv_replacement [=[
     // LOCAL_LLM_Q4K_BASE_DMMV_OVERRIDE: mode 3 explicitly forces base DMMV for Q4_K.
-    // LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV: Mali without integer-dot keeps the AUTO base path.
+    // LOCAL_LLM_MALI_Q4K_AUTO_BASE_DMMV: Mali AUTO keeps the (measured faster) base path.
     // Modes 3/4/5 expose explicit Q4_K/Q5_K/Q6_K A/B paths; Q5_K/Q6_K logic is unchanged.
     const int local_llm_quant_override = local_llm_vulkan_dmmv_workgroup_override();
     // LOCAL_LLM_Q4K_Q8_1_ELIGIBILITY: preserve upstream Q8_1 input/layout/alignment/precision requirements.
@@ -623,10 +626,14 @@ static void ggml_vk_get_physical_device_features2(
     const bool local_llm_mali_q4k_auto =
         local_llm_quant_override == 0 && ctx->device->vendor_id == 0x13B5;
     // LOCAL_LLM_Q4K_AUTO_VENDOR_SCOPE: only Mali overrides AUTO; other vendors keep upstream quantize_y.
+    // Mali AUTO prefers base DMMV: integer-dot MMVQ measured 40-48% slower on Mali-G57.
+    // Flip this constant only after a repeated, runtime-verified A/B shows MMVQ winning.
+    constexpr bool local_llm_mali_auto_prefers_mmvq = false;
     const bool local_llm_q4k_integer_dot_batch1 =
         local_llm_q4k_q8_1_eligible &&
         ctx->device->integer_dot_product &&
-        local_llm_mali_q4k_auto;
+        local_llm_mali_q4k_auto &&
+        local_llm_mali_auto_prefers_mmvq;
     const char * local_llm_q4k_decode_reason = "upstream";
     if (local_llm_q4k_integer_dot_batch1) {
         // Expected log evidence: selected=MMVQ_INTEGER_DOT,reason=intDot_q4k_batch1,yKernelType=q8_1.
@@ -639,7 +646,9 @@ static void ggml_vk_get_physical_device_features2(
             ? "explicit_base_override"
             : (!ctx->device->integer_dot_product
                 ? "mali_auto_base_without_intDot"
-                : "mali_auto_base_q8_1_ineligible");
+                : (local_llm_q4k_q8_1_eligible
+                    ? "mali_auto_base_measured_faster"
+                    : "mali_auto_base_q8_1_ineligible"));
     } else if (src0->type == GGML_TYPE_Q5_K && ne11 == 1 && local_llm_quant_override == 4) {
         quantize_y = false;
     } else if (src0->type == GGML_TYPE_Q6_K && ne11 == 1 && local_llm_quant_override == 5) {
@@ -1273,6 +1282,7 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "local_llm_q4k_integer_dot_batch1" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_AUTO_VENDOR_SCOPE" OR
        NOT _vulkan_contents MATCHES "local_llm_mali_q4k_auto" OR
+       NOT _vulkan_contents MATCHES "local_llm_mali_auto_prefers_mmvq" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_Q8_1_ELIGIBILITY" OR
        NOT _vulkan_contents MATCHES "src1->type == GGML_TYPE_F32" OR
        NOT _vulkan_contents MATCHES "ggml_is_contiguous\\(src1\\)" OR
@@ -1281,6 +1291,7 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "q8_1Eligible=%d,q8_1Eligibility=%s" OR
        NOT _vulkan_contents MATCHES "q8_1_pipeline_unavailable_fallback" OR
        NOT _vulkan_contents MATCHES "mali_auto_base_q8_1_ineligible" OR
+       NOT _vulkan_contents MATCHES "mali_auto_base_measured_faster" OR
        NOT _vulkan_contents MATCHES "reason=%s" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MEMORY_BUDGET" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_OP_TIMING" OR

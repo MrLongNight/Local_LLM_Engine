@@ -575,13 +575,15 @@ abstract class VulkanDiagnosticsViewModel(
                     if (autoPath && loaded.activeBackend.contains("Mali", ignoreCase = true) &&
                         selectedKernelPath == "BASE_TYPE_MMV" && !q8PipelineFallback
                     ) {
-                        val expectedMaliAutoReason = if (!intDotAvailable) {
-                            "mali_auto_base_without_intDot"
-                        } else {
-                            "mali_auto_base_q8_1_ineligible"
+                        // Mali AUTO keeps the base DMMV path. With integer-dot hardware and an
+                        // eligible Q8_1 input it does so because MMVQ measured 40-48% slower
+                        // on Mali-G57; otherwise the reason names the missing prerequisite.
+                        val expectedMaliAutoReason = when {
+                            !intDotAvailable -> "mali_auto_base_without_intDot"
+                            q8Eligible -> "mali_auto_base_measured_faster"
+                            else -> "mali_auto_base_q8_1_ineligible"
                         }
                         if (selectedReason != expectedMaliAutoReason ||
-                            (intDotAvailable && q8Eligible) ||
                             (!intDotAvailable && q8EligibilityReason.isBlank())
                         ) {
                             throw IllegalStateException(
