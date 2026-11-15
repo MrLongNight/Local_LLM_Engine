@@ -7,6 +7,13 @@
 
 > **Single source of truth:** This is the only active task list. Architecture references, integration guides and historical reports may document facts and contracts, but must not create parallel implementation queues.
 
+## Audit control — 2026-11-15
+
+- [x] Source-audit every item currently marked `[x]` against the implementation and its named tests at HEAD `aadcbd3fa70981a89cbaa0e2625e31fada0d3314`; findings: `docs/active-todos/COMPLETED_ITEMS_AUDIT.md`.
+- [ ] Resolve the source/documentation mismatch and the additional regression gaps recorded in the audit before treating the affected acceptance areas as fully verified.
+- [ ] Re-run and record JVM, host-native, Android instrumentation and APK workflows separately after code changes; the current-head Unit Tests workflow is green, while the APK workflow is still running at audit time.
+- [ ] Complete the physical-device checks that remain open in P0/P1; source review and CI do not substitute for hardware acceptance.
+
 ## Execution order and invariants
 
 1. **P0 — Correctness defects:** incorrect/garbled model output, backend/kernel selection defects, inference and loading failures, cache/state corruption, cancellation and recovery defects.
@@ -51,14 +58,15 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 - [x] Add content-safe correctness-output classification for the synthetic gate: `EMPTY`, `PREFIX_TOO_SHORT`, `EXPECTED_PREFIX`, `EXACT_SEQUENCE`, `SEQUENCE_MISMATCH`, `NON_SEQUENCE_TEXT` and `EXTRA_SUFFIX`, plus a non-whitespace character count. Only the category/count are persisted; generated response text remains in-memory and is never written to diagnostics. JVM regression tests cover every category (`4c68e28`).
 - [x] Capture the terminal EOG token-selection trace before the Kotlin null/terminal check, and clear the per-step trace before every native token attempt so non-sampling exits cannot replay a stale trace as a duplicate (`9bf5f3e`, `d460522`). This fixes trace attribution only; it does not establish model-output correctness.
 - [x] Fix the correctness gate's self-imposed truncation: 16 generated tokens could not reliably complete the five-number answer on digit-per-token Qwen/LFM tokenizers. Increase the safety budget to 32, require the complete exact answer, and accept the model's natural early EOG after the answer; CPU/Vulkan trace lengths must match. JVM tests cover truncation rejection, early stop and paired trace-length mismatch (`2279d37`, `faeea29`, `752e26e`, `11db00b`, `dcd85d7`, `dcb6b4f`, `1f02efb`).
-- [x] Correct gate accounting after allowing natural early EOG: `Evaluation.comparedSteps` now reports the actual trace length on CPU pass and CPU/Vulkan comparison failures, rather than the 32-token safety ceiling. The acceptance report also derives its displayed gate budget from the shared constant instead of retaining a stale `16-token` label (`2c6b1ae`, `77b0407`, `5f7ce1e`).
+- [x] Correct gate accounting after allowing natural early EOG: `Evaluation.comparedSteps` reports the actual trace length on CPU-only pass and CPU/Vulkan comparison failures, rather than the 32-token safety ceiling. The acceptance report also derives its displayed gate budget from the shared constant instead of retaining a stale `16-token` label (`2c6b1ae`, `77b0407`, `5f7ce1e`).
+- [ ] Audit follow-up: paired CPU/Vulkan **PASS** still reports `CORRECTNESS_GATE_STEPS` instead of `candidateSteps.size` when both traces stop naturally before 32 tokens; correct the count and add a paired early-EOG PASS regression test.
 - [ ] Investigate the 2026-11-14 compact acceptance result for LFM3 1.7B Q4_K_M: both the CPU reference and Vulkan candidate failed the synthetic expected-continuation check with `EXPECTED_OUTPUT_MISMATCH`. Because the CPU reference also failed, this run does not establish a Vulkan-only regression and its 5.51 vs 3.37 tok/s figures must not be treated as an accepted performance comparison. Use the new output-shape evidence on the next run to determine whether the prompt/output expectation or model output is wrong; do not persist response text.
 
 **Acceptance:** Every intended model family passes repeatable output-correctness tests on CPU; Vulkan passes the same correctness contract on supported devices. Root causes and remaining unsupported combinations are explicit.
 
 ### P0-02 — Verify and correct the Mali-G57 Q4_K decode kernel path
 
-**Current source finding:** The Android Vulkan overlay selects the Q4_K batch-1 integer-dot path in AUTO only on the measured Mali vendor path and only when the pinned upstream Q8_1 input/layout/alignment/precision prerequisites are satisfied. Non-Mali vendors retain the pinned upstream `ggml_vk_should_use_mmvq()` decision in AUTO. Explicit MMVQ/base A/B modes remain separate; upstream llama.cpp stays pristine.
+**Current source finding (2026-11-15 source audit):** Mali Q4_K batch-1 AUTO currently selects the base DMMV path: `local_llm_mali_auto_prefers_mmvq` is explicitly `false` in the generated Vulkan overlay. The guarded Q8_1/integer-dot MMVQ path remains available for explicit diagnostic A/B selection; non-Mali vendors retain the pinned upstream `ggml_vk_should_use_mmvq()` AUTO heuristic. The 2026-11-14 runtime MMVQ evidence is historical and must not be described as proof of the current Mali AUTO selection. The pinned llama.cpp submodule remains pristine.
 
 **Device evidence (2026-11-14):**
 - Mali-G57 reports `int dot=1`, `fp16=1`, `bf16=0`, warp size 16, shared memory 32 KiB and no matrix cores.
@@ -190,7 +198,7 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 - [x] Rethrow `CancellationException` before handling recoverable per-file failures in the bulk SAF loop.
 - [x] Ensure cancellation stops subsequent files, retains completed imports, refreshes the model list after partial success, removes incomplete temporary files in the resolver and resets UI state once.
-- [ ] Add tests for cancellation during permission/metadata lookup, copy, verification and between files.
+- [ ] Add tests for cancellation during permission/metadata lookup, copy, verification and between files. Audit note: the bulk-import display-name query currently wraps `ContentResolver.query()` in `runCatching`; a cancellation exception is temporarily converted to the fallback name, then observed by the immediately following `ensureActive()`. Add a deterministic test for cancellation while the metadata query is blocked and consider replacing the broad catch with explicit `CancellationException` rethrow for direct propagation.
 
 **Acceptance:** A cancelled import cannot continue as a sequence of ordinary file failures or report success.
 
