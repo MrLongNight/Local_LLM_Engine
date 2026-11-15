@@ -1,0 +1,470 @@
+package com.mydocanizer.llm.engine.internal
+
+import android.content.Context
+import android.net.Uri
+import android.os.StatFs
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import android.system.Os
+import android.system.OsConstants
+import com.mydocanizer.llm.engine.ModelSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
+import javax.net.ssl.HttpsURLConnection
+import java.io.FileDescriptor
+
+internal object ModelSourceResolver {
+
+    private const val CONNECT_TIMEOUT_MS = 15_000
+    private const val READ_TIMEOUT_MS = 30_000
+    private const val MAX_REDIRECTS = 5
+    private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
+    private val PROC_SELF_FD_PATH = Regex("^/proc/self/fd/([0-9]+)$")
+    private const val IMPORT_RESERVE_BYTES = 64L * 1024L * 1024L
+
+    private data class ContentMetadata(
+        val displayName: String?,
+        val sizeBytes: Long?,
+        val lastModified: Long?
+    )
+
+    suspend fun resolveToFile(
+        context: Context,
+        source: ModelSource,
+        onProgress: ((Int) -> Unit)? = null
+    ): File =
+        withContext(Dispatchers.IO) {
+            when (source) {
+                is ModelSource.FilePath -> {
+                    val file = source.file
+                    if (PROC_SELF_FD_PATH.matches(source.path)) {
+                        // /proc/self/fd/N is a process-local descriptor path, not a
+                        // conventional filesystem path. File.isFile/canRead() are not
+                        // reliable for Binder-transferred SAF descriptors on Android.
+                        // Validate the actual descriptor with fstat/lseek/pread/mmap
+                        // and keep the original descriptor open for llama.cpp.
+                        val descriptor = source.descriptor
+                            ?: throw IllegalArgumentException(
+                                "Direct SAF source is missing its borrowed file descriptor; refusing to reopen or copy it"
+                            )
+                        val descriptorNumber = source.descriptorFd
+                            ?: throw IllegalArgumentException(
+                                "Direct SAF source is missing its descriptor number; refusing to reopen or copy it"
+                            )
+                        validateSeekableMmapDescriptor(descriptor, descriptorNumber)
+                    } else {
+                        require(file.isFile && file.canRead()) {
+                            "Model file does not exist or cannot be read: ${source.path}"
+                        }
+                        validateGgufMagic(file)
+                    }
+                    file
+                }
+
+                is ModelSource.ContentUri -> {
+                    val targetDir = ensureModelDirectory(context)
+                    val uri = Uri.parse(source.uriString)
+                    val metadata = queryContentMetadata(context, uri)
+                    val displayName = source.displayName
+                        ?: metadata?.displayName
+                        ?: queryFileName(context, uri)
+                        ?: "imported_model.gguf"
+
+                    // Reuse an existing private copy only when the provider supplies both
+                    // size and modification time. Unknown metadata never trusts a stale URI.
+                    findCachedContentUriImport(context, targetDir, source.uriString, metadata)?.let {
+                        android.util.Log.i("ModelSourceResolver", "SAF_IMPORT_CACHE_HIT path=${it.name}")
+                        onProgress?.invoke(100)
+                        return@withContext it
+                    }
+
+                    metadata?.sizeBytes?.takeIf { it > 0L }?.let { expectedBytes ->
+                        val available = StatFs(targetDir.absolutePath).availableBytes
+                        val required = expectedBytes + IMPORT_RESERVE_BYTES
+                        require(available >= required) {
+                            "Nicht genügend Speicher für den Modellimport: benötigt ${required / (1024L * 1024L)} MiB, " +
+                                "verfügbar ${available / (1024L * 1024L)} MiB."
+                        }
+                    }
+
+                    val input = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalArgumentException("Could not open Content URI: ${source.uriString}")
+                    val imported = copyAndPublish(
+                        targetDir = targetDir,
+                        displayName = displayName,
+                        input = input,
+                        expectedBytes = metadata?.sizeBytes,
+                        onProgress = { percent ->
+                            onProgress?.invoke(percent)
+                            com.mydocanizer.llm.engine.EngineDiagnostics.info(
+                                "model_import", "IMPORT_PROGRESS",
+                                "source=SAF,percent=$percent,name=$displayName"
+                            )
+                        }
+                    )
+                    rememberContentUriImport(context, imported, source.uriString, metadata)
+                    imported
+                }
+
+                is ModelSource.AssetPath -> {
+                    val targetDir = ensureModelDirectory(context)
+                    require(source.assetName.isNotBlank()) { "Asset name must not be blank" }
+                    val input = context.assets.open(source.assetName)
+                    copyAndPublish(targetDir, source.assetName, input)
+                }
+
+                is ModelSource.RemoteUrl -> downloadRemoteFile(ensureModelDirectory(context), source)
+            }
+        }
+
+    private fun ensureModelDirectory(context: Context): File {
+        val targetDir = File(context.filesDir, "models")
+        if (!targetDir.exists() && !targetDir.mkdirs()) {
+            throw IllegalStateException("Could not create private model directory")
+        }
+        require(targetDir.isDirectory && targetDir.canWrite()) {
+            "Private model directory is not writable"
+        }
+        return targetDir
+    }
+
+    private suspend fun downloadRemoteFile(targetDir: File, source: ModelSource.RemoteUrl): File {
+        var currentUrl = URL(source.url)
+        require(currentUrl.protocol.equals("https", ignoreCase = true)) {
+            "Remote model downloads require HTTPS"
+        }
+        require(currentUrl.userInfo == null) {
+            "Credentials embedded in remote model URLs are not supported"
+        }
+
+        val fallbackName = source.suggestedFileName
+            ?: currentUrl.path.substringAfterLast('/').takeIf { it.isNotBlank() }
+            ?: "downloaded_model.gguf"
+
+        for (redirectCount in 0..MAX_REDIRECTS) {
+            currentCoroutineContext().ensureActive()
+            val connection = currentUrl.openConnection() as? HttpsURLConnection
+                ?: throw IllegalArgumentException("Remote model URL must use HTTPS")
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.instanceFollowRedirects = false
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "Local-LMM-Engine/1.0")
+
+            try {
+                val status = connection.responseCode
+                if (status in setOf(
+                        HttpURLConnection.HTTP_MOVED_PERM,
+                        HttpURLConnection.HTTP_MOVED_TEMP,
+                        HttpURLConnection.HTTP_SEE_OTHER,
+                        307,
+                        308
+                    )
+                ) {
+                    val location = connection.getHeaderField("Location")
+                    require(!location.isNullOrBlank()) {
+                        "HTTPS model server returned a redirect without Location"
+                    }
+                    require(redirectCount < MAX_REDIRECTS) {
+                        "Remote model download exceeded $MAX_REDIRECTS redirects"
+                    }
+                    val nextUrl = URL(currentUrl, location)
+                    require(nextUrl.protocol.equals("https", ignoreCase = true)) {
+                        "Remote model redirect attempted to downgrade from HTTPS"
+                    }
+                    require(nextUrl.userInfo == null) {
+                        "Credentials embedded in remote model redirects are not supported"
+                    }
+                    currentUrl = nextUrl
+                    continue
+                }
+
+                require(status in 200..299) {
+                    "Remote model download failed with HTTP status $status"
+                }
+                return copyAndPublish(targetDir, fallbackName, connection.inputStream)
+            } finally {
+                connection.disconnect()
+            }
+        }
+        throw IllegalStateException("Remote model download did not complete")
+    }
+
+    /**
+     * Streams a source into a private .part file, verifies its GGUF header, hashes it,
+     * then publishes it with an atomic same-filesystem rename. A failed/cancelled copy
+     * can therefore never appear as a selectable .gguf model.
+     */
+    internal suspend fun copyAndPublish(
+        targetDir: File,
+        displayName: String,
+        input: InputStream,
+        expectedBytes: Long? = null,
+        onProgress: ((Int) -> Unit)? = null
+    ): File {
+        val coroutineContext = currentCoroutineContext()
+        var temporaryFile: File? = null
+        try {
+            var sha256: String? = null
+            input.use { source ->
+                val digest = MessageDigest.getInstance("SHA-256")
+                val stage = File.createTempFile(".model-import-", ".part", targetDir)
+                temporaryFile = stage
+                FileOutputStream(stage).use { destination ->
+                    val buffer = ByteArray(1024 * 1024)
+                    var copiedBytes = 0L
+                    var lastProgressBucket = -1
+                    onProgress?.invoke(0)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        if (count == 0) continue
+                        digest.update(buffer, 0, count)
+                        destination.write(buffer, 0, count)
+                        copiedBytes += count
+                        if (expectedBytes != null && expectedBytes > 0L && onProgress != null) {
+                            val percent = ((copiedBytes.toDouble() / expectedBytes.toDouble()) * 100.0)
+                                .toInt().coerceIn(0, 99)
+                            val bucket = percent / 5
+                            if (bucket > lastProgressBucket) {
+                                lastProgressBucket = bucket
+                                onProgress(percent)
+                            }
+                        }
+                    }
+                    destination.fd.sync()
+                }
+                coroutineContext.ensureActive()
+                validateGgufMagic(stage)
+                sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                onProgress?.invoke(100)
+            }
+
+            coroutineContext.ensureActive()
+            val verifiedHash = checkNotNull(sha256)
+            val stage = checkNotNull(temporaryFile)
+            val safeName = safeModelFileName(displayName)
+            val destination = File(targetDir, "$verifiedHash-$safeName")
+
+            // POSIX rename is atomic within the private models directory. It also safely
+            // replaces a previous copy with the same content hash.
+            Os.rename(stage.absolutePath, destination.absolutePath)
+            return destination
+        } finally {
+            temporaryFile?.takeIf { it.exists() }?.delete()
+        }
+    }
+
+    /**
+     * Validates the already-open SAF descriptor directly. No open("/proc/self/fd/N"),
+     * FileInputStream, cache materialization or descriptor replacement is performed.
+     * The borrowed descriptor remains owned by the caller and is used by JNI through
+     * llama_model_load_from_file_ptr(FILE*, ...).
+     */
+    private fun validateSeekableMmapDescriptor(
+        descriptor: FileDescriptor,
+        descriptorNumber: Int
+    ) {
+        val stat = try {
+            Os.fstat(descriptor)
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "SAF descriptor $descriptorNumber is not valid in :inference",
+                error
+            )
+        }
+
+        val fileType = stat.st_mode and OsConstants.S_IFMT
+        if (fileType != OsConstants.S_IFREG) {
+            val sourceType = when (fileType) {
+                OsConstants.S_IFIFO -> "pipe"
+                OsConstants.S_IFSOCK -> "socket"
+                OsConstants.S_IFCHR -> "character device"
+                OsConstants.S_IFBLK -> "block device"
+                OsConstants.S_IFDIR -> "directory"
+                else -> "non-regular source (mode=0x${stat.st_mode.toString(16)})"
+            }
+            throw IllegalArgumentException(
+                "Selected SAF provider supplied a $sourceType descriptor, not a seekable regular file. " +
+                    "llama.cpp requires a seekable, mmap-capable file descriptor. " +
+                    "The source was not copied; choose a provider that exposes the file directly."
+            )
+        }
+
+        require(stat.st_size >= GGUF_MAGIC.size) {
+            "SAF descriptor $descriptorNumber points to a file smaller than a GGUF header"
+        }
+
+        try {
+            Os.lseek(descriptor, 0L, OsConstants.SEEK_CUR)
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "Selected SAF provider returned a non-seekable descriptor. " +
+                    "llama.cpp cannot mmap this source; the source was not copied.",
+                error
+            )
+        }
+
+        val header = ByteArray(GGUF_MAGIC.size)
+        val bytesRead = try {
+            Os.pread(descriptor, header, 0, header.size, 0L)
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "Could not read the GGUF header directly from SAF descriptor $descriptorNumber",
+                error
+            )
+        }
+        require(bytesRead == GGUF_MAGIC.size && header.contentEquals(GGUF_MAGIC)) {
+            "Invalid GGUF file on SAF descriptor $descriptorNumber: expected GGUF magic bytes at offset 0"
+        }
+
+        // Probe mmap on the exact descriptor that JNI will duplicate and pass to llama.cpp.
+        val probeLength = minOf(stat.st_size, 4096L)
+        val mapping = try {
+            Os.mmap(
+                0L,
+                probeLength,
+                OsConstants.PROT_READ,
+                OsConstants.MAP_PRIVATE,
+                descriptor,
+                0L
+            )
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "Selected SAF provider returned a seekable descriptor but does not support " +
+                    "read-only mmap required by llama.cpp. The source was not copied.",
+                error
+            )
+        }
+        try {
+            // Capability probe only; llama.cpp creates and owns the model mappings.
+        } finally {
+            Os.munmap(mapping, probeLength)
+        }
+
+        android.util.Log.i(
+            "ModelSourceResolver",
+            "Validated borrowed SAF descriptor fd=$descriptorNumber size=${stat.st_size} " +
+                "seekable=true mmap=true copy=false"
+        )
+    }
+
+    internal fun validateGgufMagic(file: File) {
+        require(file.isFile && file.canRead()) { "GGUF source is not a readable file" }
+        val header = ByteArray(GGUF_MAGIC.size)
+        file.inputStream().use { input ->
+            var offset = 0
+            while (offset < header.size) {
+                val count = input.read(header, offset, header.size - offset)
+                if (count < 0) break
+                offset += count
+            }
+            require(offset == GGUF_MAGIC.size && header.contentEquals(GGUF_MAGIC)) {
+                "Invalid GGUF file: expected GGUF magic bytes at offset 0"
+            }
+        }
+    }
+
+    private fun safeModelFileName(candidate: String): String =
+        ModelFileNamePolicy.safeOriginalName(candidate)
+
+    private fun queryContentMetadata(context: Context, uri: Uri): ContentMetadata? {
+        if (uri.scheme != "content") return null
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    OpenableColumns.DISPLAY_NAME,
+                    OpenableColumns.SIZE,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                val modifiedIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                ContentMetadata(
+                    displayName = nameIndex.takeIf { it >= 0 }?.let { cursor.getString(it) },
+                    sizeBytes = sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                        ?.let { cursor.getLong(it) }?.takeIf { it > 0L },
+                    lastModified = modifiedIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                        ?.let { cursor.getLong(it) }?.takeIf { it > 0L }
+                )
+            }
+        }.getOrNull()
+    }
+
+    private fun findCachedContentUriImport(
+        context: Context,
+        targetDir: File,
+        uriString: String,
+        metadata: ContentMetadata?
+    ): File? {
+        val size = metadata?.sizeBytes ?: return null
+        val modified = metadata.lastModified ?: return null
+        val key = contentUriPreferenceKey(uriString)
+        val preferences = context.getSharedPreferences("local_llm_model_imports", Context.MODE_PRIVATE)
+        if (preferences.getLong("$key.size", -1L) != size ||
+            preferences.getLong("$key.modified", -1L) != modified
+        ) return null
+        val storedName = preferences.getString("$key.file", null) ?: return null
+        val file = File(targetDir, storedName).canonicalFile
+        if (file.parentFile != targetDir.canonicalFile || !file.isFile || file.length() != size) return null
+        return runCatching {
+            validateGgufMagic(file)
+            file
+        }.getOrNull()
+    }
+
+    private fun rememberContentUriImport(
+        context: Context,
+        file: File,
+        uriString: String,
+        metadata: ContentMetadata?
+    ) {
+        val size = metadata?.sizeBytes ?: return
+        val modified = metadata.lastModified ?: return
+        val key = contentUriPreferenceKey(uriString)
+        context.getSharedPreferences("local_llm_model_imports", Context.MODE_PRIVATE)
+            .edit()
+            .putLong("$key.size", size)
+            .putLong("$key.modified", modified)
+            .putString("$key.file", file.name)
+            .apply()
+    }
+
+    private fun contentUriPreferenceKey(uriString: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(uriString.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return "uri_$digest"
+    }
+
+    private fun queryFileName(context: Context, uri: Uri): String? {
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1) return cursor.getString(nameIndex)
+                    }
+                }
+            } catch (_: Exception) {
+                // A provider may not expose OpenableColumns; use the URI segment below.
+            }
+        }
+        return uri.lastPathSegment
+    }
+}
