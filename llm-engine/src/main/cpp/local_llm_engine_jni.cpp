@@ -330,6 +330,8 @@ struct EngineInstance {
     FILE* model_file_stream = nullptr;
     llama_batch batch;
     common_sampler* sampler = nullptr;
+    // True only while llama.cpp's context retains this sampler chain for backend sampling.
+    bool backend_sampler_attached = false;
     common_chat_templates_ptr chat_templates;
 
     int32_t context_size = 4096;
@@ -436,10 +438,19 @@ struct EngineInstance {
         return true;
     }
 
+    void detach_backend_sampler() {
+        if (!backend_sampler_attached || context == nullptr) return;
+        if (!llama_set_sampler(context, 0, nullptr)) {
+            LOGW("Backend sampler detach failed; context teardown will release its registration");
+        }
+        backend_sampler_attached = false;
+    }
+
     // Caller must hold mtx.
     void unload_unlocked() {
         reset_short_term();
         reset_long_term(false);
+        detach_backend_sampler();
         if (sampler) {
             common_sampler_free(sampler);
             sampler = nullptr;
@@ -1558,6 +1569,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     const float effective_top_p =
         std::isfinite(request_top_p) && request_top_p >= 0.0f && request_top_p <= 1.0f
             ? request_top_p : engine->default_top_p;
+    // A prior request may have registered its sampler chain with llama_context.
+    // Detach it before freeing the chain or constructing the next request's sampler.
+    engine->detach_backend_sampler();
     if (engine->sampler != nullptr) {
         common_sampler_free(engine->sampler);
         engine->sampler = nullptr;
@@ -1584,6 +1598,26 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     LOGI("Request sampler configured: temperature=%.3f, top_k=%d, top_p=%.3f, min_p=%.3f, chain=%s",
          effective_temperature, engine->default_top_k, effective_top_p, engine->default_min_p,
          effective_temperature <= 0.0f ? "GREEDY" : "TOP_K_TOP_P_MIN_P_TEMPERATURE");
+
+    // The pinned llama.cpp revision can run supported sampler stages in the same
+    // backend graph as decode. Register only for normal Vulkan inference: the
+    // TEXT_DIAGNOSTICS build needs the full CPU-visible logits for Top-5 traces.
+    const bool backend_sampling_requested =
+        engine->active_backend.find("Vulkan") != std::string::npos;
+#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+    if (backend_sampling_requested) {
+        engine->backend_sampler_attached = llama_set_sampler(
+            engine->context, 0, common_sampler_get(engine->sampler));
+        LOGI("LOCAL_LLM_BACKEND_SAMPLING - requested=1,attached=%d,backend=%s,runId=%s",
+             engine->backend_sampler_attached ? 1 : 0,
+             engine->active_backend.c_str(), engine->inference_run_id.c_str());
+    }
+#else
+    if (backend_sampling_requested) {
+        LOGI("LOCAL_LLM_BACKEND_SAMPLING - requested=0,reason=top5_diagnostics_requires_cpu_logits,backend=%s,runId=%s",
+             engine->active_backend.c_str(), engine->inference_run_id.c_str());
+    }
+#endif
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     {
         std::ostringstream sampling;
