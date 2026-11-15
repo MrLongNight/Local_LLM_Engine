@@ -31,9 +31,9 @@ The current native engine has one loaded model/context per `EngineInstance` and 
 | Context size and other load-time parameters | Applied when the model/context is loaded; changing them requires a model reload, which resets memory and cached tokens. |
 | Conversation/session | The request supplies the full message history. Appended turns can reuse the exact prior prefix; edits/deletions/branch changes stop reuse at the first token divergence. Identical token prefixes are semantically equivalent input, even if they originate from different UI sessions. |
 
-### Remaining edge case: non-leading system messages
+### Interleaved system messages
 
-Prompt truncation protects every message whose role is `system`, but the context-shift boundary is currently computed only from the contiguous leading system-message prefix. If a caller supplies a later/interleaved system message, prompt truncation preserves it but a future context shift could discard it. The app's normal conversation shape places system messages first, but the engine should either disable context shifting for non-leading system messages or preserve all protected ranges explicitly. Keep this as an open P0-06 item until a code guard and host test land.
+Prompt truncation protects every message whose role is `system`. A single context-shift boundary cannot preserve disjoint system-message ranges, so the engine now detects non-leading system messages and sets `system_prompt_position` to the complete current prompt length. Context shifting can then discard only generated tokens after that prompt; it cannot remove any earlier user/assistant/tool/system message. This is conservative and may reduce history compaction for such requests. Host-native tests cover the role-order predicate.
 
 ## 3. Failure and lifecycle invalidation
 

@@ -99,7 +99,18 @@ inline std::vector<std::size_t> build_prompt_truncation_plan(
 }
 
 
- // Incremental KV/prefix reuse and context shifts are safe only for ordinary attention
+ // Return true only when every system message is in the leading prompt prefix.
+// Context shifting can then preserve that immutable prefix with one boundary position.
+inline bool system_messages_are_prefix_only(const std::vector<bool>& system_message_flags) noexcept {
+    bool non_system_seen = false;
+    for (const bool is_system : system_message_flags) {
+        if (is_system && non_system_seen) return false;
+        if (!is_system) non_system_seen = true;
+    }
+    return true;
+}
+
+// Incremental KV/prefix reuse and context shifts are safe only for ordinary attention
 // models. Hybrid/recurrent architectures must always clear their full memory state.
 inline bool supports_incremental_memory_ops(bool is_hybrid, bool is_recurrent) noexcept {
     return !is_hybrid && !is_recurrent;

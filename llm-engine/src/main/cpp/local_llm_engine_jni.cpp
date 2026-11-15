@@ -1749,10 +1749,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
 
     const int max_allowed = engine->context_size - OVERFLOW_HEADROOM;
     std::vector<size_t> protected_message_indices;
+    std::vector<bool> system_message_flags;
+    system_message_flags.reserve(messages.size());
     size_t last_user_index = messages.empty() ? 0 : messages.size() - 1;
     bool found_user_message = false;
     for (size_t i = 0; i < messages.size(); ++i) {
-        if (messages[i].role == "system") protected_message_indices.push_back(i);
+        const bool is_system_message = messages[i].role == "system";
+        system_message_flags.push_back(is_system_message);
+        if (is_system_message) protected_message_indices.push_back(i);
         if (messages[i].role == "user") {
             last_user_index = i;
             found_user_message = true;
@@ -1802,7 +1806,15 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         system_messages.push_back(message);
     }
     engine->system_prompt_position = 0;
-    if (!system_messages.empty()) {
+    const bool system_prefix_is_contiguous =
+        local_llm::system_messages_are_prefix_only(system_message_flags);
+    if (!system_prefix_is_contiguous) {
+        // One boundary cannot preserve disjoint system-message ranges. Preserve the
+        // complete current prompt instead; this sacrifices history compaction but
+        // prevents a later system message from being shifted out of the KV state.
+        engine->system_prompt_position = static_cast<llama_pos>(tokens.size());
+        LOGW("Non-leading system message detected; context shifting will preserve the complete current prompt");
+    } else if (!system_messages.empty()) {
         try {
             std::string system_prompt_text;
             common_chat_prompt system_rendered;

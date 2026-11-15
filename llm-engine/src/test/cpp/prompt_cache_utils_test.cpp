@@ -18,6 +18,10 @@ int main() {
     assert(!local_llm::supports_incremental_memory_ops(true, false));
     assert(!local_llm::supports_incremental_memory_ops(false, true));
     assert(!local_llm::supports_incremental_memory_ops(true, true));
+    assert(local_llm::system_messages_are_prefix_only({true, true, false, false}));
+    assert(local_llm::system_messages_are_prefix_only({false, false}));
+    assert(!local_llm::system_messages_are_prefix_only({true, false, true}));
+    assert(!local_llm::system_messages_are_prefix_only({false, true}));
 
     {
         const std::vector<int> cached{1, 2, 3, 4, 5};
