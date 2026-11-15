@@ -68,6 +68,9 @@ class InferenceService : Service() {
     private val activeRequestId = AtomicReference<String?>(null)
     @Volatile
     private var activeInferenceJob: Job? = null
+    // Binder threads may call streamChat concurrently. The check of the active slot and the
+    // assignment of the new Job must be one atomic step.
+    private val inferenceSlotLock = Any()
     private val isShuttingDown = AtomicBoolean(false)
     private val memoryTrimUnloadPending = AtomicBoolean(false)
     private var resourceMonitor: EngineResourceMonitor? = null
@@ -106,7 +109,7 @@ class InferenceService : Service() {
      * reach LocalLlmEngineImpl while its blocking JNI call owns the worker.
      */
     private fun interruptInferenceForModelOperation(operation: String) {
-        if (activeInferenceJob == null) return
+        if (activeInferenceJob?.isActive != true) return
         EngineDiagnostics.info(
             "ipc",
             "INFERENCE_PREEMPTED_FOR_MODEL_OPERATION",
@@ -383,114 +386,127 @@ class InferenceService : Service() {
         ) {
             // There is exactly one native EngineInstance per service process. Reject
             // overlapping Binder requests instead of silently cancelling the first stream.
-            if (activeInferenceJob != null) {
+            //
+            // The Job is created LAZY, published, and only then started. Otherwise a request
+            // that finishes immediately (for example "No model loaded") could clear the slot
+            // before this thread assigns the Job, leaving a completed Job in the slot that
+            // rejects every later request until the process restarts.
+            val slotBusy = synchronized(inferenceSlotLock) {
+                val existing = activeInferenceJob
+                if (existing != null && existing.isActive) {
+                    true
+                } else {
+                    activeRequestId.set(requestId)
+                    val job = serviceScope.launch(start = CoroutineStart.LAZY) {
+                        val currentReqId = requestId
+                        resourceMonitor?.inferenceStarted(currentReqId)
+                        var terminalCallback: (() -> Unit)? = null
+                        var requestReleased = false
+                        try {
+                            val e = initEngine()
+                            var tokenCount = 0
+                            val streamBuilder = StringBuilder()
+
+                            e.streamChat(request).collect { event ->
+                                // Discard events if request ID has been superseded or cancelled
+                                if (activeRequestId.get() != currentReqId) return@collect
+
+                                when (event) {
+                                    is InferenceEvent.Started -> {
+                                        callback?.onStarted(currentReqId, event.promptMessageCount)
+                                    }
+                                    is InferenceEvent.Token -> {
+                                        streamBuilder.append(event.token)
+                                        tokenCount++
+                                        callback?.onToken(currentReqId, event.token, event.tokenIndex)
+                                    }
+                                    is InferenceEvent.Progress -> {
+                                        when (event.phase) {
+                                            ProgressPhase.PROMPT_PREPARATION,
+                                            ProgressPhase.PROMPT_EVALUATION -> callback?.onPromptProgress(
+                                                currentReqId,
+                                                event.promptTokensProcessed,
+                                                event.promptTokensTotal,
+                                                event.elapsedMs
+                                            )
+                                            ProgressPhase.WAITING_FOR_FIRST_TOKEN -> Unit
+                                            ProgressPhase.GENERATING -> callback?.onProgress(
+                                                currentReqId,
+                                                event.tokensGenerated,
+                                                event.elapsedMs
+                                            )
+                                        }
+                                    }
+                                    is InferenceEvent.Completed -> {
+                                        // Keep the native llama.cpp ID separate from the IPC/resource ID:
+                                        // token traces and Vulkan profiler rows use nativeRunId, while
+                                        // INFERENCE_<requestId> RAM/thermal samples use diagnosticRunId.
+                                        val nativeRunId = event.result.nativeRunId
+                                            .ifBlank { event.result.diagnosticRunId }
+                                        val result = event.result.copy(
+                                            diagnosticRunId = currentReqId,
+                                            nativeRunId = nativeRunId
+                                        )
+                                        terminalCallback = { callback?.onCompleted(currentReqId, result) }
+                                    }
+                                    is InferenceEvent.Cancelled -> {
+                                        val partialText = event.partialText
+                                        val generatedTokens = event.tokensGenerated
+                                        terminalCallback = {
+                                            callback?.onCancelled(currentReqId, partialText, generatedTokens)
+                                        }
+                                    }
+                                    is InferenceEvent.Error -> {
+                                        val message = event.throwable.message ?: event.throwable.javaClass.simpleName
+                                        val partialText = event.partialText
+                                        terminalCallback = {
+                                            callback?.onError(currentReqId, message, partialText)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (cancelled: CancellationException) {
+                            Log.i(TAG, "Inference coroutine cancelled for request $currentReqId")
+                            terminalCallback = { callback?.onCancelled(currentReqId, "", 0) }
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "Error in streamChat IPC", t)
+                            val message = t.message ?: t.javaClass.simpleName
+                            terminalCallback = { callback?.onError(currentReqId, message, "") }
+                        } finally {
+                            resourceMonitor?.inferenceFinished(currentReqId)
+                            requestReleased = activeRequestId.compareAndSet(currentReqId, null)
+                            if (requestReleased) {
+                                // Release the active slot before notifying the client. The client
+                                // may immediately reload the model for the next benchmark profile;
+                                // it must not preempt this just-finished request during the small
+                                // window between onCompleted and this Job's finally block.
+                                activeInferenceJob = null
+                            }
+                        }
+
+                        if (requestReleased) {
+                            runCatching { terminalCallback?.invoke() }
+                                .onFailure { callbackError ->
+                                    EngineDiagnostics.error(
+                                        "ipc",
+                                        "INFERENCE_TERMINAL_CALLBACK_FAILED",
+                                        callbackError
+                                    )
+                                }
+                        }
+                    }
+                    activeInferenceJob = job
+                    job.start()
+                    false
+                }
+            }
+            if (slotBusy) {
                 runCatching {
                     callback?.onError(
                         requestId,
                         "Another inference request is already active",
                         ""
                     )
-                }
-                return
-            }
-            activeRequestId.set(requestId)
-
-            activeInferenceJob = serviceScope.launch {
-                val currentReqId = requestId
-                resourceMonitor?.inferenceStarted(currentReqId)
-                var terminalCallback: (() -> Unit)? = null
-                var requestReleased = false
-                try {
-                    val e = initEngine()
-                    var tokenCount = 0
-                    val streamBuilder = StringBuilder()
-
-                    e.streamChat(request).collect { event ->
-                        // Discard events if request ID has been superseded or cancelled
-                        if (activeRequestId.get() != currentReqId) return@collect
-
-                        when (event) {
-                            is InferenceEvent.Started -> {
-                                callback?.onStarted(currentReqId, event.promptMessageCount)
-                            }
-                            is InferenceEvent.Token -> {
-                                streamBuilder.append(event.token)
-                                tokenCount++
-                                callback?.onToken(currentReqId, event.token, event.tokenIndex)
-                            }
-                            is InferenceEvent.Progress -> {
-                                when (event.phase) {
-                                    ProgressPhase.PROMPT_PREPARATION,
-                                    ProgressPhase.PROMPT_EVALUATION -> callback?.onPromptProgress(
-                                        currentReqId,
-                                        event.promptTokensProcessed,
-                                        event.promptTokensTotal,
-                                        event.elapsedMs
-                                    )
-                                    ProgressPhase.WAITING_FOR_FIRST_TOKEN -> Unit
-                                    ProgressPhase.GENERATING -> callback?.onProgress(
-                                        currentReqId,
-                                        event.tokensGenerated,
-                                        event.elapsedMs
-                                    )
-                                }
-                            }
-                            is InferenceEvent.Completed -> {
-                                // Keep the native llama.cpp ID separate from the IPC/resource ID:
-                                // token traces and Vulkan profiler rows use nativeRunId, while
-                                // INFERENCE_<requestId> RAM/thermal samples use diagnosticRunId.
-                                val nativeRunId = event.result.nativeRunId
-                                    .ifBlank { event.result.diagnosticRunId }
-                                val result = event.result.copy(
-                                    diagnosticRunId = currentReqId,
-                                    nativeRunId = nativeRunId
-                                )
-                                terminalCallback = { callback?.onCompleted(currentReqId, result) }
-                            }
-                            is InferenceEvent.Cancelled -> {
-                                val partialText = event.partialText
-                                val generatedTokens = event.tokensGenerated
-                                terminalCallback = {
-                                    callback?.onCancelled(currentReqId, partialText, generatedTokens)
-                                }
-                            }
-                            is InferenceEvent.Error -> {
-                                val message = event.throwable.message ?: event.throwable.javaClass.simpleName
-                                val partialText = event.partialText
-                                terminalCallback = {
-                                    callback?.onError(currentReqId, message, partialText)
-                                }
-                            }
-                        }
-                    }
-                } catch (cancelled: CancellationException) {
-                    Log.i(TAG, "Inference coroutine cancelled for request $currentReqId")
-                    terminalCallback = { callback?.onCancelled(currentReqId, "", 0) }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Error in streamChat IPC", t)
-                    val message = t.message ?: t.javaClass.simpleName
-                    terminalCallback = { callback?.onError(currentReqId, message, "") }
-                } finally {
-                    resourceMonitor?.inferenceFinished(currentReqId)
-                    requestReleased = activeRequestId.compareAndSet(currentReqId, null)
-                    if (requestReleased) {
-                        // Release the active slot before notifying the client. The client
-                        // may immediately reload the model for the next benchmark profile;
-                        // it must not preempt this just-finished request during the small
-                        // window between onCompleted and this Job's finally block.
-                        activeInferenceJob = null
-                    }
-                }
-
-                if (requestReleased) {
-                    runCatching { terminalCallback?.invoke() }
-                        .onFailure { callbackError ->
-                            EngineDiagnostics.error(
-                                "ipc",
-                                "INFERENCE_TERMINAL_CALLBACK_FAILED",
-                                callbackError
-                            )
-                        }
                 }
             }
         }
