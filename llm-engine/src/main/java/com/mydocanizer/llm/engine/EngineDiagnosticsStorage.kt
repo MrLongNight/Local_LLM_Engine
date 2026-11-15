@@ -14,14 +14,15 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Owns diagnostic log persistence and cross-process file access.
  *
- * Parsing/report composition stays in [EngineDiagnostics]. Each process writes
- * a separate file so the main process can export service events after the
- * :inference process exits. Full diagnostic Debug builds preserve the complete log.
+ * Each process writes a separate, size-bounded file so the main process can
+ * export service events after the :inference process exits. Both process files
+ * and the in-memory queue have fixed retention limits, including Debug builds.
  */
 internal object EngineDiagnosticsStorage {
     private const val TAG = "EngineDiagnostics"
     private const val MAX_LOG_ENTRIES = 500
-    private const val MAX_LOG_FILE_BYTES = 2L * 1024L * 1024L
+    private const val MAX_LOG_FILE_BYTES = 512L * 1024L
+    private const val MAX_PROCESS_LOG_FILES = 4
 
     private val preserveAllDebugDetails: Boolean
         get() = BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED
@@ -40,7 +41,14 @@ internal object EngineDiagnosticsStorage {
             Log.w(TAG, "Could not create diagnostics directory: ${directory.absolutePath}")
             return
         }
-        processLogFile = File(directory, "engine-${Process.myPid()}.log")
+        val currentFile = File(directory, "engine-${Process.myPid()}.log")
+        processLogFile = currentFile
+        runCatching {
+            if (!currentFile.exists()) currentFile.createNewFile()
+            currentFile.setLastModified(System.currentTimeMillis())
+            trimLogFileIfNeeded(currentFile)
+            pruneOldProcessLogs(directory, currentFile)
+        }.onFailure { Log.w(TAG, "Could not enforce diagnostic log retention", it) }
     }
 
     fun info(tag: String, event: String, details: String = "") {
@@ -50,9 +58,7 @@ internal object EngineDiagnosticsStorage {
             val partEvent = if (chunks.size == 1) event else "${event}_PART_${index + 1}_OF_${chunks.size}"
             val entry = formatLog("INFO", tag, partEvent, chunk)
             logQueue.add(entry)
-            if (!preserveAllDebugDetails) {
-                while (logQueue.size > MAX_LOG_ENTRIES) logQueue.poll()
-            }
+            while (logQueue.size > MAX_LOG_ENTRIES) logQueue.poll()
             persist(entry)
             Log.i(TAG, "[$tag] $partEvent: $chunk")
         }
@@ -95,11 +101,45 @@ internal object EngineDiagnosticsStorage {
             runCatching {
                 file.parentFile?.let { if (!it.exists()) it.mkdirs() }
                 file.appendText(entry + "\n", Charsets.UTF_8)
-                if (!preserveAllDebugDetails && file.length() > MAX_LOG_FILE_BYTES) {
-                    val recent = file.readLines(Charsets.UTF_8).takeLast(MAX_LOG_ENTRIES * 4)
-                    file.writeText(recent.joinToString(separator = "\n", postfix = "\n"), Charsets.UTF_8)
-                }
+                trimLogFileIfNeeded(file)
             }.onFailure { Log.w(TAG, "Could not persist diagnostic entry", it) }
+        }
+    }
+
+    private fun trimLogFileIfNeeded(file: File) {
+        if (!file.isFile || file.length() <= MAX_LOG_FILE_BYTES) return
+
+        val bytes = file.readBytes()
+        var start = (bytes.size - MAX_LOG_FILE_BYTES.toInt()).coerceAtLeast(0)
+        // Start at a complete line boundary; never keep a partial UTF-8/log envelope.
+        while (start < bytes.size && bytes[start] != '\\n'.code.toByte()) start++
+        if (start < bytes.size) start++
+
+        val tail = if (start < bytes.size) {
+            String(bytes, start, bytes.size - start, Charsets.UTF_8)
+        } else {
+            ""
+        }
+        val retained = tail.lineSequence()
+            .filter { it.isNotBlank() }
+            .takeLast(MAX_LOG_ENTRIES)
+            .joinToString(separator = "\\n", postfix = "\\n")
+        file.writeText(retained, Charsets.UTF_8)
+    }
+
+    private fun pruneOldProcessLogs(directory: File, currentFile: File) {
+        val files = directory.listFiles { file ->
+            file.isFile && file.name.startsWith("engine-") && file.name.endsWith(".log")
+        } ?: return
+        val retained = files
+            .sortedByDescending { it.lastModified() }
+            .take(MAX_PROCESS_LOG_FILES)
+            .toMutableSet()
+        retained += currentFile
+        files.filterNot { it in retained }.forEach { stale ->
+            if (!stale.delete()) {
+                Log.w(TAG, "Could not remove stale diagnostic process log: ${stale.name}")
+            }
         }
     }
 
