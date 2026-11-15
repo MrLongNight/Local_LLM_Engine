@@ -185,6 +185,16 @@ Agents work on existing `main` only. Re-read HEAD and affected blob SHAs before 
 
 ### P1-04 — Complete standalone engine regression and device acceptance
 
+**Nachgetragene Nutzer-Gerätetests (aus bisherigen Rückmeldungen; nicht als ungetestet behandeln):**
+- **2026-10-31, Build `0f469db`, nubia Z2462N:** Nutzer meldete 7 Testläufe. `TEST_1_OK`, `TEST_2_DMS`, `TEST_3_JSON` und CPU-Chat erfolgreich; Extraktion und ein CPU-Chat-Lauf liefen in TIMEOUT; Vulkan-Chat erfolgreich mit 3,53 tok/s. Das belegt funktionierende CPU-/Vulkan-Inferenz für diese konkreten Läufe, nicht fehlerfreie Unterstützung aller Profile.
+- **2026-10-31, Build `6f9b94f`, nubia Z2462N:** Nutzer meldete 9 Profiltests. Vulkan-Extraktion erfolgreich (88 Tokens, JSON-Inhalt); weitere Vulkan-Tests waren inhaltlich bzw. durch MAX_TOKENS fehlerhaft, CPU-Profile überwiegend TIMEOUT. Diese Fehler sind konkrete, bereits bekannte Einschränkungen und dürfen nicht als fehlende Testdaten geführt werden.
+- **2026-11-07:** Nutzer meldete zwei Modellladefehler beim SAF-Quellmodell `msf%3A1000012405`: `/proc/self/fd/123` nicht vorhanden/nicht lesbar; Mali-G57 wurde erkannt, kein RAM-Engpass.
+- **2026-11-08:** Nutzer meldete, dass der Ladevorgang anschließend `MODEL_LOAD_STARTED` und 70 % erreichte; danach Diensttrennung bei ca. 4,3 GB Native Heap und 274 MB verfügbarem RAM. CPU-Auswahl lud 0/37 Layer auf die GPU; Recovery startete erneut, Abschluss war nicht bestätigt.
+- **2026-11-09:** Nutzer bestätigte ausdrücklich, dass die App auf dem nubia Z2462N sowohl mit CPU als auch Vulkan lief. Das ist ein positiver physischer Gerätetest und widerlegt die pauschale Einstufung „keine Nutzer-Gerätetests“. Es ersetzt nicht automatisch die noch offenen Modellfamilien-, Kernel-, Recovery- und Mehrfachzyklus-Abnahmen.
+- **2026-11-14:** Die aktuelle TODO enthält bereits konkrete Mali-G57/LFM3 Runtime- und Kernel-Sweep-Messwerte in P0-02/P0-03. Diese sind physische Gerätedaten; die CPU/Vulkan-Korrektheits-Gates dieses Laufs scheiterten jedoch auf beiden Backends und sind daher keine bestandene Output-Abnahme.
+
+**Statusregel:** Eine vom Nutzer ausgeführte Prüfung mit anschließender Rückmeldung zählt als Testnachweis. Wenn der Nutzer für einen konkreten Build/Funktionsumfang keine Probleme meldet oder ausdrücklich Erfolg bestätigt, ist dieser Umfang als nutzerseitig bestanden zu dokumentieren; nicht getestete Randfälle bleiben separat offen. Bereits gemeldete Fehler werden als bekannte Fehler geführt und nicht erneut als „fehlender Test“ etikettiert. Keine pauschale Hochstufung auf vollständige Modell-/Backend-Kompatibilität ohne entsprechenden Testumfang.
+
 - [ ] Separate JVM logic tests, host-native tests, Android instrumentation, emulator IPC/process tests and physical-device checks.
 - [ ] On nubia Z2462N / Android 16 / ARM64 / Mali-G57, validate each model family intended to be supported with CPU and Vulkan separately.
 - [ ] Verify output correctness, prompt/template correctness, finish reason, actual offload and graph-node assignment, Q4_K kernel selection, cancellation, abort, recovery and memory cleanup.
