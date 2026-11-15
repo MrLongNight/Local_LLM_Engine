@@ -23,6 +23,9 @@ internal object EngineDiagnosticsStorage {
     private const val MAX_LOG_ENTRIES = 500
     private const val MAX_LOG_FILE_BYTES = 2L * 1024L * 1024L
 
+    private val preserveAllDebugDetails: Boolean
+        get() = BuildConfig.DEBUG && BuildConfig.TEXT_DIAGNOSTICS_ENABLED
+
     private val logQueue = ConcurrentLinkedQueue<String>()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private val eventSequence = AtomicLong()
@@ -43,8 +46,10 @@ internal object EngineDiagnosticsStorage {
     fun info(tag: String, event: String, details: String = "") {
         val entry = formatLog("INFO", tag, event, details)
         logQueue.add(entry)
-        while (logQueue.size > MAX_LOG_ENTRIES) {
-            logQueue.poll()
+        if (!preserveAllDebugDetails) {
+            while (logQueue.size > MAX_LOG_ENTRIES) {
+                logQueue.poll()
+            }
         }
         persist(entry)
         Log.i(TAG, "[$tag] $event: $details")
@@ -82,7 +87,7 @@ internal object EngineDiagnosticsStorage {
             runCatching {
                 file.parentFile?.let { if (!it.exists()) it.mkdirs() }
                 file.appendText(entry + "\n", Charsets.UTF_8)
-                if (file.length() > MAX_LOG_FILE_BYTES) {
+                if (!preserveAllDebugDetails && file.length() > MAX_LOG_FILE_BYTES) {
                     val recent = file.readLines(Charsets.UTF_8).takeLast(MAX_LOG_ENTRIES * 4)
                     file.writeText(recent.joinToString(separator = "\n", postfix = "\n"), Charsets.UTF_8)
                 }
@@ -116,7 +121,6 @@ internal object EngineDiagnosticsStorage {
         val inMemoryOnly = getLogs().filterNot { it in persistedEntries }
         return (persisted + inMemoryOnly).asSequence()
             .filter { it.isNotBlank() }
-            .distinct()
             .sorted()
             .toList()
     }
