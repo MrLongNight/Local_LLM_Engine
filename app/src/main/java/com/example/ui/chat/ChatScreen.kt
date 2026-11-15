@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +47,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.navigation.AppTab
+import com.example.ui.EngineViewModel
 import com.mydocanizer.llm.engine.ChatMessage
 import com.mydocanizer.llm.engine.ChatRole
 import com.mydocanizer.llm.engine.EngineState

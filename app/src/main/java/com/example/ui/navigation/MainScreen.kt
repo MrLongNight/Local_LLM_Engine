@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.navigation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +35,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.EngineViewModel
+import com.example.ui.chat.ChatScreen
+import com.example.ui.modelimport.ModelImportScreen
+import com.example.ui.settings.SettingsScreen
 import com.mydocanizer.llm.engine.EngineDiagnostics
 
 @OptIn(ExperimentalMaterial3Api::class)

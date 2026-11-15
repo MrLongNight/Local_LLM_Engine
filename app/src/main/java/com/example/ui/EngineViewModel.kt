@@ -3,6 +3,7 @@ package com.example.ui
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.viewModelScope
+import com.example.ui.navigation.AppTab
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import kotlinx.coroutines.Dispatchers
@@ -11,12 +12,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-enum class AppTab {
-    CHAT,
-    IMPORT,
-    SETTINGS
-}
 
 /**
  * Public app-level ViewModel facade. Public screen APIs and the one shared

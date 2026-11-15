@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.modelimport
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -13,10 +13,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import com.example.ui.modelimport.ActiveModelSection
-import com.example.ui.modelimport.FilePickerSection
-import com.example.ui.modelimport.ImportErrorBanner
-import com.example.ui.modelimport.importedModelsSection
+import com.example.ui.EngineViewModel
+import com.example.ui.ImportedModelEntry
 import com.mydocanizer.llm.engine.ModelInfo
 
 @Composable

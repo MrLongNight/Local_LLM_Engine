@@ -118,7 +118,11 @@ sequenceDiagram
 
 | Area | Responsibility |
 |---|---|
-| `app/src/main/java/com/example/ui/` | Prototype screens, shared `EngineViewModel` facade and feature ViewModels. |
+| `app/src/main/java/com/example/ui/navigation/` | Main navigation screen and `AppTab` navigation contract. |
+| `app/src/main/java/com/example/ui/chat/` | Chat screen, chat bubbles and inference/model-load progress UI. |
+| `app/src/main/java/com/example/ui/modelimport/` | Model-import screen and model-library/import UI sections. |
+| `app/src/main/java/com/example/ui/settings/` | Settings screen and focused settings sections. |
+| `app/src/main/java/com/example/ui/` | Shared `EngineViewModel` facade and feature ViewModels/plans pending the composition refactor. |
 | `app/src/main/java/com/example/ui/settings/sections/` | Focused composable sections used by `SettingsScreen`. |
 | App-side model helpers/ViewModels | Prototype-only model selection, app persistence and import orchestration. |
 | `llm-engine/src/main/java/com/mydocanizer/llm/engine/` | Public API, request/config/state/result/model types, diagnostics facade, and bounded event-envelope/storage/metrics/report components. |

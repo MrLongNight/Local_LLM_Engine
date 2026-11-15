@@ -1,4 +1,4 @@
-package com.example.ui
+package com.example.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.ui.EngineViewModel
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.ModelInfo
