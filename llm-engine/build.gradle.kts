@@ -23,6 +23,14 @@ val localLlmSyntheticTokenDiagnostics = providers.gradleProperty("localLlmSynthe
     }
     .getOrElse(false)
 
+// ARM CPU kernels: the baseline arm64 build has no dot-product instructions
+// (runtime log: DOTPROD=0). Every Armv8.2-A core (Cortex-A55/A75/A76 and newer, i.e. every
+// Mali-G57 phone) supports them, and they make int8 matmul (prefill, Q8_0) about 2-3x faster.
+// Set -PlocalLlmCpuArmArch= (empty) to build the portable baseline for pre-Armv8.2 devices.
+val localLlmCpuArmArch = providers.gradleProperty("localLlmCpuArmArch")
+    .getOrElse("armv8.2-a+dotprod")
+    .trim()
+
 android {
     namespace = "com.mydocanizer.llm.engine"
     compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -69,6 +77,10 @@ android {
             cmake {
                 cppFlags += listOf("-std=c++17")
                 arguments += listOf("-DANDROID_STL=c++_shared")
+                // Consumed by ggml's ARM CPU backend only; ignored for the x86_64 ABI.
+                if (localLlmCpuArmArch.isNotEmpty()) {
+                    arguments += listOf("-DGGML_CPU_ARM_ARCH=$localLlmCpuArmArch")
+                }
             }
         }
 
