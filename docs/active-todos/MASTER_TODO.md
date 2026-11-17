@@ -32,8 +32,9 @@
 
 ### P0-01 — Fehlgeschlagenen Unit-Test-Build reparieren
 
-- [ ] **P0-01a** 🛠️ AGENT · CODE/CI · XS · Impact H — Den veralteten Parameter `includeFullDebugTrace = false` aus `EngineDiagnosticsTest.kt` entfernen oder nur bei nachgewiesenem Testbedarf einen passenden Vertrag herstellen. Danach ausschließlich `:llm-engine:testDebugUnitTest` vollständig ausführen.
+- [x] **P0-01a** 🛠️ AGENT · CODE/CI · XS · Impact H — Den veralteten Parameter `includeFullDebugTrace = false` aus `EngineDiagnosticsTest.kt` entfernt (Commit `96100a0`). CI-Run #669 hat `:llm-engine:testDebugUnitTest` vollständig ausgeführt und den Kotlin-Testcode erfolgreich kompiliert; anschließend scheiterten sieben unabhängige Report-Assertions. Diese Folgeprüfung ist in P0-01c erfasst.
 - [ ] **P0-01b** 🛠️ AGENT · CODE/CI · S · Impact M — Den Unit-CI-Reportpfad so korrigieren, dass Compiler-/Gradle-Taskfehler den Lauf sicher fehlschlagen lassen und fehlende JUnit-Berichte niemals als erfolgreicher Testlauf oder als „keine fehlgeschlagenen Assertions“ dargestellt werden.
+- [ ] **P0-01c** 🛠️ AGENT · DIAGNOSE/CODE/TESTS · S · Impact H — Die sieben in CI-Run #669 fehlgeschlagenen `EngineDiagnosticsTest`-Assertions gegen `EngineDiagnosticsReportBuilder` untersuchen. Veraltete Abschnittslabels und strukturierte Felddarstellung von tatsächlichem Verlust diagnostischer Inhalte unterscheiden; Gate-Zusammenfassung und Priorisierung berücksichtigen. Regressionstests nur anhand des belegten Reportvertrags aktualisieren und den Builder nur bei nachgewiesenem Funktionsfehler ändern. Danach `:llm-engine:testDebugUnitTest` vollständig ausführen. Weitere unabhängige Ursachen vor einer Implementierung separat aufteilen.
 
 ### P0-02 — Fehlerhafte oder unverständliche Modellausgaben
 
