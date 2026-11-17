@@ -6,7 +6,7 @@ An Android development project for building, correcting, optimizing and hardenin
 
 ## Modules
 
-- `:app` — prototype/demo UI, model selection, configuration, diagnostics and on-device test flows.
+- `:app` — prototype/test harness for diagnostics and on-device engine verification.
 - `:llm-engine` — reusable Android library, public Kotlin API, AIDL process boundary, JNI and native `llama.cpp` integration.
 - `:llm-engine/src/main/cpp/llama.cpp` — pinned upstream Git submodule. Current pin: `a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5`.
 
@@ -28,7 +28,7 @@ cd Local_LLM_Engine
 git submodule update --init --recursive
 ```
 
-Build the demo APK and instrumentation APK:
+Build the test APKs:
 
 ```bash
 gradle --no-daemon :app:assembleDebug :llm-engine:assembleDebugAndroidTest
@@ -50,12 +50,10 @@ gradle --no-daemon --continue --build-cache :llm-engine:testDebugUnitTest :app:t
 
 ## Documentation
 
-All project documentation is organized by document type under [`docs/`](docs/README.md):
-
+- [Documentation index](docs/README.md) — canonical navigation.
+- [Master TODO](docs/active-todos/MASTER_TODO.md) — the **only active task list**, including priorities and device tasks.
 - [Technical documentation](docs/technical/) — architecture, model compatibility, CI signing and change history.
-- [Mermaid architecture](docs/technical/ARCHITECTURE.md) — canonical module, process and inference-flow diagrams.
-- [Master TODO](docs/active-todos/MASTER_TODO.md) — the single prioritized list for engine correctness, optimization, reliability and product-readiness.
-- [Planning](docs/planning/) — engine implementation history. Future consumer integration is intentionally deferred.
 - [Agent rules](docs/AGENTS.md) — repository invariants and documentation ownership.
+- [Archive](docs/archive/README.md) — completed refactoring records and historical audits; no active tasks.
 
-Start with the [documentation index](docs/README.md). The myDocAnizer-Mobile integration guide defines the active migration contract. The audit report evaluates the previous 89 open tasks and records which prototype tasks remain relevant.
+There is no separate implementation plan, roadmap or second task order. Integration with `myDocAnizer_Mobile` remains deferred until explicit user GO.

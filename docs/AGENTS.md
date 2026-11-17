@@ -12,7 +12,6 @@
 - Reuse the single `EngineViewModel` instance across demo screens. Do not create parallel engine/ViewModel instances for separate screens.
 - Treat verbose text traces as an explicitly enabled prototype-debugging aid only; keep them out of ordinary operational diagnostics. Do not add an independent release/distribution checklist to this engine repository.
 
-
 ## Project structure and change discipline
 
 - Inspect the existing module/package tree and the closest related implementation before editing. Decide the final file, package and module for the change before writing code.
@@ -28,10 +27,11 @@
 
 ## Mermaid architecture documentation
 
-- [`technical/ARCHITECTURE.md`](technical/ARCHITECTURE.md) is the single canonical, version-controlled Mermaid architecture document. Do not create competing diagrams in README, the implementation plan or status files.
+- [`technical/ARCHITECTURE.md`](technical/ARCHITECTURE.md) is the single canonical, version-controlled Mermaid architecture document. Do not create competing diagrams in README, archived notes or status files.
 - Review the Mermaid diagrams whenever a code change affects modules, package ownership, component responsibility, dependency direction, public API, model import/persistence flow, AIDL/Binder communication, process lifecycle, JNI/native flow or backend selection.
 - If architecture or control flow changes, update the affected Mermaid diagram(s) and source-layout table in the same commit as the code change. Never knowingly leave the diagrams stale.
 - If a change does not alter the architecture or control flow, keep the diagrams unchanged; do not add decorative or duplicate diagrams.
+
 ## Build and verification rules
 
 - No Gradle wrapper launcher scripts/JAR are checked in. CI uses Gradle 9.3.1 and JDK 21; Java source/target compatibility remains 17.
@@ -42,10 +42,10 @@
 ## Documentation ownership
 
 - `README.md` is the concise repository entry page; `docs/README.md` is the documentation index.
-- Keep technical references in `docs/technical/`, active task trackers in `docs/active-todos/`, and broader plans/integration strategy in `docs/planning/`.
-- `docs/active-todos/MASTER_TODO.md` is the only active task register for the entire repository. Sort every new measure by priority, merge duplicates, and do not create another active TODO, roadmap, status or cache checklist.
-- `docs/planning/IMPLEMENTATION_PLAN.md` owns technical decisions and dated historical evidence; it is not a second active task queue.
-- Completed refactoring evidence belongs in `docs/history/`; do not treat archived checklists as currently planned work.
-- `docs/planning/INTEGRATION_MYDOCANIZER.md` is an important downstream integration plan. Maintain it against the current public library API; do not remove it because the engine prototype is a separate repository.
-- Update the canonical document in place. Do not duplicate content across README, changelog, planning and status documents; use links to the canonical location.
+- Keep technical references in `docs/technical/`, the sole active task register in `docs/active-todos/MASTER_TODO.md`, and historical material in `docs/archive/`.
+- `docs/active-todos/MASTER_TODO.md` is the only active task register for the entire repository. Sort every new measure by priority, merge duplicates, and do not create another active TODO, roadmap, planning order, status or cache checklist.
+- Do not maintain a separate implementation plan or parallel execution sequence. Every current and future task belongs in the Master TODO, in its appropriate priority section.
+- `docs/archive/` contains completed refactoring records and historical audits only. Archived documents are not task sources; any still-relevant follow-up must be expressed once in the Master TODO.
+- Do not create or maintain a separate consumer-integration plan. Analysis or planning for integration with another repository, including `myDocAnizer_Mobile`, remains deferred until the user explicitly gives GO.
+- Update the canonical document in place. Do not duplicate content across README, changelog, archive and status documents; use links to the canonical location.
 - Keep links relative to the final file location and update all inbound references when moving a document.

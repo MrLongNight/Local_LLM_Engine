@@ -1,3 +1,5 @@
+> **Archiviert am 17.11.2026:** Abgeschlossene Refactorings und damalige Verifikationsnachweise. Dieses Dokument enthält keine offenen Aufgaben.
+
 # Refactoring status — Local_LLM_Engine
 
 **Live tracker:** InferenceServiceProcessTest split (Task 5).
@@ -68,7 +70,7 @@ Sizes: main screen 3,957 bytes; every new section below 4.4 KB. No `@Preview` ex
 
 Code commits: extraction `ecffd68be8608356d0c2f3dfefbfd5b0ae1fe383`; import correction `5c6caea4c508a073ff245dd118bd3b1844066575`. Unit Tests run `43567003341` on `5c6caea`: completed / success. The earlier Android run for `5c6caea` was cancelled before artifact upload; the later integrated Android run `43572476045` on `75c93b0` built and uploaded both APKs and completed `:llm-engine:connectedDebugAndroidTest` successfully.
 
-Detailed mapping and file sizes: [ModelImportScreen extraction report](../REFACTORING_MODEL_IMPORT.md).
+Detailed mapping and file sizes: [ModelImportScreen extraction report](REFACTORING_MODEL_IMPORT.md).
 
 ## Task 5 — InferenceServiceProcessTest split
 
@@ -93,6 +95,6 @@ Commits: `319ff84`, `3988702`, `f2d3947`, `2b6b5d2`, `b526616`.
 
 Final Unit Tests run `43572193823` on code SHA `b526616ab54c7fa75ac552eef04502c3404650e8`: completed / success, including host-only native tests. The first Android run `43572193817` for that SHA was cancelled by the next push. The same split was then verified in integrated run `43572476045` on `75c93b043ca74006c39066b57cacdd1c5223680d`: APK and instrumentation APK built, both artifacts uploaded (IDs `14104649692` and `14105172838`), and `:llm-engine:connectedDebugAndroidTest` completed successfully. Compare `b526616...75c93b0`: no split test files changed.
 
-Detailed method map, byte comparisons and class sizes: [InferenceServiceProcessTest split report](../REFACTORING_TESTS.md).
+Detailed method map, byte comparisons and class sizes: [InferenceServiceProcessTest split report](REFACTORING_TESTS.md).
 
-This file is historical evidence only. Do not add new planned tasks here; add them to [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
+This file is historical evidence only. Do not add new planned tasks here; add them to [`../../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).

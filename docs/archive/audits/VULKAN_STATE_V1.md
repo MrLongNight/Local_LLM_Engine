@@ -1,3 +1,5 @@
+> **Archiviert am 17.11.2026:** V1-Quellcode-Audit vom 15.11.2026. Die Befunde beziehen sich auf den im Dokument genannten historischen Commit und sind keine aktuelle Code- oder Geräteabnahme.
+
 # VULKAN_STATE — V1 Code-Audit
 
 **Stand:** 15.11.2026  
@@ -6,7 +8,7 @@
 **Geprüfter Repository-Stand:** 9361618d1454f30e7df19e2269dff28a069d942f  
 **Gepinntes llama.cpp-Submodul:** ggml-org/llama.cpp, Commit a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5
 
-> **Prüfstands-Hinweis (2026-11-17):** Dieses V1-Dokument bleibt ein historischer Quellcode-Audit des oben genannten Repository-Commits `9361618d1454f30e7df19e2269dff28a069d942f`. Der aktuelle Branch `main` steht inzwischen auf `590dc68030ff37035d8cc5d424c49a609b127cc8`. Die V1-Einzelbefunde sind damit nicht automatisch für den aktuellen HEAD neu bestätigt; aktuelle offene Maßnahmen und CI-Befunde stehen in [`active-todos/MASTER_TODO.md`](active-todos/MASTER_TODO.md).
+> **Prüfstands-Hinweis (2026-11-17):** Dieses V1-Dokument bleibt ein historischer Quellcode-Audit des oben genannten Repository-Commits `9361618d1454f30e7df19e2269dff28a069d942f`. Der aktuelle Branch `main` steht inzwischen auf `590dc68030ff37035d8cc5d424c49a609b127cc8`. Die V1-Einzelbefunde sind damit nicht automatisch für den aktuellen HEAD neu bestätigt; aktuelle offene Maßnahmen und CI-Befunde stehen in [`MASTER_TODO.md`](../../active-todos/MASTER_TODO.md).
 
 **V1-Modus:** ausschließlich Quellcode- und Dateiprüfung. Keine Code-Fixes, keine Sweeps und keine neuen Geräte-Benchmarks.
 

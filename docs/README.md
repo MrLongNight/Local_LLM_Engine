@@ -1,6 +1,6 @@
 # Documentation index
 
-Project documentation is grouped by purpose. Each topic has one canonical document; this index is navigation, not a second copy of the underlying content.
+This index is navigation only. The repository has exactly one active task register; historical documents are kept separately in the archive.
 
 ## Technical documentation
 
@@ -11,28 +11,13 @@ Located in [`technical/`](technical/):
 - [`CI_DEBUG_SIGNING.md`](technical/CI_DEBUG_SIGNING.md) — persistent signing setup for the prototype's side-by-side Debug APK and the temporary-key fallback.
 - [`CHANGELOG.md`](technical/CHANGELOG.md) — implementation changes and verified historical milestones.
 
-## Active todos
+## Active tasks
 
-Located in [`active-todos/`](active-todos/):
+[`active-todos/MASTER_TODO.md`](active-todos/MASTER_TODO.md) is the **only active task list** for the entire repository. It contains priorities, agent work and required device checks. No separate implementation plan, roadmap or parallel task order exists.
 
-- [`MASTER_TODO.md`](active-todos/MASTER_TODO.md) — the only active, priority-sorted queue for engine correctness, optimization, reliability and product-readiness.
+## Archive
 
-## Planning
-
-Located in [`planning/`](planning/):
-
-- [`IMPLEMENTATION_PLAN.md`](planning/IMPLEMENTATION_PLAN.md) — overall engine implementation plan, technical decisions and dated historical CI/device snapshots.
-- [`INTEGRATION_MYDOCANIZER.md`](planning/INTEGRATION_MYDOCANIZER.md) — deferred integration-planning placeholder. Do not expand or execute until explicitly requested.
-
-
-## Completed implementation history
-
-- [`REFACTORING_COMPLETED.md`](history/REFACTORING_COMPLETED.md) — historical evidence for completed UI, Model Import and instrumentation test refactors.
-
-## Refactoring analyses
-
-- [`REFACTORING_MODEL_IMPORT.md`](REFACTORING_MODEL_IMPORT.md) — extraction record and verification for `ModelImportScreen`.
-- [`REFACTORING_TESTS.md`](REFACTORING_TESTS.md) — method-to-class map and lifecycle analysis for `InferenceServiceProcessTest`.
+[`archive/README.md`](archive/README.md) indexes completed refactoring records and historical audits. Archived files are reference material only; they do not contain active tasks.
 
 ## Repository rules
 
