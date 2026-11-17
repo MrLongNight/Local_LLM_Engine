@@ -59,20 +59,15 @@
 ### P1-01 — Vulkan-Bottleneck mit einem reproduzierbaren Diagnosepfad eingrenzen
 
 - [ ] 🛠️ **AGENT · CODE/DIAGNOSTIK · M · Impact H** — Einen fokussierten Diagnosepfad für Prefill, Time-to-first-token und Decode bereitstellen. backendSyncWaitUs, Queue-Submit/Fence-Wait, Logits-Readback, Graph-Aufteilung und tatsächlich ausgelagerte Operationen pro Lauf korrelieren. Keine allgemeine Benchmark-Matrix ohne konkrete offene Hypothese aufbauen.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Auf dem Mali-G57 einen normalen, reproduzierbaren Qwen3-4B-Instruct-Q4_K_M-Vulkan-Lauf mit den festgelegten Referenzparametern durchführen und den kompakten Laufbericht samt Antwortkorrektheit bereitstellen. Keine Demo-Benchmark-Oberfläche als Voraussetzung verwenden.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Bei begründetem Kernelverdacht einen gezielten A/B-Lauf mit identischem Modell/Prompt und bestätigtem Kernel-/Offload-Nachweis durchführen. Nur erweitern, wenn das Ergebnis weitere Ursachen offenlässt.
 
 ### P1-02 — Memory-Guard und Ressourcenlebenszyklus belastbar machen
 
 - [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Modell-RAM-Schätzung, KV-/Context-Anteil, Laufzeitreserve, Guard-Grenzen, dynamische Context-Reduktion und Unload bei Speicherdruck mit Grenzfällen absichern. Schätzwerte klar von tatsächlich gemessenen Spitzenwerten trennen.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Spitzen-PSS, Native-/Java-Heap, Graphics-PSS und verfügbaren Vulkan-Heap beim Modellladen und bei Inferenz erfassen. Memory-Pressure-Unload und die Ressourcenfreigabe nach Prozessende prüfen.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Fünf kombinierte Load-/Inference-/Abort-/Timeout-/Reconnect-Zyklen ausführen und nach jedem Zyklus Prozesse, offene Deskriptoren sowie fortschreitendes Ressourcenwachstum kontrollieren.
 
 ### P1-03 — Modellquellen und Downloads robust behandeln
 
 - [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact M** — HTTPS-Download gegen unbeschränkten Speicherverbrauch absichern: Content-Length nur als Hinweis behandeln, harte konfigurierbare Dateigröße/Abbruchgrenze und freien Speicher berücksichtigen, temporäre Dateien bei Fehler/Abbruch entfernen und nur validierte GGUF-Dateien atomar veröffentlichen.
 - [ ] 🛠️ **AGENT · CODE · M · Impact M** — Retry/Backoff und Resume-Verhalten für Remote-Downloads nur dann implementieren, wenn RemoteUrl als unterstützte Engine-Funktion bestehen bleibt. Range-/ETag-Konsistenz und unvollständige Dateien müssen abgesichert sein.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Direkten SAF-Ladevorgang mit mindestens einem lokalen Provider und den tatsächlich verwendeten Dokumentanbietern prüfen. No-copy nur bei regulärem seekbarem mmap-fähigem FD akzeptieren; Descriptor-Freigabe nach Unload/Service-Tod prüfen.
 
 ### P1-04 — Laufzeitstatus und Diagnostik verlässlich halten
 
@@ -99,15 +94,14 @@
 - [ ] 🛠️ **AGENT · CODE/TESTS · S · Impact M** — Test-Fixtures und Testdateien nur dort vereinfachen oder aufteilen, wo echte Duplikate, falsche Testebenen oder konkret erschwerte Diagnose vorliegen. Bestehende Assertions nicht nur aus Stilgründen umschreiben.
 - [ ] 🛠️ **AGENT · CODE/DOKU · S · Impact M** — Architektur-, Build-, Modellkompatibilitäts- und Diagnostikdokumentation nach tatsächlichen Engine-Änderungen aktualisieren. Historische CI-/Gerätebelege klar vom aktuellen Status trennen.
 
-## Einmalige Geräte-Abnahme — keine parallelen Sammel-Checklisten
+## Einmalige Geräte-Abnahme — vier nicht überlappende Pakete
 
-Die folgenden fünf Pakete sind voneinander abgegrenzt. Dieselbe Prüfung wird nicht zusätzlich in einer allgemeinen „alle Punkte abnehmen“-Aufgabe wiederholt.
+Jedes Paket wird genau einmal auf dem echten nubia Z2462N / Android 16 / ARM64 / Mali-G57 ausgeführt. Die Agent-Aufgaben oben betreffen Code, JVM/Host und Android-Instrumentation; sie ersetzen diese vier Hardware-Nachweise nicht.
 
-- **D1 – Ausgabequalität und Modellverhalten:** vereinbarte unterstützte GGUF-Modelle; CPU/Vulkan mit identischen Eingaben; Template, Tokenizer, Special Tokens, UTF-8, Ausgabeform, Finish-Grund und Folgeanfragen.
-- **D2 – Mali-Vulkan-Kernel und Performance:** ein reproduzierbarer Referenzlauf; tatsächlicher Offload/Graph-Backend; Q4_K-Decode/Prefill und nur bei konkretem Befund ein gezielter A/B-Kernelvergleich. Performance erst nach bestandenem D1 werten.
-- **D3 – Abbruch und Recovery:** Timeout-Konfiguration; kooperativer Abbruch; Abort-Eskalation; gezieltes Beenden des :inference-Prozesses; Reconnect und erfolgreiche Folgeinferenz in fünf kombinierten Zyklen.
-- **D4 – Dateideskriptoren und Modellquellen:** realer SAF-Provider; direkter FD-Transfer; geeignete/ungeeignete Descriptor-Arten; Unload, Modellwechsel und Prozessende; keine doppelte FD-/Modellkopie.
-- **D5 – Speicher und Lifecycle:** Load-/Inference-Spitzenwerte; Memory-Guard; dynamischer Context; Prozessende und Ressourcenfreigabe; kein fortschreitendes RAM-/FD-Wachstum.
+- [ ] 📱 **DU · ENDGERÄT · Impact H · D1 – Ausgabequalität:** vereinbarte unterstützte GGUF-Modelle auf CPU und Vulkan mit identischen Eingaben prüfen. Template, Tokenizer, Special Tokens, UTF-8, Ausgabeform, Finish-Grund und Folgeanfragen kontrollieren.
+- [ ] 📱 **DU · ENDGERÄT · Impact H · D2 – Mali-Vulkan und Leistung:** einen reproduzierbaren Qwen3-4B-Instruct-Q4_K_M-Referenzlauf durchführen; tatsächlichen Offload, Graph-Backend-Verteilung, Q4_K-Decode/Prefill, TTFT und Decode messen. Nur bei konkretem Kernelverdacht einen gezielten A/B-Lauf ergänzen. Leistung erst nach bestandenem D1 werten.
+- [ ] 📱 **DU · ENDGERÄT · Impact H · D3 – Abbruch, Recovery und Ressourcen:** Timeout-Konfiguration prüfen; kooperativen Abbruch und Abort-Eskalation auslösen; den :inference-Prozess gezielt beenden; Reconnect und Folgeinferenz in fünf kombinierten Zyklen ausführen. Gleichzeitig PSS, Native-/Java-Heap, Graphics-PSS, Vulkan-Heap soweit verfügbar, offene FDs und Ressourcenfreigabe des überlebenden Prozesses erfassen.
+- [ ] 📱 **DU · ENDGERÄT · Impact H · D4 – Modellquellen und Dateideskriptoren:** GGUF von einem realen lokalen SAF-Provider und den tatsächlich benötigten weiteren Providern laden, wechseln und entladen. Direkten FD-Transfer nur bei regulärem seekbarem mmap-fähigem Descriptor akzeptieren; alternative Importpfade, FD-Besitz und Freigabe nach Unload/Service-Tod prüfen.
 
 ## Kriterien für „Engine fertig“
 
