@@ -25,6 +25,10 @@ Local_LLM_Engine ist ein zusätzlicher Entwicklungsprototyp für die LLM-Engine 
 | Speicher | Eigene Modellablage und alte feste Native-Konfiguration. | ModelMemoryGuard, dynamischer Context, Prozess-Ressourcenmonitor, Entladen bei Speicherdruck. | **Hoch:** besser kontrollierbarer RAM-Bedarf; reale Spitzenwerte am Zielgerät bleiben nötig. |
 | Diagnostik | Teilweise synthetische Hardware-/TPS-Schätzwerte. | Backend-, Laufzeit-, Token-, Speicher- und Prozessdiagnostik. | **Mittel/Hoch:** echte Laufzeitdaten statt Schätzungen; Demo-Diagnoseoberfläche wird nicht übernommen. |
 
+### Bestehende LLM-Dokumentation in der Ziel-App
+
+Die Haupt-App enthält mit `docs/LLM_NATIVE_PRODUCTION_PLAN.md` weiterhin eine Datei mit der Überschrift **„Lokale LLM-Funktionen – Live-Todo“**, Stand 27.10.2026. Sie dokumentiert wichtige App-Fachanforderungen, bildet aber eine zweite Arbeitsliste neben der neuen Engine-Migrationsliste und enthält teils ältere Status-/Nachweisangaben. Ihr Inhalt bestätigt unter anderem die festen Branchenzweige ohne Modellaufruf in `generateRulesFromPrompt()`, die direkte Heuristik in `queryDocumentAssistant()`, den gemischten Follow-up-/Fallback-Pfad, deaktivierte DMS-Grammatiken und geschätzte Hardware-TPS. Diese relevanten Fachanforderungen müssen in der Migration erhalten bleiben; veraltete Laufzeit- und Statusaussagen sind abzugleichen. Nicht zur Engine gehörende Scanner-/DMS-Aufgaben sollen nicht in die Engine-Liste übernommen werden. Die Zusammenführung der drei zentralen LLM-Dokumente der Haupt-App ist deshalb als eigener Agent-Punkt im neuen Master-TODO erfasst.
+
 ### Build- und Integrationsbefund
 
 - Beide Projekte verwenden aktuell AGP 9.1.1, Kotlin 2.2.10, NDK 27.2.12479018 und CMake 3.22.1. Ein echter Consumer-Build fehlt noch.

@@ -28,6 +28,7 @@
 
 - [ ] 🛠️ **AGENT · CODE · M · Impact H** — Alle derzeitigen Aufrufer der alten Engine in myDocAnizer_Mobile inventarisieren: Dokument-First-/Second-Run, DMS-Extraktion, Chat-Assistent, Regelgenerator, Benchmarks, Modellimport/-auswahl und Persistenz. Für jeden Aufrufer den neuen LocalLlmEngine-Request, das Ergebnis-/Event-Mapping und den Fallback definieren.
 - [ ] 🛠️ **AGENT · CODE · M · Impact H** — Den Consumer-Vertrag für einen appweiten Engine-Owner, Modellidentität/-quelle, EngineConfig, Streaming, Progress, Cancel/Timeout, Status, Fehler und Close festlegen. Keine Compose-, Room- oder DMS-Typen in :llm-engine einführen.
+- [ ] 🛠️ **AGENT · CODE/DOKU · S · Impact M** — Die App-Dokumente `docs/LLM_NATIVE_PRODUCTION_PLAN.md`, `docs/LLM_INTEGRATION_DOCUMENTATION.md` und `docs/LLM_FUNKTIONEN_UND_PROZESSE_DOKUMENTATION.md` gegen diese Migration abgleichen. Noch nötige App-Fachanforderungen übernehmen, veraltete Engine-Annahmen korrigieren und die bisherige separate LLM-Live-TODO-Liste als nicht mehr eigenständige Arbeitswarteschlange kennzeichnen. Reine Scanner-/DMS-Arbeiten außerhalb des Engine-Wechsels bleiben dort separat.
 
 ### P0-03 — Ausschließlich das Bibliotheksmodul in myDocAnizer einbinden
 
