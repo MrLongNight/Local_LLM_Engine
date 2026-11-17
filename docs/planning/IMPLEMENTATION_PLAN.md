@@ -1,6 +1,6 @@
 > **Dokumenttyp:** Übergeordneter Umsetzungsplan mit technischen Entscheidungen und datierter Nachweishistorie. CI- und Hardware-Statusblöcke sind historische Snapshots und kein aktueller Live-Status. Aktuell geplante Maßnahmen stehen ausschließlich in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md). Die nachfolgenden CI-, Geräte- und Umsetzungsstände sind datierte historische Snapshots, keine zweite aktive Aufgabenliste. Verbindliche Agent-Regeln stehen in `../AGENTS.md`.
 
-> **Aktueller Projektzweck (17.11.2026):** Dieser Plan dokumentiert die historische Entwicklung des Engine-Prototyps. Das aktive Ziel ist jetzt, die bisherige LLM-Laufzeit in myDocAnizer-Mobile durch das Modul :llm-engine zu ersetzen. Die verbindliche neue Reihenfolge und alle offenen Arbeiten stehen ausschließlich in der Master-TODO-Liste. Prototyp-Demo-UI und Demo-Modellverwaltung sind nicht Teil der Migration.
+> **Aktueller Arbeitsfokus (17.11.2026):** Zuerst wird ausschließlich :llm-engine selbst auf korrekte, reproduzierbare und robuste Inferenz, verlässliche CPU-/Vulkan-Ausführung, Ressourcenverhalten und gemessene Leistung gehärtet. Die Abschnitte zur späteren Consumer-Integration sind historische Planung und keine aktive Aufgabenreihenfolge. Es findet keine neue Analyse der Zielanwendung oder beider Repositories statt, bevor der Nutzer ausdrücklich GO gibt.
 
 # CI-/APK-Nachweis-Snapshot vom 12.11.2026 (historisch)
 

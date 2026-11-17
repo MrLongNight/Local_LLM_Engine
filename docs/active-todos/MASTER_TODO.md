@@ -1,116 +1,124 @@
-# Master-TODO — Engine-Migration nach myDocAnizer-Mobile
+# Master-TODO — LLM Engine: Korrektheit, Optimierung und Produktreife
 
-**Ziel:** Die im Repository entwickelte Engine-Laufzeit aus dem Modul :llm-engine ersetzt die bisherige LLM-Engine-Logik in MrLongNight/myDocAnizer_Mobile. Local_LLM_Engine ist der Entwicklungsprototyp und Testträger; seine Demo-App :app ist kein eigenständiges Ziel und wird nicht in die Haupt-App übernommen.
+**Primäres Ziel:** Die Engine-Logik in :llm-engine wird eigenständig so weit entwickelt, korrigiert und optimiert, bis sie zuverlässig, reproduzierbar und für den vorgesehenen produktiven Einsatz geeignet ist. Der Prototyp ist Entwicklungs- und Testträger; die Demo-Oberfläche ist kein Entwicklungsziel.
 
-**Geprüfte Basis:**
-- Engine-Prototyp: main, Commit 5180ce1abbb0f8d5dfe3fe490d5eb80f207936c9
-- Haupt-App: main, Commit 772caa5b6df2921fab1cdbba5f2cca6b487d4f3d
-- llama.cpp-Pin des Engine-Moduls: a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5
+**Geprüfte Codebasis:** main, HEAD 5180ce1abbb0f8d5dfe3fe490d5eb80f207936c9 (Dokumentationsstand vom 17.11.2026). Vor jeder Implementierung den aktuellen main-HEAD und alle betroffenen Dateien erneut prüfen.
 
-> **Einzige aktive Aufgabenliste.** Die vollständige Einzelbewertung der vorherigen 89 offenen Punkte und die Code-Altlastenprüfung liegen in [docs/audits/2026-11-17-myDocAnizer-migration-audit.md](../audits/2026-11-17-myDocAnizer-migration-audit.md). Das Audit ist ein Prüfbericht, keine zweite Aufgabenwarteschlange.
+> **Scope-Grenze:** Eine Analyse oder Planung der späteren Integration in myDocAnizer_Mobile findet ausdrücklich noch nicht statt. Auch mögliche Anpassungen an beiden Repositories vor dieser Integration werden erst nach einem ausdrücklichen GO untersucht. Bis dahin konzentrieren sich sämtliche aktiven Maßnahmen ausschließlich auf die Engine selbst.
 
-## Verantwortlichkeit und Aufwand
+> **Einzige aktive Aufgabenliste.** Keine parallelen aktiven TODO-/Abnahme-Listen. Technische Berichte und historische Nachweise dürfen Details dokumentieren, aber keine zusätzlichen Arbeitswarteschlangen eröffnen.
 
-- 🛠️ **AGENT · CODE** — Analyse, Implementierung, Refactoring, Tests, CI und Dokumentation.
-- 📱 **DU · ENDGERÄT** — reale Ausführung auf nubia Z2462N / Android 16 / ARM64 / Mali-G57 oder mit einem echten SAF-/Cloud-Provider. CI und Emulator ersetzen diese Prüfung nicht.
-- Bei gemischten Punkten sind Codevorbereitung und Gerätetest getrennte Aufgaben.
-- Aufwand ist eine grobe Coding-Schätzung: **XS** bis 2 h, **S** 2–4 h, **M** 0,5–1 Tag, **L** 1–3 Tage, **XL** mehr als 3 Tage. Für Gerätetests steht „—“; sie sind keine Agent-Coding-Stunden.
-- App-Impact: **H** hoch, **M** mittel, **L** gering.
+## Verantwortlichkeit, Aufwand und Impact
 
-## P0 — Integrationsgrundlage und Engine-Wechsel
+- 🛠️ **AGENT · CODE** — Codeanalyse, Implementierung, gezielte Tests, CI, Refactoring und Engine-Dokumentation.
+- 📱 **DU · ENDGERÄT** — Tests, die echte Laufzeit auf dem nubia Z2462N / Android 16 / ARM64 / Mali-G57 oder echte Android-Dateianbieter voraussetzen. Diese Aufgaben sind keine Agent-Coding-Aufgaben.
+- **Agent-Aufwand:** XS bis ca. 2 h · S ca. 2–4 h · M ca. 0,5–1 Arbeitstag · L ca. 1–3 Arbeitstage · XL mehr als 3 Arbeitstage.
+- **Engine-Impact:** H = hoch · M = mittel · L = gering. Gemeint ist der erwartete Nutzen für Korrektheit, Zuverlässigkeit, Leistung oder Wartbarkeit der Engine.
 
-### P0-01 — Verifizierten Test-Baselinefehler beheben
+## P0 — Inferenzkorrektheit und kritische Laufzeitfehler
 
-- [ ] 🛠️ **AGENT · CODE/CI · XS · Impact H** — EngineDiagnosticsTest.kt verwendet weiterhin includeFullDebugTrace = false, obwohl EngineDiagnostics.buildCompactReportForTest() aktuell nur lines entgegennimmt. Den veralteten Parameter entfernen oder nur dann einen API-Vertrag ergänzen, wenn ein echter Testfall ihn benötigt. Danach :llm-engine:testDebugUnitTest und :app:testDebugUnitTest vollständig ausführen; JUnit-XML für beide Module kontrollieren.
-- [ ] 🛠️ **AGENT · CODE/CI · S · Impact M** — CI-Auswertung so prüfen, dass Compiler-/Taskfehler eindeutig als fehlgeschlagener Testlauf ausgewiesen werden und fehlende JUnit-Berichte nicht als „keine Assertions fehlgeschlagen“ gelten.
+### P0-01 — Fehlgeschlagenen Unit-Test-Build reparieren
 
-### P0-02 — Consumer-Vertrag und Ziel-App-Aufrufer festlegen
+- [ ] 🛠️ **AGENT · CODE/CI · XS · Impact H** — EngineDiagnosticsTest.kt übergibt weiterhin includeFullDebugTrace = false an EngineDiagnostics.buildCompactReportForTest(), obwohl die Produktionsfunktion aktuell nur lines entgegennimmt. Den veralteten Parameter entfernen oder nur bei einem belegten Testbedarf einen kompatiblen Vertrag herstellen. Danach :llm-engine:testDebugUnitTest vollständig ausführen.
+- [ ] 🛠️ **AGENT · CODE/CI · S · Impact M** — Sicherstellen, dass CI Compiler-/Taskfehler als fehlgeschlagenen Lauf ausweist und fehlende JUnit-Berichte nicht als erfolgreiche Tests oder als „keine fehlgeschlagenen Assertions“ erscheinen.
 
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — Alle derzeitigen Aufrufer der alten Engine in myDocAnizer_Mobile inventarisieren: Dokument-First-/Second-Run, DMS-Extraktion, Chat-Assistent, Regelgenerator, Benchmarks, Modellimport/-auswahl und Persistenz. Für jeden Aufrufer den neuen LocalLlmEngine-Request, das Ergebnis-/Event-Mapping und den Fallback definieren.
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — Den Consumer-Vertrag für einen appweiten Engine-Owner, Modellidentität/-quelle, EngineConfig, Streaming, Progress, Cancel/Timeout, Status, Fehler und Close festlegen. Keine Compose-, Room- oder DMS-Typen in :llm-engine einführen.
-- [ ] 🛠️ **AGENT · CODE/DOKU · S · Impact M** — Die App-Dokumente `docs/LLM_NATIVE_PRODUCTION_PLAN.md`, `docs/LLM_INTEGRATION_DOCUMENTATION.md` und `docs/LLM_FUNKTIONEN_UND_PROZESSE_DOKUMENTATION.md` gegen diese Migration abgleichen. Noch nötige App-Fachanforderungen übernehmen, veraltete Engine-Annahmen korrigieren und die bisherige separate LLM-Live-TODO-Liste als nicht mehr eigenständige Arbeitswarteschlange kennzeichnen. Reine Scanner-/DMS-Arbeiten außerhalb des Engine-Wechsels bleiben dort separat.
+### P0-02 — Ursachen fehlerhafter oder unverständlicher Modellausgaben finden
 
-### P0-03 — Ausschließlich das Bibliotheksmodul in myDocAnizer einbinden
+- [ ] 🛠️ **AGENT · CODE · M–L · Impact H** — Modellmetadaten, Architektur-/Tokenizer-Erkennung, Chat-Template, Special Tokens, EOS-/Finish-Behandlung, Sampler, Context-Zustand und CPU-/Vulkan-Unterschiede systematisch anhand konkreter fehlerhafter Läufe untersuchen. Keine Symptome durch willkürliche Prompt- oder Parameteränderungen kaschieren.
+- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Kleine deterministische und datenschutzneutrale Korrektheits-Fixtures für die tatsächlich unterstützten Modellfamilien bereitstellen. Nur Modelle/Architekturen als unterstützt ausweisen, für die der Engine-Pfad real geprüft ist.
+- [ ] 🛠️ **AGENT · CODE/TESTS · S · Impact H** — Ausgabe-Gates absichern: valides UTF-8, erwartete Antwortstruktur, keine unerwarteten Steuer-/Special-Tokens, korrekter Finish-Grund, keine leeren Scheinerfolge und definierte Behandlung abgeschnittener Ausgaben.
 
-- [ ] 🛠️ **AGENT · CODE/BUILD · M · Impact H** — Engine-Repository mit geprüftem Commit 5180ce1abbb0f8d5dfe3fe490d5eb80f207936c9 als gepinnte Abhängigkeit aufnehmen und ausschließlich :llm-engine in settings.gradle.kts einbinden. Die Prototyp-Demo-App nicht einbinden. Rekursives llama.cpp-Submodul und Build-Konfiguration im Consumer-Build nachweisen.
-- [ ] 🛠️ **AGENT · CODE/BUILD · M · Impact H** — Gradle-/Kotlin-/AGP-/NDK-/CMake-Kompatibilität im tatsächlichen Haupt-App-Build verifizieren. Die Baselines sind aktuell weitgehend gleich (AGP 9.1.1, Kotlin 2.2.10, NDK 27.2.12479018, CMake 3.22.1); ABI-Filter prüfen: :llm-engine baut derzeit ARM64/x86_64, die Haupt-App besitzt zusätzlich 32-Bit-Filter.
+### P0-03 — CPU-/Vulkan-Korrektheit vor Performanceänderungen absichern
 
-### P0-04 — Eine einzige native Laufzeit und einen einzigen Engine-Owner verwenden
+- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Vergleichs-Fixtures mit identischem Modell, Nachrichten, Template, Context, Sampler und Tokenlimit für CPU und Vulkan einrichten. Numerisch bedingte Abweichungen von Template-, Tokenizer-, Cache- oder Zustandsfehlern unterscheiden.
+- [ ] 🛠️ **AGENT · CODE · S · Impact H** — Korrektheits-Gates als Voraussetzung für Backend-, Kernel-, Quantisierungs- und Default-Änderungen festlegen. Keine schnellere Konfiguration übernehmen, wenn Ausgabequalität oder Backend-Parität regressiert.
 
-- [ ] 🛠️ **AGENT · CODE · L–XL · Impact H** — In myDocAnizer_Mobile einen appweiten Besitzer für LocalLlmEngine implementieren und alle ViewModels/Services über diesen Owner anbinden. Keine Engine pro Bildschirm oder Anfrage erzeugen. Lifecycle-Close nur am tatsächlichen Owner.
-- [ ] 🛠️ **AGENT · CODE/BUILD · M · Impact H** — Die alte LlamaCppInferenceEngine-JNI-Laufzeit in der Haupt-App aus dem aktiven Aufrufpfad nehmen. Den Consumer-Build so umstellen, dass nur die native Bibliothek aus :llm-engine eingebunden wird und nicht versehentlich zwei llama.cpp-Versionen bzw. zwei JNI-Laufzeiten parallel gebaut oder geladen werden.
-- [ ] 🛠️ **AGENT · CODE · L · Impact H** — Bestehende Modelloperationen, Chat-Requests und Inferenz-Events zentral über den neuen Owner routen. Doppeltes Laden und parallele native Inferenzpfade verhindern.
+### P0-04 — Mali-G57-Q4_K-Decode-Pfad gezielt untersuchen
 
-### P0-05 — DMS-Fachlogik erhalten und an die neue Engine anbinden
+- [ ] 🛠️ **AGENT · CODE · M · Impact H** — Aktuelle Q4_K-Dispatch-/Policy-Auswahl und dokumentierten BASE-DMMV-Standardpfad mit dem beobachteten Mali-G57-Verhalten abgleichen. Unterstützte Kernel, Quantisierungskombinationen und Voraussetzungen aus dem tatsächlichen Code/Upstream belegen; keine spekulativen Shader- oder llama.cpp-Patches.
+- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Den tatsächlichen Fallback bei nicht verfügbarer Q4_K×Q8_1-Pipeline automatisiert absichern. Fallback muss korrekte Quantisierungsparameter und einen kompatiblen Kernel wählen; Fehler dürfen nicht als erfolgreicher Vulkan-Pfad verschleiert werden.
 
-- [ ] 🛠️ **AGENT · CODE · L · Impact H** — DMS-Prompts, OCR-Vorfilter, Department-Auswahl, First-/Second-Run-Logik, JSON-Parser, Grounding, Zusatzfelder und Ordnerpfad-Regeln aus der alten Engine-Fassade in der App-Fachschicht erhalten bzw. gezielt separieren. Die wiederverwendbare Engine bleibt modell- und appagnostisch.
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — Sämtliche Dokument-Klassifikationspfade auf Requests/Results der neuen Engine abbilden und Fehler/Abbruch/Timeout explizit in App-Ergebnisse übersetzen. Kein unbemerkter Erfolg durch Fallback nach einem abgebrochenen Request.
+### P0-05 — Abbruch, Timeout und Prozess-Recovery deterministisch machen
 
-### P0-06 — Modellquelle und Modellidentität ohne unnötige Kopie erhalten
+- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Native Cancellation, Timeout-Fristen, Abort-Eskalation, parallele Modelloperationen, Service-Disconnect, veraltete Callbacks und Folgeinferenz nach Prozess-Reconnect mit gezielten Regressionstests absichern.
+- [ ] 🛠️ **AGENT · CODE · S · Impact H** — Den tatsächlich wirksamen Timeout-Snapshot und abortGracePeriodMs pro Request eindeutig nachvollziehbar halten. Gespeicherte Modellkonfiguration darf unbeabsichtigt keine zu kurze alte Grace Period reaktivieren.
+- [ ] 🛠️ **AGENT · CODE/TESTS · S · Impact H** — Sicherstellen, dass ein abgebrochener oder abgelaufener Request niemals durch einen verspäteten Callback als erfolgreicher Abschluss überschrieben wird und dass die alte Service-PID nicht mit einer neuen verwechselt wird.
 
-- [ ] 🛠️ **AGENT · CODE · L · Impact H** — Die Modellverwaltung der Haupt-App behalten, aber den Modellladepfad auf ModelSource umstellen. Für ContentUri den vorhandenen direkten SAF-FD-Weg der Engine verwenden (copy=false), die URI als Modellidentität speichern und das Descriptor-Lifecycle über Binder korrekt halten. Nur Provider, die keinen regulären seekbaren/mmap-fähigen FD bereitstellen, benötigen einen explizit behandelten Alternativpfad.
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — Letztes ausgewähltes Modell und seine wiederherstellbare Quelle/Konfiguration in der Haupt-App erhalten. Wiederöffnung der SAF-Quelle nach Prozessneustart mit gespeicherten URI-Berechtigungen testen; keine Modellkopie oder Umbenennung ohne technischen Grund.
-- [ ] 🛠️ **AGENT · CODE · S · Impact M** — Die bisherigen Modellimport-/Kopierpfade auf Doppelverarbeitung prüfen. Modellkatalog und App-Downloadlogik nicht zusätzlich durch eine zweite Demo-Modellbibliothek ersetzen.
+### P0-06 — Modellladen und Descriptor-Eigentum absichern
 
-### P0-07 — Modell- und Backend-Konfiguration sauber übertragen
+- [ ] 🛠️ **AGENT · ANDROID-TESTS · M · Impact H** — Instrumentation für erfolgreiches/fehlgeschlagenes Laden, Modellwechsel, Unload, Abbruch und Service-Neustart ausführen. Client-, Binder-, Service- und native Descriptor-Kopien sowie ihre Schließzeitpunkte prüfen.
+- [ ] 🛠️ **AGENT · CODE · M · Impact H** — SAF-Descriptor-Voraussetzungen und Fehlerpfade eindeutig behandeln. Ein nicht regulärer, nicht seekbarer oder nicht mmap-fähiger Descriptor darf nicht als reguläre Modell-Datei angenommen werden. Eine unterstützte Importalternative muss klar vom direkten No-copy-Pfad getrennt bleiben.
 
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — Bestehende App-Modellparameter auf EngineConfig abbilden: Context, Batch/Microbatch, CPU-Threads, BackendPreference, GPU-Layer, Sampler und Timeout. Keine stillen Festwerte wie den bisherigen gpuLayers = 0-Aufruf in der App übernehmen.
-- [ ] 🛠️ **AGENT · CODE · S · Impact H** — BackendInfo, tatsächliche aktive Backend-Auswahl und geladene Modellmetadaten in den App-Status übersetzen. Eine Vulkan-Auswahl oder ein angeforderter Layer-Wert darf nicht als bestätigter GPU-Offload angezeigt werden.
+### P0-07 — Context- und Cache-Zustand korrekt halten
 
-### P0-08 — KI-Funktionen und Fallbacks fachlich korrekt verdrahten
+- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Modellbewussten Cache und Context-Lifecycle bei Context-Shift, Abbruch, Fehler, Modellwechsel, Unload, Prozessneustart und Speicher-Eviction mit gezielten Regressionstests absichern.
+- [ ] 🛠️ **AGENT · CODE · S · Impact H** — Cache-Wiederverwendung nur zulassen, wenn alle zugehörigen Modell-/KV-/Sampler-/Context-Zustände nachweislich synchron sind. Bei Unsicherheit vollständig invalidieren statt potenziell beschädigten Zustand weiterzuverwenden.
 
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — generateRulesFromPrompt() untersuchen und den aktuellen festen Branchen-if/when-Generator ersetzen oder klar als Vorlagenmodus ausweisen. Echte KI-Regelvorschläge müssen über :llm-engine laufen; Kotlin bleibt für Schema-Validierung, Konfliktprüfung und Commit in die Regelverwaltung zuständig.
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — queryDocumentAssistant() und queryDocumentAssistantWithFollowUps() auf einen eindeutigen Ablauf aus Dokumentkontext, Modellantwort und deterministischen Tools umstellen. LlmToolExecutor darf strukturierte Datenabfragen ausführen, aber eine Heuristikantwort nicht als Modellgenerierung ausgeben.
-- [ ] 🛠️ **AGENT · CODE · S · Impact H** — Regel-/Tool-Fallbacks explizit als Fallback kennzeichnen und sicherstellen, dass Cancel/Timeout/native Fehler nicht als normale erfolgreiche LLM-Antwort erscheinen.
+## P1 — Vulkan-Leistung, Ressourcen und robuste Modellquellen
 
-## P1 — Korrektheit und reale Zuverlässigkeit in der Haupt-App
+### P1-01 — Vulkan-Bottleneck mit einem reproduzierbaren Diagnosepfad eingrenzen
 
-### P1-01 — Modell-Ausgabekorrektheit für die Zielmodellmatrix sichern
+- [ ] 🛠️ **AGENT · CODE/DIAGNOSTIK · M · Impact H** — Einen fokussierten Diagnosepfad für Prefill, Time-to-first-token und Decode bereitstellen. backendSyncWaitUs, Queue-Submit/Fence-Wait, Logits-Readback, Graph-Aufteilung und tatsächlich ausgelagerte Operationen pro Lauf korrelieren. Keine allgemeine Benchmark-Matrix ohne konkrete offene Hypothese aufbauen.
+- [ ] 📱 **DU · ENDGERÄT · Impact H** — Auf dem Mali-G57 einen normalen, reproduzierbaren Qwen3-4B-Instruct-Q4_K_M-Vulkan-Lauf mit den festgelegten Referenzparametern durchführen und den kompakten Laufbericht samt Antwortkorrektheit bereitstellen. Keine Demo-Benchmark-Oberfläche als Voraussetzung verwenden.
+- [ ] 📱 **DU · ENDGERÄT · Impact H** — Bei begründetem Kernelverdacht einen gezielten A/B-Lauf mit identischem Modell/Prompt und bestätigtem Kernel-/Offload-Nachweis durchführen. Nur erweitern, wenn das Ergebnis weitere Ursachen offenlässt.
 
-- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Synthetische, deterministische Fixtures für tatsächlich unterstützte Modellfamilien ergänzen. Chat-Template, Tokenizer, Special Tokens, UTF-8, JSON-Struktur, EOS/Finish-Grund, Mehrfachanfragen und Context-Neustart prüfen.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Die identischen Fixtures bzw. festgelegten Testprompts mit identischer GGUF-Datei und Konfiguration auf CPU und Vulkan ausführen. Fehlerhafte Ausgabe von numerischen Backendunterschieden, falschem Template und vorzeitigem EOS trennen.
+### P1-02 — Memory-Guard und Ressourcenlebenszyklus belastbar machen
 
-### P1-02 — Mali-G57-Vulkanpfad belegen, erst danach optimieren
+- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Modell-RAM-Schätzung, KV-/Context-Anteil, Laufzeitreserve, Guard-Grenzen, dynamische Context-Reduktion und Unload bei Speicherdruck mit Grenzfällen absichern. Schätzwerte klar von tatsächlich gemessenen Spitzenwerten trennen.
+- [ ] 📱 **DU · ENDGERÄT · Impact H** — Spitzen-PSS, Native-/Java-Heap, Graphics-PSS und verfügbaren Vulkan-Heap beim Modellladen und bei Inferenz erfassen. Memory-Pressure-Unload und die Ressourcenfreigabe nach Prozessende prüfen.
+- [ ] 📱 **DU · ENDGERÄT · Impact H** — Fünf kombinierte Load-/Inference-/Abort-/Timeout-/Reconnect-Zyklen ausführen und nach jedem Zyklus Prozesse, offene Deskriptoren sowie fortschreitendes Ressourcenwachstum kontrollieren.
 
-- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Prüfen, ob der aktuelle Mali-Q4_K-Policy-/Fallbackpfad für die von myDocAnizer unterstützten Modelle korrekt kompiliert und diagnostiziert wird. Keine Default-Änderung allein aus theoretischen TPS-Schätzungen.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Q4_K-Decode/Prefill, Batch>1, tatsächlich ausgelagerte Layer, Graph-Node-Verteilung sowie Q5_K/Q6_K nur für vorhandene Zielmodelle auf dem Mali-G57 prüfen. Den Treiber-Fallback bei nicht verfügbaren Pipelines nachweisen.
+### P1-03 — Modellquellen und Downloads robust behandeln
 
-### P1-03 — Cancel, Timeout, Prozessabbruch und Recovery nachweisen
+- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact M** — HTTPS-Download gegen unbeschränkten Speicherverbrauch absichern: Content-Length nur als Hinweis behandeln, harte konfigurierbare Dateigröße/Abbruchgrenze und freien Speicher berücksichtigen, temporäre Dateien bei Fehler/Abbruch entfernen und nur validierte GGUF-Dateien atomar veröffentlichen.
+- [ ] 🛠️ **AGENT · CODE · M · Impact M** — Retry/Backoff und Resume-Verhalten für Remote-Downloads nur dann implementieren, wenn RemoteUrl als unterstützte Engine-Funktion bestehen bleibt. Range-/ETag-Konsistenz und unvollständige Dateien müssen abgesichert sein.
+- [ ] 📱 **DU · ENDGERÄT · Impact H** — Direkten SAF-Ladevorgang mit mindestens einem lokalen Provider und den tatsächlich verwendeten Dokumentanbietern prüfen. No-copy nur bei regulärem seekbarem mmap-fähigem FD akzeptieren; Descriptor-Freigabe nach Unload/Service-Tod prüfen.
 
-- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Regressionen für native Cancellation, Timeout-Fristen, Abort-Eskalation, Service-Disconnect, veraltete Callbacks, Modell-Neuladen und Folgeinferenz in JVM-/Instrumentation-Tests abdecken.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Auf dem nubia aktive Generierung abbrechen, Timeout auslösen, Inference-Service-Prozess beenden, Reconnect und Folgeinferenz prüfen. Mindestens fünf wiederholte Zyklen durchführen und den tatsächlichen abortGracePeriodMs-Wert dokumentieren.
+### P1-04 — Laufzeitstatus und Diagnostik verlässlich halten
 
-### P1-04 — SAF-/Descriptor-Lifecycle auf echten Providerquellen prüfen
+- [ ] 🛠️ **AGENT · CODE · S · Impact M** — Backend-Status, angeforderte GPU-Layer, tatsächlich ausgelagerte Layer/Graph-Nodes, CPU-Fallback, Finish-Grund und reale Tokenmetriken strikt unterscheiden. Keine Backend-Auswahl oder angeforderte Layerzahl als Beweis für GPU-Ausführung ausgeben.
+- [ ] 🛠️ **AGENT · CODE/DIAGNOSTIK · M · Impact M** — Diagnostikexport kompakt, strukturiert und größenbegrenzt halten. Redundante Ereignisse vermeiden, wichtige Fehler-/Backend-/Timeout-/Speicherereignisse priorisieren und Lauf-IDs zur Korrelation erhalten.
+- [ ] 🛠️ **AGENT · CODE/TESTS · S · Impact M** — Modell-Lade- und Inferenzfortschritt müssen die tatsächlichen Phasen widerspiegeln. Keine künstlichen 0→100-Sprünge vor abgeschlossener Initialisierung oder vorliegende Ready-Zustände vor nativer Einsatzbereitschaft melden.
 
-- [ ] 🛠️ **AGENT · ANDROID-TESTS · M · Impact H** — Descriptor-Instrumentation für direkten SAF-FD, fehlgeschlagenes Laden, Modellwechsel, Unload, Abbruch und Service-Reconnect ausführen. Client-/Service-FD-Eigentum, Schließzeitpunkt und Fehlerpfade testen.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Ein GGUF direkt von einem lokalen SAF-Provider und von tatsächlich genutzten Cloud-/Dokumentenprovidern laden, ohne Kopie, sofern der Provider einen seekbaren regulären FD liefert. Andernfalls Alternativpfad/Fehlermeldung prüfen und anschließend FD-Freigabe bestätigen.
+## P2 — Codequalität, Funktionsumfang und nachhaltige Wartbarkeit
 
-### P1-05 — Memory-Guard und Ressourcenlebenszyklus real prüfen
+### P2-01 — Nicht benötigte Engine-Funktionen und Altlasten evidenzbasiert bereinigen
 
-- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Tests für Modell-RAM-Schätzung, dynamischen Context, Guard-Grenzen, Unload bei Speicherdruck, Abbruch und Reconnect ausführen. Cache-/Context-Zustand nach Fehler und Prozesswechsel sicher invalidieren.
-- [ ] 📱 **DU · ENDGERÄT · Impact H** — Spitzen-PSS, Native-/Java-Heap, Graphics-PSS und Vulkan-Heap soweit auslesbar messen. Memory-Pressure-Entladen sowie fünf Load-/Inference-/Kill-/Reconnect-Zyklen prüfen; kein wachsendes Ressourcen- oder FD-Leck.
+- [ ] 🛠️ **AGENT · CODE · M · Impact M** — Öffentliche Engine-API, ModelSource-Varianten, Build-Flags, Diagnosefunktionen und native Test-Hooks inventarisieren. Jede Funktion als Kern, optional, Diagnose/Test-only oder entbehrlich klassifizieren und tatsächliche Aufrufer/Tests dokumentieren.
+- [ ] 🛠️ **AGENT · CODE · S · Impact M** — AssetPath und RemoteUrl gegen echte Engine-Anforderungen und Testabdeckung prüfen. Halb unterstützte Varianten entweder vollständig absichern oder nach Prüfung der öffentlichen API gezielt zur Entfernung vorschlagen; keine stillen API-Brüche.
+- [ ] 🛠️ **AGENT · CODE · M · Impact M** — TODO/FIXME/Stub-/Dummy-/konstante Rückgabepfade im Engine-Modul einschließlich JNI/CMake/Buildvarianten prüfen. Nur belegte ungenutzte oder irreführende Implementierungen entfernen; absichtliche Fallbacks und Plattformstubs behalten und eindeutig kennzeichnen.
 
-### P1-06 — Hardwarestatus und Leistungswerte nicht als Messwerte ausgeben, wenn sie Schätzungen sind
+### P2-02 — Große Komponenten nur bei konkretem Nutzen refaktorieren
 
-- [ ] 🛠️ **AGENT · CODE · S · Impact M** — Nach Migration checkGpuAccelerationSupport() und dessen veralteten CPU-AAR-Kommentar aus dem alten Enginepfad entfernen. LlmHardwareDetector.detectVulkanGpu() durch echte Backend-Diagnostik ergänzen/ersetzen. Synthetische CPU-Scores und estimateTps() eindeutig als Schätzung kennzeichnen oder nicht mehr für Performanceanzeigen verwenden.
+- [ ] 🛠️ **AGENT · CODE · L · Impact M** — InferenceClient nach klaren Besitz-/Lifecycle-Grenzen aufteilen, falls die aktuellen Koppelungen weitere Fehlerbehebung oder zuverlässige Tests konkret behindern. Fassade, Zustandsbesitz und öffentliche API stabil halten.
+- [ ] 🛠️ **AGENT · CODE · XL · Impact L** — Native JNI-Implementierung nur dann in fachlich getrennte Einheiten zerlegen, wenn dadurch ein konkreter Wartungs-/Fehlergrund gelöst wird. JNI-Exports, Exception-Barriere, EngineInstance-Ownership und Upstream-Submodul unverändert absichern.
 
-### P1-07 — Test- und Kompatibilitätsnachweise an den Consumer binden
+### P2-03 — Build, Tests und technische Dokumentation konsistent halten
 
-- [ ] 🛠️ **AGENT · CODE/CI · M · Impact H** — JVM-, Host-native, Android-Instrumentation und tatsächlichen myDocAnizer_Mobile-Consumer-Build separat ausführen. Bibliotheksrevision, Consumer-Commit, ABI, Modellkonfiguration und vorhandene Artefakte nachvollziehbar dokumentieren.
-- [ ] 🛠️ **AGENT · CODE/DOKU · S · Impact M** — Modell-Kompatibilitätsstatus ausschließlich anhand der tatsächlichen Engine-/Gerätenachweise aktualisieren.
+- [ ] 🛠️ **AGENT · CODE/CI · M · Impact H** — Reproduzierbarkeit von Gradle-, NDK-, CMake-, ABI- und rekursivem llama.cpp-Submodul-Build sicherstellen. Host-native, JVM- und Android-Instrumentationstests in der passenden Ausführungsebene halten.
+- [ ] 🛠️ **AGENT · CODE/TESTS · S · Impact M** — Test-Fixtures und Testdateien nur dort vereinfachen oder aufteilen, wo echte Duplikate, falsche Testebenen oder konkret erschwerte Diagnose vorliegen. Bestehende Assertions nicht nur aus Stilgründen umschreiben.
+- [ ] 🛠️ **AGENT · CODE/DOKU · S · Impact M** — Architektur-, Build-, Modellkompatibilitäts- und Diagnostikdokumentation nach tatsächlichen Engine-Änderungen aktualisieren. Historische CI-/Gerätebelege klar vom aktuellen Status trennen.
 
-## P2 — Nach erfolgreichem Engine-Wechsel aufräumen
+## Einmalige Geräte-Abnahme — keine parallelen Sammel-Checklisten
 
-- [ ] 🛠️ **AGENT · CODE · M · Impact H** — Nach nachgewiesener Consumer-Nutzung den alten CPU-only JNI-/CMake-Aufbau aus myDocAnizer_Mobile entfernen: LlamaCppInferenceEngine-Native-Methoden, llama_android.cpp, alten CMake-Zielpfad und das nicht mehr benötigte alte llama.cpp-Submodul. DMS-Prompts/Parser/Fallbacks vorher separat erhalten und sämtliche Referenzen suchen.
-- [ ] 🛠️ **AGENT · CODE · M · Impact M** — Ein Funktionsinventar von :llm-engine erstellen: Kern, optionale Modellquelle, Diagnose/Test-only, Demo-only und veraltet. AssetPath, RemoteUrl und optionale Diagnosepfade nur behalten, wenn Consumer-Aufrufer oder ein konkreter Testzweck existieren.
-- [ ] 🛠️ **AGENT · CODE/TESTS · M · Impact H** — Architekturgrenze automatisiert absichern: :llm-engine darf keine Compose-, UI-, Room- oder DMS-Abhängigkeit erhalten. JVM-, Android- und Host-C++-Tests in der passenden Testebene halten.
-- [ ] 🛠️ **AGENT · CODE · XL · Impact L** — Große InferenceClient-/JNI-Dateien nur dann weiter aufteilen, wenn die Migration einen konkreten Wartungs- oder Fehlergrund zeigt. Keine großflächigen Refactorings als Vorbedingung für den Engine-Wechsel.
+Die folgenden fünf Pakete sind voneinander abgegrenzt. Dieselbe Prüfung wird nicht zusätzlich in einer allgemeinen „alle Punkte abnehmen“-Aufgabe wiederholt.
 
-## Gemeinsame Architekturregeln
+- **D1 – Ausgabequalität und Modellverhalten:** vereinbarte unterstützte GGUF-Modelle; CPU/Vulkan mit identischen Eingaben; Template, Tokenizer, Special Tokens, UTF-8, Ausgabeform, Finish-Grund und Folgeanfragen.
+- **D2 – Mali-Vulkan-Kernel und Performance:** ein reproduzierbarer Referenzlauf; tatsächlicher Offload/Graph-Backend; Q4_K-Decode/Prefill und nur bei konkretem Befund ein gezielter A/B-Kernelvergleich. Performance erst nach bestandenem D1 werten.
+- **D3 – Abbruch und Recovery:** Timeout-Konfiguration; kooperativer Abbruch; Abort-Eskalation; gezieltes Beenden des :inference-Prozesses; Reconnect und erfolgreiche Folgeinferenz in fünf kombinierten Zyklen.
+- **D4 – Dateideskriptoren und Modellquellen:** realer SAF-Provider; direkter FD-Transfer; geeignete/ungeeignete Descriptor-Arten; Unload, Modellwechsel und Prozessende; keine doppelte FD-/Modellkopie.
+- **D5 – Speicher und Lifecycle:** Load-/Inference-Spitzenwerte; Memory-Guard; dynamischer Context; Prozessende und Ressourcenfreigabe; kein fortschreitendes RAM-/FD-Wachstum.
 
-- Nur :llm-engine aus dem Prototyp in die Haupt-App integrieren; niemals die Prototyp-Demo-App.
-- Keine Änderungen am öffentlichen Kotlin-Vertrag, AIDL-/Parcelable-Layout, JNI-Symbolen oder ABI ohne konkrete Notwendigkeit und passende Regressionstests.
-- Das llama.cpp-Submodul bleibt unverändert; Android-/Mali-Anpassungen gehören in kontrollierte Build-Overlays.
-- Korrektheit vor Performance. Kein Vulkan-/Offload-/TPS-Versprechen ohne tatsächlichen Laufzeitnachweis.
-- App-spezifische DMS-Logik bleibt in myDocAnizer_Mobile; die Engine bleibt generisch.
-- Dateien, API-Varianten und Abhängigkeiten nur entfernen, wenn Aufrufer-, Build- und Testsuche die Entbehrlichkeit bestätigt.
+## Kriterien für „Engine fertig“
+
+Die Engine gilt erst dann als ausreichend fertig für den nächsten Projektabschnitt, wenn:
+
+1. JVM-, Host-native und Android-Instrumentation-Builds/Tests für den aktuellen Stand erfolgreich sind.
+2. Jede ausdrücklich unterstützte Modellfamilie auf den vorgesehenen Backendpfaden sinnvolle, korrekte und reproduzierbare Ausgaben liefert.
+3. CPU/Vulkan-Auswahl, tatsächlicher Offload und Fallbacks nachvollziehbar und korrekt sind.
+4. Abbruch, Timeouts, Service-Abstürze, Reconnect und Folgeinferenz deterministisch funktionieren.
+5. Modellladen, Descriptor-Eigentum, Context/Cache und Memory-Guard keine Daten-/Ressourcenfehler verursachen.
+6. Die auf dem Zielgerät gemessene Leistung und der Ressourcenbedarf für die vorgesehenen Modelle nachvollziehbar dokumentiert und akzeptabel sind.
+7. Keine bekannten kritischen Platzhalter, irreführenden Erfolgszustände oder ungenutzten parallelen Laufzeitpfade übrig sind.
+
+**Nicht Teil dieser Liste:** Demo-Screens, Demo-ViewModel-Vererbung, Demo-Navigation, Demo-Modellbibliothek, Demo-Speicherpräferenzen sowie jede Prüfung oder Planung der späteren Integration in ein anderes Repository. Diese Themen werden nicht bearbeitet, bevor sie ausdrücklich neu beauftragt werden.

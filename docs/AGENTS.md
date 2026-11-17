@@ -22,7 +22,7 @@
 - Do not create temporary implementations in a convenient file and plan to move them later. Start in the correct final location.
 - Create a new class/file only when it has a clear, cohesive responsibility or is required by an existing package/module boundary. Do not split files just to reduce line count; do not allow one file/class to accumulate unrelated responsibilities.
 - Preserve the dependency direction: `:app` may depend on `:llm-engine`; the reusable library must never depend on the app or its UI/DMS types. Keep public contracts separate from `internal` implementation details.
-- This repository is an engine-development prototype. The current target is to replace the old inference runtime in `MrLongNight/myDocAnizer_Mobile` with `:llm-engine`. Integrate only the library module; keep the prototype `:app` as a test harness and preserve DMS/OCR/model-catalog responsibilities in the main app.
+- Current work scope: improve, correct, optimize and harden the reusable `:llm-engine` itself. The prototype `:app` may be used only as a test harness; its demo UI is not a development target. Do not analyse or plan integration with another repository, including `myDocAnizer_Mobile`, until the user explicitly gives GO.
 - Keep tests beside the responsibility they verify, using the matching `test` or `androidTest` source set. Do not duplicate existing test helpers, fake services or fixtures.
 - Keep each task's code diff limited to the requested behavior and necessary tests/docs. If a broader refactor is genuinely unavoidable, explain why and isolate it into a separate, explicitly tracked commit.
 

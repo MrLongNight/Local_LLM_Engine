@@ -15,18 +15,15 @@ Located in [`technical/`](technical/):
 
 Located in [`active-todos/`](active-todos/):
 
-- [`MASTER_TODO.md`](active-todos/MASTER_TODO.md) — the only active, priority-sorted implementation queue for migrating the engine into myDocAnizer-Mobile.
+- [`MASTER_TODO.md`](active-todos/MASTER_TODO.md) — the only active, priority-sorted queue for engine correctness, optimization, reliability and product-readiness.
 
 ## Planning
 
 Located in [`planning/`](planning/):
 
 - [`IMPLEMENTATION_PLAN.md`](planning/IMPLEMENTATION_PLAN.md) — overall engine implementation plan, technical decisions and dated historical CI/device snapshots.
-- [`INTEGRATION_MYDOCANIZER.md`](planning/INTEGRATION_MYDOCANIZER.md) — active migration contract for replacing the old inference runtime in myDocAnizer-Mobile with `:llm-engine`.
+- [`INTEGRATION_MYDOCANIZER.md`](planning/INTEGRATION_MYDOCANIZER.md) — deferred integration-planning placeholder. Do not expand or execute until explicitly requested.
 
-## Audits
-
-- [`2026-11-17-myDocAnizer-migration-audit.md`](audits/2026-11-17-myDocAnizer-migration-audit.md) — individual review of all 89 previously open checklist items, app impact/agent effort, code leftovers and the revised device-test packages.
 
 ## Completed implementation history
 
