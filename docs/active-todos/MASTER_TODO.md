@@ -30,7 +30,7 @@
 
 #### P1 — CI-Regression und fehlende Testnachweise
 
-- [ ] Den fehlgeschlagenen Unit-Test-Job `43812816059` vollständig auswerten. Den ersten konkreten Gradle-Fehler beheben, anschließend beide JVM-Test-Tasks erneut ausführen und sicherstellen, dass JUnit-XML für `:llm-engine` tatsächlich erzeugt und als Artefakt hochgeladen wird.
+- [ ] Den veralteten Aufruf in `EngineDiagnosticsTest.kt:228` korrigieren: `includeFullDebugTrace = false` entfernen oder die gewünschte Test-Semantik explizit und kompatibel in der Report-API wiederherstellen. Danach beide JVM-Test-Tasks erneut ausführen und sicherstellen, dass JUnit-XML für `:llm-engine` tatsächlich erzeugt und als Artefakt hochgeladen wird.
 - [ ] Testreport-Erzeugung so absichern, dass ein Task-Konfigurations-/Kompilierungsfehler nicht als „keine fehlgeschlagenen Assertions“ missverstanden wird. Job-Fehler und Assertion-Fehler getrennt ausweisen.
 
 #### P1 — Datenschutzkonflikt in Debug-Diagnostik
