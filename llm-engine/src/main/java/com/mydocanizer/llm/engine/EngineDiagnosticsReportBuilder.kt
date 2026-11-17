@@ -353,6 +353,22 @@ internal object EngineDiagnosticsReportBuilder {
                     field(it, "status") == "FAIL"
             }
             .takeLast(8)
+        // A PASS row is already represented by a matching matrix/backend-acceptance
+        // result. Preserve standalone gate evidence when no such result row exists.
+        fun correctnessGateKey(line: String, statusField: String): String? {
+            val profile = field(line, "profile")?.uppercase(Locale.US) ?: return null
+            val backend = field(line, "backend")?.uppercase(Locale.US) ?: return null
+            val status = field(line, statusField)?.uppercase(Locale.US) ?: return null
+            return "$profile/$backend/$status"
+        }
+        val representedGateResults = fullMatrixRows.mapNotNull { correctnessGateKey(it, "gateStatus") }.toSet()
+        val standaloneCorrectnessGatePasses = kotlinLines
+            .filter {
+                eventName(it) == "CORRECTNESS_GATE_RESULT" &&
+                    field(it, "status") == "PASS"
+            }
+            .filterNot { correctnessGateKey(it, "status") in representedGateResults }
+            .takeLast(8)
         val performanceEvents = (
             kotlinLines
                 .filterNot { it.contains("RESOURCE_SNAPSHOT") }
@@ -704,6 +720,10 @@ internal object EngineDiagnosticsReportBuilder {
             if (correctnessGateFailures.isNotEmpty()) {
                 appendLine("Zusätzliche Korrektheits-Gate-Fehlerdetails:")
                 correctnessGateFailures.forEach { appendLine(readableEventLine(it, 520)) }
+            }
+            if (standaloneCorrectnessGatePasses.isNotEmpty()) {
+                appendLine("Zusätzliche Korrektheits-Gate-Nachweise ohne zugehörige Matrix-/Abnahmeresultzeile:")
+                standaloneCorrectnessGatePasses.forEach { appendLine(readableEventLine(it, 520)) }
             }
             appendLine()
             appendLine("[2] VULKAN-LAUFZEIT – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET")

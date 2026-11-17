@@ -235,7 +235,7 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("budgetKnown=0"))
         assertTrue(
             report.indexOf("[VULKAN-LAUFZEITBELEG") <
-                report.indexOf("[WICHTIGE EREIGNISSE")
+                report.indexOf("[5] WICHTIGE EREIGNISSE")
         )
         assertTrue(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
     }
@@ -293,9 +293,13 @@ class EngineDiagnosticsTest {
         val report = EngineDiagnostics.buildCompactReportForTest(nativeSelections + sweepEvents)
 
         assertTrue(report.contains("Q4_K-/DMMV-KERNELPFAD"))
-        assertTrue(report.contains("override=AUTO,selected=SUBGROUP,subgroupSize=16"))
-        assertTrue(report.contains("override=SUBGROUP,selected=SUBGROUP,subgroupSize=16"))
-        assertTrue(report.contains("override=LARGE,selected=LARGE,subgroupSize=16"))
+        // Native fields are rendered as separate readable bullets, not a comma-joined raw field row.
+        assertTrue(report.contains("override=AUTO"))
+        assertTrue(report.contains("selected=SUBGROUP"))
+        assertTrue(report.contains("override=SUBGROUP"))
+        assertTrue(report.contains("override=LARGE"))
+        assertTrue(report.contains("selected=LARGE"))
+        assertTrue(report.contains("subgroupSize=16"))
         assertTrue(report.contains("VULKAN_DMMV_SWEEP_STARTED"))
         assertTrue(report.contains("VULKAN_DMMV_SWEEP_PLAN"))
         assertTrue(report.contains("workgroup=AUTO,workgroupNativeId=0"))
@@ -329,8 +333,11 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("selected=BASE_TYPE_MMV"))
         assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_STARTED"))
         assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_PLAN"))
-        assertTrue(report.contains("path=MMVQ_INTEGER_DOT,pathNativeId=0"))
-        assertTrue(report.contains("path=BASE_DMMV,pathNativeId=3"))
+        // Structured event fields are rendered individually in the compact export.
+        assertTrue(report.contains("path=MMVQ_INTEGER_DOT"))
+        assertTrue(report.contains("pathNativeId=0"))
+        assertTrue(report.contains("path=BASE_DMMV"))
+        assertTrue(report.contains("pathNativeId=3"))
         assertTrue(report.contains("VULKAN_Q4K_PATH_SWEEP_RESTORED"))
     }
     @Test
@@ -350,7 +357,7 @@ class EngineDiagnosticsTest {
             )
         )
 
-        assertTrue(report.contains("[VULKAN-GPU-OPERATIONSPROFIL"))
+        assertTrue(report.contains("[3] VULKAN-GPU-OPERATIONSPROFIL"))
         assertTrue(
             report.contains(
                 "pid=6412 runId=decode-run-a op=mul_mat_vec_q4_K snapshots=3 samples=3 " +
@@ -416,8 +423,8 @@ class EngineDiagnosticsTest {
         }
 
         val report = EngineDiagnostics.buildCompactReportForTest(listOf(ramSample) + manyTokenRuns)
-        val ramIndex = report.indexOf("[RAM-ZUSAMMENFASSUNG – SPITZENWERTE PRO PHASE]")
-        val tokenIndex = report.indexOf("[NATIVE TOKEN-DECODE-ZEITEN – STICHPROBEN]")
+        val ramIndex = report.indexOf("[7] RAM-ZUSAMMENFASSUNG")
+        val tokenIndex = report.indexOf("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
 
         assertTrue(report.contains("MODEL_LOADED_IDLE"))
         assertTrue(ramIndex >= 0)
@@ -489,7 +496,7 @@ class EngineDiagnosticsTest {
 
         val report = EngineDiagnostics.buildCompactReportForTest(lines)
 
-        assertTrue(report.contains("[CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE]"))
+        assertTrue(report.contains("[1] CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE"))
         assertTrue(report.contains("profile=CPU_REFERENCE"))
         assertTrue(report.contains("decodeTokensPerSecond=5.1"))
         assertTrue(report.contains("diagnosticRunId=cpu-measurement"))
