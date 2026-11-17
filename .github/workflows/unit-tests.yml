@@ -16,6 +16,7 @@ on:
       - "gradle/libs.versions.toml"
       - ".gitmodules"
       - ".github/workflows/unit-tests.yml"
+      - ".github/workflows/manual-apk.yml"
   pull_request:
 
 permissions:

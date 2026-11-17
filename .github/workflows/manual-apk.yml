@@ -1,23 +1,15 @@
 name: Android APK Build
 
 on:
-  # Native builds are the expensive/critical verification step. Run them only
-  # when app, engine, Gradle/toolchain or this workflow changes on main.
-  push:
+  # Run the expensive native APK build only after the matching main-branch
+  # Unit Tests workflow has completed successfully.
+  workflow_run:
+    workflows:
+      - Unit Tests
+    types:
+      - completed
     branches:
       - main
-    paths:
-      - "app/src/main/**"
-      - "app/src/debug/**"
-      - "app/build.gradle.kts"
-      - "llm-engine/src/main/**"
-      - "llm-engine/src/androidTest/**"
-      - "llm-engine/build.gradle.kts"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle/**"
-      - ".github/workflows/manual-apk.yml"
-      - ".gitmodules"
   workflow_dispatch:
     inputs:
       build_type:
@@ -41,14 +33,100 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  unit-test-gate:
+    name: Require passing unit tests
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.conclusion == 'success'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Confirm successful upstream Unit Tests run
+        if: ${{ github.event_name == 'workflow_run' }}
+        shell: bash
+        env:
+          TEST_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TEST_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          TEST_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          test "$TEST_CONCLUSION" = "success"
+          test "$TEST_BRANCH" = "main"
+          test -n "$TEST_SHA"
+          echo "Unit Tests passed for commit $TEST_SHA; APK build is unlocked."
+
+      - name: Checkout manually requested commit
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up JDK 21 for manual unit-test gate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle 9.3.1 for manual unit-test gate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Verify Android SDK platform for manual unit-test gate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -f "$SDK_ROOT/platforms/android-36/android.jar"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Run all JVM unit tests before manual APK build
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: >-
+          gradle --no-daemon --continue --build-cache
+          :llm-engine:testDebugUnitTest :app:testDebugUnitTest
+
+      - name: Run host-only native correctness tests before manual APK build
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/prompt_cache_utils_test.cpp \
+            -o "$RUNNER_TEMP/prompt-cache-utils-test"
+          "$RUNNER_TEMP/prompt-cache-utils-test"
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/utf8_conversion_utils_test.cpp \
+            -o "$RUNNER_TEMP/utf8-conversion-utils-test"
+          "$RUNNER_TEMP/utf8-conversion-utils-test"
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/gdn_fusion_policy_test.cpp \
+            -o "$RUNNER_TEMP/gdn-fusion-policy-test"
+          "$RUNNER_TEMP/gdn-fusion-policy-test"
+
   build-apk:
     name: Build installable Debug APK
+    needs:
+      - unit-test-gate
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Checkout
+      - name: Checkout exact commit that passed unit tests
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
       - name: Verify pinned llama.cpp submodule
