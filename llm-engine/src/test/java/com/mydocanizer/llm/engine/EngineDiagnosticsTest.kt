@@ -302,9 +302,13 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("subgroupSize=16"))
         assertTrue(report.contains("VULKAN_DMMV_SWEEP_STARTED"))
         assertTrue(report.contains("VULKAN_DMMV_SWEEP_PLAN"))
-        assertTrue(report.contains("workgroup=AUTO,workgroupNativeId=0"))
-        assertTrue(report.contains("workgroup=SUBGROUP,workgroupNativeId=1"))
-        assertTrue(report.contains("workgroup=LARGE,workgroupNativeId=2"))
+        // Benchmark event fields are rendered separately in the compact report.
+        assertTrue(report.contains("workgroup=AUTO"))
+        assertTrue(report.contains("workgroupNativeId=0"))
+        assertTrue(report.contains("workgroup=SUBGROUP"))
+        assertTrue(report.contains("workgroupNativeId=1"))
+        assertTrue(report.contains("workgroup=LARGE"))
+        assertTrue(report.contains("workgroupNativeId=2"))
         assertTrue(report.contains("VULKAN_DMMV_SWEEP_RESTORED"))
     }
 
