@@ -416,7 +416,7 @@ Strukturelle Änderungen müssen das Verhalten erhalten. Jedes Refactoring einze
 - [ ] 📱 **DU · ENDGERÄT** — Die Korrektheit der Modellausgabe besteht für jede als unterstützt ausgewiesene Modellfamilie und jedes Backend.
 - [ ] 📱 **DU · ENDGERÄT** — Die Q4_K-Vulkan-Decode-Auswahl und die tatsächliche Ausführung auf Mali-G57 sind belegt oder Einschränkungen der Unterstützung ausdrücklich dokumentiert.
 - [ ] 📱 **DU · ENDGERÄT** — Timeouts, Abbruch, Prozessabbruch/Reconnect, Modellladen und Cache-Zustand verhalten sich deterministisch.
-- [ ] 🛠️ **AGENT · CODE/CI** — **Play-Store-Freigabe (zukünftig, kein aktueller Prototyp-Blocker):** Vor der ersten öffentlichen Veröffentlichung Debug-Textlogging vollständig aus dem Produkt entfernen/deaktivieren oder DSGVO-konform anpassen. Die aktuelle Entwicklungs-/Debug-Diagnostik darf bis dahin für die Fehleranalyse bestehen bleiben.
+- [ ] 🏪 **PLAY-STORE-GATE · VOR VERÖFFENTLICHUNG** — Vor der ersten öffentlichen Veröffentlichung Debug-Textlogging vollständig aus dem Produkt entfernen/deaktivieren oder DSGVO-konform anpassen. Die aktuelle Entwicklungs-/Debug-Diagnostik darf bis dahin für die Fehleranalyse bestehen bleiben.
 - [ ] 📱 **DU · ENDGERÄT** — Wiederholte Zyklen auf realen Geräten zeigen keine zurückbleibenden Prozesse/Deskriptoren und kein fortschreitendes Ressourcenwachstum.
 - [ ] 🛠️ **AGENT · CODE/CI** — Tiefe Vererbung und übergroße Komponenten mit gemischten Zuständigkeiten wurden ohne Verhaltensregressionen refaktorisiert.
 - [ ] 🛠️ **AGENT · CODE/CI** — Jede beibehaltene optionale Funktion besitzt einen Verantwortlichen, Tests und einen nachvollziehbaren Zweck.
