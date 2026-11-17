@@ -10,7 +10,7 @@
 - Do not add dependencies, NPU backends, DI frameworks, speculative abstractions or performance-default changes without explicit approval.
 - Correctness and reproducibility take priority over speed. Never claim device performance, GPU execution or production readiness without the corresponding physical-device evidence.
 - Reuse the single `EngineViewModel` instance across demo screens. Do not create parallel engine/ViewModel instances for separate screens.
-- Keep prompts and model responses out of persistent diagnostic logs.
+- Keep prompts and model responses out of normal operational and Release diagnostic logs. During the pre-beta prototype phase, explicitly enabled developer-only Debug diagnostic builds may persist full prompt/token/response traces when needed to investigate inference correctness. This is intentional prototype instrumentation, not a current privacy incident. Before the first public Play Store release, remove/disable this text logging from the product or adapt it to the applicable GDPR requirements; keep the Release variant free of full text traces.
 
 
 ## Project structure and change discipline
