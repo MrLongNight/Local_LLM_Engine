@@ -23,7 +23,15 @@
 - Preserve the dependency direction: `:app` may depend on `:llm-engine`; the reusable library must never depend on the app or its UI/DMS types. Keep public contracts separate from `internal` implementation details.
 - Current work scope: improve, correct, optimize and harden the reusable `:llm-engine` itself. The prototype `:app` may be used only as a test harness; its demo UI is not a development target. Do not analyse or plan integration with another repository, including `myDocAnizer_Mobile`, until the user explicitly gives GO.
 - Keep tests beside the responsibility they verify, using the matching `test` or `androidTest` source set. Do not duplicate existing test helpers, fake services or fixtures.
-- Keep each task's code diff limited to the requested behavior and necessary tests/docs. If a broader refactor is genuinely unavoidable, explain why and isolate it into a separate, explicitly tracked commit.
+- Keep each task's code diff limited to the requested behavior and necessary tests. If a broader refactor is genuinely unavoidable, explain why and isolate it into a separate, explicitly tracked commit.
+
+## Agent session and context rules
+
+- The only active work queue is [`active-todos/MASTER_TODO.md`](active-todos/MASTER_TODO.md). Each checkbox there is one independently completable agent or device session. A section heading is only a grouping, never a request to execute every checkbox in that section at once.
+- One agent session should solve one coherent outcome and normally take no more than about 1–4 hours. If diagnosis reveals multiple independent causes or the required work exceeds that size, stop before broad implementation, add separately scoped checkboxes to the Master TODO, then execute one checkbox.
+- At session start, read the root `AGENTS.md`, this file and the Master TODO. Then read only the technical documents and source files directly relevant to the selected checkbox.
+- Do **not** load `docs/archive/` by default. Archived audits, plans and refactoring reports are historical records only, not current specifications, task lists or a substitute for checking current source. Open an archived item only when the selected task explicitly needs historical evidence.
+- Do not create session plans, parallel roadmaps, scratch task registers or additional active checklists. Update the selected checkbox and, when needed, split follow-up tasks in the Master TODO itself.
 
 ## Mermaid architecture documentation
 
