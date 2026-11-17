@@ -86,36 +86,82 @@ jobs:
           "$RUNNER_TEMP/gdn-fusion-policy-test"
           echo "Host prompt-cache, UTF-16 conversion and Qwen3.5 GDN policy tests passed (also run after JVM test failures)."
 
-      - name: Print failed JUnit assertions
+      - name: Validate and summarize JUnit reports
         if: always()
         shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           import glob
+          import sys
           import xml.etree.ElementTree as ET
 
-          report_files = sorted(
-              glob.glob("app/build/test-results/testDebugUnitTest/TEST-*.xml")
-              + glob.glob("llm-engine/build/test-results/testDebugUnitTest/TEST-*.xml")
-          )
-          if not report_files:
-              print("No JUnit XML reports were generated.")
-          for report_file in report_files:
-              try:
-                  root = ET.parse(report_file).getroot()
-              except (ET.ParseError, OSError) as error:
-                  print(f"Could not parse {report_file}: {error}")
+          modules = {
+              "llm-engine": "llm-engine/build/test-results/testDebugUnitTest/TEST-*.xml",
+              "app": "app/build/test-results/testDebugUnitTest/TEST-*.xml",
+          }
+          total_tests = total_failures = total_errors = 0
+          problems = []
+
+          for module, pattern in modules.items():
+              report_files = sorted(glob.glob(pattern))
+              if not report_files:
+                  problems.append(f"{module}: no JUnit XML reports generated")
+                  print(f"ERROR: {module}: no JUnit XML reports generated")
                   continue
-              for case in root.findall(".//testcase"):
-                  for failure in list(case.findall("failure")) + list(case.findall("error")):
+
+              module_tests = module_failures = module_errors = 0
+              for report_file in report_files:
+                  try:
+                      root = ET.parse(report_file).getroot()
+                  except (ET.ParseError, OSError) as error:
+                      problems.append(f"{report_file}: invalid/unreadable XML: {error}")
+                      print(f"ERROR: {report_file}: {error}")
+                      continue
+
+                  for case in root.findall(".//testcase"):
+                      module_tests += 1
                       name = f"{case.get('classname', 'unknown')}.{case.get('name', 'unknown')}"
-                      print(f"FAILED: {name}")
-                      print(f"Type: {failure.get('type', 'unknown')}")
-                      print(f"Message: {failure.get('message', '(no assertion message)')}")
-                      detail = (failure.text or "").strip()
-                      if detail:
-                          print("Failure detail:")
-                          print(detail[-12000:])
+                      for failure in case.findall("failure"):
+                          module_failures += 1
+                          print(f"FAILED: {name}")
+                          print(f"Type: {failure.get('type', 'unknown')}")
+                          print(f"Message: {failure.get('message', '(no assertion message)')}")
+                          detail = (failure.text or "").strip()
+                          if detail:
+                              print("Failure detail:")
+                              print(detail[-12000:])
+                      for error in case.findall("error"):
+                          module_errors += 1
+                          print(f"ERROR: {name}")
+                          print(f"Type: {error.get('type', 'unknown')}")
+                          print(f"Message: {error.get('message', '(no error message)')}")
+
+              if module_tests == 0:
+                  problems.append(f"{module}: reports contain no test cases")
+                  print(f"ERROR: {module}: reports contain no test cases")
+              print(
+                  f"JUnit {module}: tests={module_tests}, "
+                  f"failures={module_failures}, errors={module_errors}"
+              )
+              total_tests += module_tests
+              total_failures += module_failures
+              total_errors += module_errors
+
+          print(
+              f"JUnit TOTAL: tests={total_tests}, failures={total_failures}, "
+              f"errors={total_errors}"
+          )
+          if total_tests == 0:
+              problems.append("no test cases found in any module")
+          if total_failures or total_errors:
+              problems.append("JUnit reported failed or errored test cases")
+          if problems:
+              print("JUnit report validation FAILED:")
+              for problem in problems:
+                  print(f" - {problem}")
+              sys.exit(1)
+          print("JUnit report validation PASSED for both modules.")
           PY
 
       - name: Upload unit-test reports
@@ -128,5 +174,5 @@ jobs:
             app/build/reports/tests/testDebugUnitTest/
             llm-engine/build/test-results/testDebugUnitTest/
             llm-engine/build/reports/tests/testDebugUnitTest/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
