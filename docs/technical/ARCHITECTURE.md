@@ -2,7 +2,7 @@
 
 **Scope:** This repository develops and verifies the reusable `:llm-engine` runtime. Its `:app` is a prototype/test harness only. The intended target is to replace the old inference runtime in `myDocAnizer_Mobile`; only the library module is transferred. The migration contract is documented in [`../planning/INTEGRATION_MYDOCANIZER.md`](../planning/INTEGRATION_MYDOCANIZER.md).
 
-**Source review baseline:** code commit `5180ce1abbb0f8d5dfe3fe490d5eb80f207936c9` (2026-11-17). This baseline identifies the current repository HEAD used for this audit; it does not imply physical-device acceptance. Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
+**Source review baseline:** code commit `590dc68030ff37035d8cc5d424c49a609b127cc8` (2026-11-17). The later repository HEAD `5180ce1abbb0f8d5dfe3fe490d5eb80f207936c9` contains documentation changes only; this baseline does not imply physical-device acceptance. Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
 
 This is the canonical architecture document for the repository. Update it in the same commit whenever module boundaries, package ownership, process boundaries, public API, model flow, IPC or native backend flow changes. Do not maintain competing copies of these diagrams elsewhere.
 

@@ -241,8 +241,8 @@ The library writes bounded diagnostics without recording normal prompt/response 
 
 Before treating the module as integrated, verify on the actual consumer app and target device:
 
-1. Build the consuming app with the pinned library commit, recursive llama.cpp submodule and both intended ABIs.
-2. Import a representative GGUF through SAF; confirm the original document is unchanged, the app-private copy is complete and its SHA-256 is stable.
+1. Build the consuming app with the pinned library commit and recursive llama.cpp submodule. Verify the ABI matrix explicitly: the library currently supplies arm64-v8a and x86_64; decide whether the app's existing 32-bit ABI filters remain supported or are removed.
+2. Load a representative GGUF directly from the selected SAF content URI. Confirm the provider supplies a regular, seekable descriptor, Binder handoff into :inference succeeds, no additional model copy is made and the original document remains unchanged. For providers that do not expose a mmap-capable descriptor, verify the explicitly documented alternative instead of claiming no-copy support.
 3. Load and chat with explicit CPU and explicit Vulkan requests. A Vulkan request must not silently pass as CPU.
 4. Confirm model architecture, chat-template behavior, finish reason, actual GPU offload and CPU/Vulkan graph-node distribution.
 5. Exercise progress, cancellation, each timeout tier, service death/reconnect, reload and a successful follow-up inference.
