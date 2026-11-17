@@ -1,8 +1,8 @@
 # Integration plan: `:llm-engine` in myDocAnizer-Mobile
 
-**Purpose:** This guide describes how the standalone Local LLM Engine prototype can be embedded later as a reusable Android library in `MrLongNight/myDocAnizer_Mobile`. The current repository remains an independent engine-development/test prototype; this document records the intended downstream integration contract.
+**Purpose:** This guide defines the active migration of the old LLM inference runtime in `MrLongNight/myDocAnizer_Mobile` to the reusable `:llm-engine` module developed in this prototype repository. Local_LLM_Engine is not a separate app deliverable; its `:app` remains a test harness. Only `:llm-engine` is integrated into myDocAnizer.
 
-> **Compatibility gate:** This is a plan based on the current `main` API, not proof that the library has already been integrated into myDocAnizer-Mobile. Before an integration release, pin the exact Local_LLM_Engine commit and rerun the consumer build and device acceptance tests against that commit. The current prioritized actions are tracked only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md); this guide describes the integration contract, not a parallel TODO list.
+> **Current status:** The library is not yet integrated into myDocAnizer-Mobile. The Consumer build and device acceptance must run against the exact pinned engine commit. The active execution order is tracked only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md); this document records the migration contract, not a parallel TODO list.
 
 ## 1. Integration shape
 
@@ -103,13 +103,13 @@ class EngineOwner(context: Context) : Closeable {
 | Source | Behavior |
 |---|---|
 | `ModelSource.FilePath(path)` | Loads a readable local file. App-private storage is the preferred stable source for a model library. |
-| `ModelSource.ContentUri(uriString, displayName)` | Imports the SAF document into `<app filesDir>/models` before loading. The source document is not modified. |
+| `ModelSource.ContentUri(uriString, displayName)` | Opens the selected SAF provider descriptor in the client and transfers it to `:inference` without a model copy when the provider supplies a supported seekable regular file. |
 | `ModelSource.AssetPath(assetName)` | Copies a packaged asset to app-private model storage, then loads the verified file. |
 | `ModelSource.RemoteUrl(url, suggestedFileName)` | Downloads from HTTPS into app-private storage, validates GGUF magic, hashes and atomically publishes the file. |
 
-SAF, asset and HTTPS imports stream through a temporary `.part` file, verify the `GGUF` magic header, calculate SHA-256 and publish by atomic same-filesystem rename. The stored filename is content-addressed (`<sha256>-<original-name>`); use `ModelLibrary.displayName()` for a user-facing original filename. Existing same-content imports can be reused when SAF provider size and modification-time metadata are stable.
+Direct ContentUri loading does not copy or rename the selected GGUF. InferenceClient opens the provider descriptor, transfers it through Binder and remembers the URI as the model identity. The service validates that the received descriptor is a regular, seekable file suitable for native mmap; the client closes its local descriptor copy after Binder has duplicated it. Android providers may instead expose a pipe, socket or partial-file descriptor. Such a source cannot be silently treated as a regular mmap file; surface a supported fallback/import path explicitly.
 
-SAF imports check available disk space before copying when the provider reports a file size. HTTPS downloads require HTTPS, reject embedded URL credentials and HTTPS-to-HTTP redirects, and allow at most five redirects. Downloads are currently not resumable. The resolver does not overwrite the original SAF document.
+AssetPath and RemoteUrl are materialized into app-private storage through a temporary .part file, GGUF-header validation, SHA-256 and atomic same-filesystem rename. HTTPS requires HTTPS, rejects embedded URL credentials and HTTPS-to-HTTP redirects, and currently does not support resumable downloads. The selected SAF source is never overwritten.
 
 For a model-library screen that needs to import without immediately loading into RAM, use:
 
@@ -124,7 +124,7 @@ Then load the returned private path:
 engine.loadModel(ModelSource.FilePath(file.absolutePath), config)
 ```
 
-The optional borrowed-descriptor `FilePath("/proc/self/fd/N", descriptor, descriptorFd)` path is an advanced no-copy mechanism. Only use it when the provider supplies a regular, seekable and read-only-mmap-capable descriptor, keep the borrowed descriptor open until `loadModel()` returns, and validate the complete Binder/service handoff on target hardware. Prefer the normal `ContentUri` import path for the initial product integration.
+The ordinary `ModelSource.ContentUri` path is already the direct no-copy path in InferenceClient; the app does not need to manufacture a `/proc/self/fd/N` path itself. Keep the provider descriptor alive until the Binder handoff completes; the client releases its copy only after the service has duplicated it. Validate the full SAF-to-`:inference` mmap path on the target phone. Use a private copy only as an explicit compatibility alternative when a provider cannot supply a regular seekable descriptor.
 
 ## 6. Load configuration and backend expectations
 

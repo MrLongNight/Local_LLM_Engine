@@ -10,7 +10,7 @@
 - Do not add dependencies, NPU backends, DI frameworks, speculative abstractions or performance-default changes without explicit approval.
 - Correctness and reproducibility take priority over speed. Never claim device performance, GPU execution or production readiness without the corresponding physical-device evidence.
 - Reuse the single `EngineViewModel` instance across demo screens. Do not create parallel engine/ViewModel instances for separate screens.
-- Keep prompts and model responses out of normal operational and Release diagnostic logs. During the pre-beta prototype phase, explicitly enabled developer-only Debug diagnostic builds may persist full prompt/token/response traces when needed to investigate inference correctness. This is intentional prototype instrumentation, not a current privacy incident. Before the first public Play Store release, remove/disable this text logging from the product or adapt it to the applicable GDPR requirements; keep the Release variant free of full text traces.
+- Treat verbose text traces as an explicitly enabled prototype-debugging aid only; keep them out of ordinary operational diagnostics. Do not add an independent release/distribution checklist to this engine repository.
 
 
 ## Project structure and change discipline
@@ -22,6 +22,7 @@
 - Do not create temporary implementations in a convenient file and plan to move them later. Start in the correct final location.
 - Create a new class/file only when it has a clear, cohesive responsibility or is required by an existing package/module boundary. Do not split files just to reduce line count; do not allow one file/class to accumulate unrelated responsibilities.
 - Preserve the dependency direction: `:app` may depend on `:llm-engine`; the reusable library must never depend on the app or its UI/DMS types. Keep public contracts separate from `internal` implementation details.
+- This repository is an engine-development prototype. The current target is to replace the old inference runtime in `MrLongNight/myDocAnizer_Mobile` with `:llm-engine`. Integrate only the library module; keep the prototype `:app` as a test harness and preserve DMS/OCR/model-catalog responsibilities in the main app.
 - Keep tests beside the responsibility they verify, using the matching `test` or `androidTest` source set. Do not duplicate existing test helpers, fake services or fixtures.
 - Keep each task's code diff limited to the requested behavior and necessary tests/docs. If a broader refactor is genuinely unavoidable, explain why and isolate it into a separate, explicitly tracked commit.
 

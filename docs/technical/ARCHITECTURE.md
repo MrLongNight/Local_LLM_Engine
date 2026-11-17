@@ -1,8 +1,8 @@
 # Architecture — Local LLM Engine
 
-**Scope:** Current prototype application and reusable `:llm-engine` library. This repository is not the myDocAnizer-Mobile application; the planned downstream integration is documented separately in [`../planning/INTEGRATION_MYDOCANIZER.md`](../planning/INTEGRATION_MYDOCANIZER.md).
+**Scope:** This repository develops and verifies the reusable `:llm-engine` runtime. Its `:app` is a prototype/test harness only. The intended target is to replace the old inference runtime in `myDocAnizer_Mobile`; only the library module is transferred. The migration contract is documented in [`../planning/INTEGRATION_MYDOCANIZER.md`](../planning/INTEGRATION_MYDOCANIZER.md).
 
-**Source review baseline:** code commit `590dc68030ff37035d8cc5d424c49a609b127cc8` (2026-11-17). This baseline identifies the current repository HEAD used for this audit; it does not imply physical-device acceptance. Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
+**Source review baseline:** code commit `5180ce1abbb0f8d5dfe3fe490d5eb80f207936c9` (2026-11-17). This baseline identifies the current repository HEAD used for this audit; it does not imply physical-device acceptance. Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
 
 This is the canonical architecture document for the repository. Update it in the same commit whenever module boundaries, package ownership, process boundaries, public API, model flow, IPC or native backend flow changes. Do not maintain competing copies of these diagrams elsewhere.
 
@@ -57,7 +57,8 @@ flowchart TB
 
 ### Ownership and dependency rules
 
-- `:app` is the prototype/test harness. Screens, prototype settings, model-list UI and app-specific last-model persistence belong here. Screens share the same `EngineViewModel` facade.
+- `:app` is the prototype/test harness only. Its screens, settings, model-list UI and demo persistence are not transferred into myDocAnizer.
+- The target app `myDocAnizer_Mobile` owns OCR, DMS/document workflows, prompts/parsing, Room and its model catalogue. It consumes only `:llm-engine` through one app-scoped owner.
 - `:llm-engine` owns reusable engine behavior. It must not depend on `:app`, Compose UI, Room or DMS-specific entities.
 - Public consumer-facing contracts live in `com.mydocanizer.llm.engine`. Implementation details belong in `internal` and `ipc` packages.
 - AIDL contracts live under `llm-engine/src/main/aidl/`. The library manifest owns the private `InferenceService` declaration.

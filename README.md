@@ -1,6 +1,6 @@
 # Local LLM Engine
 
-An Android prototype for developing, testing and validating local GGUF inference with `llama.cpp`. The repository contains a demo app and a reusable Android library module. It is an engineering and measurement project, not a production-ready consumer app.
+An Android engine-development prototype for the local GGUF runtime used by `myDocAnizer_Mobile`. The current project objective is to replace the main app's old inference runtime with the reusable `:llm-engine` module developed here. This repository's `:app` is only a test harness, not a separate target app.
 
 > **Verification boundary:** A green JVM test, APK build or emulator test does not prove that a large model loads correctly, produces correct output, uses the requested GPU path or performs well on a physical Android device. Target-device acceptance is tracked separately.
 
@@ -10,7 +10,7 @@ An Android prototype for developing, testing and validating local GGUF inference
 - `:llm-engine` — reusable Android library, public Kotlin API, AIDL process boundary, JNI and native `llama.cpp` integration.
 - `:llm-engine/src/main/cpp/llama.cpp` — pinned upstream Git submodule. Current pin: `a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5`.
 
-The app module is a test harness for the engine. It is not the downstream myDocAnizer-Mobile application. The planned downstream integration is documented separately and remains an important use case for the library.
+The intended consumer is `MrLongNight/myDocAnizer_Mobile`. Only `:llm-engine` is transferred; do not import the prototype's Compose demo, benchmark screens or model catalogue. OCR, DMS prompts/parsing, document workflows and the main app's model-management UI remain owned by myDocAnizer.
 
 ## Build requirements
 
@@ -43,7 +43,7 @@ gradle --no-daemon --continue --build-cache :llm-engine:testDebugUnitTest :app:t
 ## Runtime design at a glance
 
 - `LocalLlmEngine.create(context)` exposes the library API. Inference runs through the library-owned, non-exported `:inference` service process; the service is a separate process under the app UID, not an isolated-UID service.
-- `ModelSource` supports private/local files, Android SAF content URIs, packaged assets and HTTPS downloads. SAF/asset/remote imports are materialized and verified in app-private storage; see the integration guide for exact behavior and constraints.
+- `ModelSource` supports private/local files, Android SAF content URIs, packaged assets and HTTPS downloads. Direct `ContentUri` model loading uses the selected provider's file descriptor without copying when the provider exposes a seekable regular file; unsupported provider descriptors need an explicit alternative.
 - `BackendPreference.VULKAN` requires a usable Vulkan backend and fails rather than silently switching to CPU. `AUTO` may fall back to CPU. A requested GPU-layer count or Vulkan selection alone is not proof of actual GPU execution.
 - Qwen3.5 Gated Delta Net operators are currently forced to the CPU reference path by the Android Vulkan overlay; other eligible graph operations may still run through Vulkan.
 - The demo app persists the last selected model/configuration across cold starts. That demo-app behavior is not an automatic persistence feature of the library API.
@@ -58,4 +58,4 @@ All project documentation is organized by document type under [`docs/`](docs/REA
 - [Planning](docs/planning/) — overall implementation plan and the downstream myDocAnizer-Mobile integration plan.
 - [Agent rules](docs/AGENTS.md) — repository invariants and documentation ownership.
 
-Start with the [documentation index](docs/README.md). The myDocAnizer-Mobile integration guide is intentionally retained as a key downstream integration document; it does not change the fact that this repository itself is an independent engine prototype.
+Start with the [documentation index](docs/README.md). The myDocAnizer-Mobile integration guide defines the active migration contract. The audit report evaluates the previous 89 open tasks and records which prototype tasks remain relevant.
