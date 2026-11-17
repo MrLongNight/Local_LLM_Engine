@@ -15,6 +15,44 @@
 - [x] Die JVM- und Android-APK-/Instrumentation-Workflows für den aktuellen HEAD getrennt erneut ausführen und dokumentieren: Unit-Tests, Lauf `43679806775`, bestanden; APK- und Process-Isolation-Instrumentation, Lauf `43679806820`, auf Commit `5a87d8f90b24f36c5ba893ba14eea27e50cc73f1` bestanden. Die CMake-Konfiguration und der Build für ARM64 und x86_64 waren erfolgreich. Debug-APK-Artefakt `14148461029` (37.010.982 Bytes; SHA-256 `821f4aaa60bf6034dcca1aa203c7201dcf244655a8e3f6665c3fe439b28b018e`) und Instrumentation-APK-Artefakt `14148281622` (24.341.340 Bytes; SHA-256 `a9f44b1a2311a024093598f9754e4adecb55b35b7bfc13e66f88f51d38f9e77c`) wurden hochgeladen. Host-native Tests bleiben, soweit zutreffend, ein separat zu verfolgender Verifikationspunkt.
 - [ ] Die noch offenen Prüfungen auf realen Geräten aus P0/P1 abschließen. Quellcodeprüfung und CI ersetzen keine Abnahme auf echter Hardware.
 
+## Repository-Nachprüfung — 2026-11-17
+
+**Geprüfter HEAD:** `590dc68030ff37035d8cc5d424c49a609b127cc8` (main)  
+**Umfang:** Repository-/Dateibaum, Build- und CI-Konfiguration, zentrale Kotlin-/AIDL-/JNI-/CMake-Pfade, Dokumentationsabgleich und aktuelle GitHub-Actions-Ergebnisse. Kein physischer Gerätetest und keine neue Performance-Messung.
+
+### Verifizierte CI-Lage auf diesem HEAD
+
+- [ ] **Unit-Test-Workflow fehlgeschlagen:** Run `43812816059`, Job `133118054466`, Commit `590dc68030ff37035d8cc5d424c49a609b127cc8`. Der Schritt `Run all JVM unit tests` ist fehlgeschlagen. Die nachfolgenden Host-C++-Utility-Tests liefen erfolgreich. Das hochgeladene Testreport-Artefakt `14201625065` enthält 23 bestandene App-Tests, aber keine `:llm-engine`-JUnit-XML-Berichte. Die genaue Ursache des fehlgeschlagenen Gradle-Schritts ist mit dem vorliegenden Report-Artefakt noch nicht belegt und muss anhand des Job-Logs geklärt werden.
+- [x] **Android-APK-Workflow erfolgreich:** Run `43812815972` auf demselben HEAD, Conclusion `success`. Debug-APK-Artefakt `14201925203` (SHA-256 `1093571e43525c46af6becd88ca4ce883a59619d0f7a9dd84fb6d880987983b2`) und Instrumentation-APK-Artefakt `14201690793` (SHA-256 `9538406606da60eac060c505c663d4742f7ddc2e7fed7f6ade8f8624f9999f01`) wurden hochgeladen. Das belegt den CI-Build und den im Workflow ausgeführten Instrumentation-Lauf, nicht die Abnahme auf dem nubia/Mali-G57-Zielgerät.
+- [x] Host-native Hilfstests `prompt_cache_utils`, `utf8_conversion_utils` und `gdn_fusion_policy` waren im fehlgeschlagenen Unit-Workflow erfolgreich. Das ersetzt weder JNI-/Vulkan-Laufzeitprüfungen noch die fehlenden Engine-JUnit-Ergebnisse.
+
+### Neue Maßnahmen aus dem Code-/Dokumentationsabgleich
+
+#### P1 — CI-Regression und fehlende Testnachweise
+
+- [ ] Den fehlgeschlagenen Unit-Test-Job `43812816059` vollständig auswerten. Den ersten konkreten Gradle-Fehler beheben, anschließend beide JVM-Test-Tasks erneut ausführen und sicherstellen, dass JUnit-XML für `:llm-engine` tatsächlich erzeugt und als Artefakt hochgeladen wird.
+- [ ] Testreport-Erzeugung so absichern, dass ein Task-Konfigurations-/Kompilierungsfehler nicht als „keine fehlgeschlagenen Assertions“ missverstanden wird. Job-Fehler und Assertion-Fehler getrennt ausweisen.
+
+#### P1 — Datenschutzkonflikt in Debug-Diagnostik
+
+- [ ] Widerspruch zwischen der Repository-Regel „Prompts und Modellantworten nicht persistent protokollieren“ (`docs/AGENTS.md`) und den Debug-Textdiagnosepfaden klären: `EngineDiagnostics.kt` dokumentiert ausdrücklich persistierte Prompt-/Output-Texte; `EngineDiagnosticsStorage.kt` erlaubt bei `TEXT_DIAGNOSTICS_ENABLED` längere Detailaufzeichnung, und der native Diagnosepfad schreibt Text-Traces. Der Schalter ist standardmäßig aus, aber ein explizit aktivierter Diagnose-Build kann sensible Inhalte in app-private Logdateien schreiben. Vor weiterer Nutzung dieser Builds eine klare, konsistente Datenschutzentscheidung und Kennzeichnung treffen; nicht stillschweigend die Diagnosefunktion entfernen.
+
+#### P2 — Dokumentations-/Wartbarkeitsthemen
+
+- [ ] Den Kommentar in `llm-engine/src/main/AndroidManifest.xml` präzisieren: `android:process=":inference"` erzeugt einen separaten Prozess, aber `android:isolatedProcess="false"` bedeutet ausdrücklich keine Isolierung mit eigener UID. Die Architektur-Dokumentation beschreibt diese Grenze bereits korrekt.
+- [ ] Remote-GGUF-Download auf Speichererschöpfungsrisiko prüfen: Der HTTPS-Downloadpfad streamt in eine temporäre Datei, prüft aber vor dem Kopieren weder verfügbaren Speicher anhand von Content-Length noch einen Mindestreservebetrag. Bei unbekannter/fehlender Content-Length bleibt die Größe unbeschränkt. Eine robuste, providerunabhängige Begrenzungs-/Abbruchstrategie definieren und testen.
+- [ ] Die Dokumentation `docs/VULKAN_STATE.md` als historischen V1-Snapshot kennzeichnen; ihr ursprünglicher geprüfter Commit ist älter als der aktuelle HEAD. Die Architektur-Baseline wurde auf diesen Audit-HEAD aktualisiert.
+
+### Bereits gegengeprüfte Punkte — kein aktueller Fehlernachweis
+
+- `TimeoutConfig` verwendet aktuell `abortGracePeriodMs=3000` als Standard; der frühere 300-ms-Wert ist nicht mehr der aktuelle Standard. Die Inference-Timeout-Policy verwendet `System.nanoTime()` für monotone Stall-Messung.
+- Die Bibliotheksmanifest-Deklaration enthält den privaten `:inference`-Service mit `exported=false`; der Service läuft in einem getrennten Prozess unter derselben App-UID.
+- Der direkte SAF-Pfad prüft den tatsächlich übertragenen Deskriptor auf regulären Dateityp, Seek-Fähigkeit, GGUF-Magic und mmap-Fähigkeit. JNI dupliziert den FD und verwendet `llama_model_load_from_file_ptr`; das ist kein belegter Fehler im aktuellen Code.
+- `ModelMemoryGuard` dokumentiert seine Schätzung als Näherung. Die Schätzung ist kein gemessener Peak-RAM-Nachweis und darf nicht als präzise Vulkan-/Treiber-Speicherprognose interpretiert werden.
+- Die CMake-Konfiguration hält das llama.cpp-Submodul auf dem dokumentierten Commit und legt Android-Anpassungen in generierten Build-Overlays ab. Kein Upstream-Patch wurde in dieser Nachprüfung vorgenommen.
+
+---
+
 ## Reihenfolge der Umsetzung und verbindliche Regeln
 
 1. **P0 — Fehler bei der Korrektheit:** Falsche/verstümmelte Modellausgaben, Fehler bei Backend-/Kernel-Auswahl, Inferenz- und Ladefehler, beschädigter Cache/Zustand sowie Fehler bei Abbruch und Wiederherstellung.

@@ -2,7 +2,7 @@
 
 **Scope:** Current prototype application and reusable `:llm-engine` library. This repository is not the myDocAnizer-Mobile application; the planned downstream integration is documented separately in [`../planning/INTEGRATION_MYDOCANIZER.md`](../planning/INTEGRATION_MYDOCANIZER.md).
 
-**Source review baseline:** code commit `3426533a8d7e6c4be99e898d75ad70586446eb53` (2026-11-14). Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
+**Source review baseline:** code commit `590dc68030ff37035d8cc5d424c49a609b127cc8` (2026-11-17). This baseline identifies the current repository HEAD used for this audit; it does not imply physical-device acceptance. Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
 
 This is the canonical architecture document for the repository. Update it in the same commit whenever module boundaries, package ownership, process boundaries, public API, model flow, IPC or native backend flow changes. Do not maintain competing copies of these diagrams elsewhere.
 

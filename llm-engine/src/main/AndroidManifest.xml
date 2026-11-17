@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application>
-        <!-- Dedicated isolated process for native LLM execution protecting app from OOM/crashes -->
+        <!-- Separate app-private process for native LLM execution. isolatedProcess=false keeps the same app UID; this is process/crash separation, not a separate-UID security sandbox. -->
         <service
             android:name="com.mydocanizer.llm.engine.ipc.InferenceService"
             android:process=":inference"
