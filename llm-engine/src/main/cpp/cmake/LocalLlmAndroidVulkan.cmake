@@ -429,6 +429,10 @@ static void ggml_vk_get_physical_device_features2(
         // Fall back to f16 dequant mul mat
         dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
         quantize_y = false;
+    }
+
+    if (quantize_y) {
+        to_q8_1 = ggml_vk_get_quantize_pipeline(ctx, GGML_TYPE_Q8_1);
     }]=])
     string(FIND "${_vulkan_contents}" "${_q4_decode_anchor}" _q4_decode_position)
     if(_q4_decode_position LESS 0)
