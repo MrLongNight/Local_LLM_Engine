@@ -34,9 +34,8 @@ internal fun BackendAcceptanceTestSection(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Je ein kurzer deterministischer CPU-Referenz- und Vulkan-Kandidatenlauf (falls Vulkan verfügbar ist) mit derselben Modelldatei, Testeingabe und gemeinsamen Parametern. " +
-                    "Der Export erfasst pro Backend die tatsächliche Auswahl, Konfiguration, Ausgabe, Finish-Grund, " +
-                    "Graph-Verteilung, Tokenzeiten und RAM. Keine Parameter-Sweeps.",
+                text = "Für die wiederholbare Geräte-Baseline Qwen3-4B-Instruct-2507 Q4_K_M laden. Der Test führt denselben festen Rechen-/Sequenzprompt einmal auf CPU und einmal auf Vulkan aus; nur Backend und GPU-Layer-Offload unterscheiden sich. " +
+                    "Er prüft exakte Ausgabe und Finish-Grund und protokolliert je Backend Modellidentität, Konfiguration, echte Graph-Verteilung, Lade-/Prefill-/TTFT-/Decode-Zeiten und RAM. Keine Parameter-Sweeps.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

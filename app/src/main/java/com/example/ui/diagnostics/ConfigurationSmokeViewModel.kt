@@ -75,8 +75,7 @@ abstract class ConfigurationSmokeViewModel(
         }
         val profiles = InferenceConfigSmokePlan.create(
             originalConfig,
-            Runtime.getRuntime().availableProcessors(),
-            activeBackend = model.activeBackend
+            Runtime.getRuntime().availableProcessors()
         )
         if (profiles.isEmpty()) {
             _errorMessage.value = "Kein Vulkan-Diagnoseprofil verfügbar."
@@ -160,8 +159,8 @@ abstract class ConfigurationSmokeViewModel(
                         profile.id + ":measured"
                     )
                     val cfg = profile.config
-                    val normalizedOutput = sample.result.text.filterNot { it.isWhitespace() }
-                    val expectedOutput = "322,324,326,328,330"
+                    val normalizedOutput = InferenceConfigSmokePlan.normalizeOutput(sample.result.text)
+                    val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
                     val outputMatches = normalizedOutput == expectedOutput
                     val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
                     val q4kFallbackValidation = if (profile.expectedBackend == "VULKAN") {
@@ -351,8 +350,8 @@ abstract class ConfigurationSmokeViewModel(
         val streamedOutput = StringBuilder()
         var cancelledPartialText: String? = null
         var failedPartialText: String? = null
-        val prompt = "Copy exactly this text and output nothing else: 322, 324, 326, 328, 330"
-        val expectedOutput = "322,324,326,328,330"
+        val prompt = InferenceConfigSmokePlan.USER_PROMPT
+        val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
         EngineDiagnostics.testText(
             "config_test",
             "CONFIG_SMOKE_TEST_INPUT",
@@ -427,14 +426,14 @@ abstract class ConfigurationSmokeViewModel(
             "CONFIG_SMOKE_TEST_OUTPUT",
             "stage=" + diagnosticLabel + ",finishReason=" + result.finishReason.name +
                 ",tokens=" + result.tokensGenerated + ",expectedOutput=" + expectedOutput +
-                ",exactOutput=" + (result.text.filterNot { it.isWhitespace() } == expectedOutput) +
+                ",exactOutput=" + (InferenceConfigSmokePlan.normalizeOutput(result.text) == expectedOutput) +
                 ",text=" + result.text
         )
-        if (!result.text.contains("322")) {
-            EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_CHECK_FAILED", "expectedFirstValue=322")
+        if (!InferenceConfigSmokePlan.normalizeOutput(result.text).startsWith("ERGEBNIS=155\n")) {
+            EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_CHECK_FAILED", "expectedFirstLine=ERGEBNIS=155")
         }
         val outputGatePassed = result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP &&
-            result.text.filterNot { it.isWhitespace() } == expectedOutput &&
+            InferenceConfigSmokePlan.normalizeOutput(result.text) == expectedOutput &&
             result.tokensGenerated >= 4
         return ConfigurationSmokeSample(
             result, firstTokenMs, promptElapsedMs, promptTokens, outputGatePassed

@@ -2,15 +2,30 @@ package com.example.ui.diagnostics
 
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.FlashAttentionMode
+import com.mydocanizer.llm.engine.GdnPolicy
+import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 
 /**
- * Fixed, short CPU/Vulkan comparison. Both profiles share model, context,
- * batch, threads and deterministic sampling; only backend-specific offload
- * settings differ. No parameter matrix or tuning sweep is performed.
+ * Fixed, short CPU/Vulkan regression comparison for the target-device baseline.
+ * Both profiles share the exact model, prompt, context, batch, threads and
+ * deterministic sampling; only backend-specific GPU offload differs.
  */
 internal object InferenceConfigSmokePlan {
-    const val MEASURED_TOKENS = 32
+    const val MEASURED_TOKENS = 96
     const val COOLDOWN_MS = 0L
+
+    const val USER_PROMPT =
+        "Berechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. " +
+            "In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. " +
+            "Keine Einleitung, keine Erklärung und kein weiterer Text."
+
+    const val EXPECTED_OUTPUT =
+        "ERGEBNIS=155\n" +
+            "FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32"
+
+    fun normalizeOutput(output: String): String =
+        output.replace("\r\n", "\n").replace('\r', '\n').trim()
 
     internal data class Profile(
         val id: String,
@@ -21,16 +36,27 @@ internal object InferenceConfigSmokePlan {
 
     fun create(
         base: EngineConfig,
-        availableProcessors: Int,
-        activeBackend: String? = null
+        availableProcessors: Int
     ): List<Profile> {
+        // The nubia Z2462N has eight CPU cores; cap this fixed comparison at six
+        // workers so the CPU reference and Vulkan host work use the same budget.
+        val threadCount = availableProcessors.coerceAtLeast(1).coerceAtMost(6)
         val common = base.copy(
-            // CPU and Vulkan must evaluate the same prompt micro-batch for a valid
-            // numeric comparison. AUTO resolves to different backend-specific sizes.
-            microBatchSize = minOf(64, base.batchSize),
+            contextSize = 256,
+            batchSize = 128,
+            threads = threadCount,
+            batchThreads = threadCount,
+            // The CPU and Vulkan paths must evaluate the same explicit micro-batch.
+            microBatchSize = 64,
             temperature = 0f,
             topP = 1f,
-            maxPredictTokens = MEASURED_TOKENS
+            topK = 20,
+            minP = 0.05f,
+            maxPredictTokens = MEASURED_TOKENS,
+            vulkanMatvecWorkgroup = VulkanMatvecWorkgroup.AUTO,
+            flashAttentionMode = FlashAttentionMode.AUTO,
+            gdnPolicy = GdnPolicy.ARCH_DEFAULT,
+            memoryGuardOverride = false
         )
         return listOf(
             Profile(
