@@ -3,6 +3,7 @@ package com.mydocanizer.llm.engine
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import com.mydocanizer.llm.engine.internal.BackendCorrectnessGate
 
 /**
  * Diagnostic logger for Local LLM Engine lifecycle and inference. Generated assistant
@@ -11,6 +12,18 @@ import android.util.Log
  */
 object EngineDiagnostics {
     private const val TAG = "EngineDiagnostics"
+
+    /** CPU/Vulkan comparison result. UNAVAILABLE is fail-closed and is never a pass. */
+    data class BackendCorrectnessResult(
+        val status: String,
+        val reason: String,
+        val comparedSteps: Int = 0,
+        val minimumTop5Overlap: Int = 0,
+        val firstDivergenceStep: Int? = null
+    ) {
+        val passed: Boolean get() = status == "PASS"
+    }
+
 
     private const val TEXT_EVENT_CHUNK_CHARS = 2_200
     private const val MAX_TEXT_PAYLOAD_CHARS = 64 * 1024
@@ -129,6 +142,33 @@ object EngineDiagnostics {
             if (!line.contains(marker)) return@filter false
             line.substringAfter(marker).startsWith("runId=$nativeRunId,")
         }
+    }
+
+    /**
+     * Compares one CPU reference with one Vulkan candidate using run-correlated Debug
+     * evidence. Missing prompt, tokenizer, sampler, cache or numeric evidence fails closed.
+     * Release builds intentionally return UNAVAILABLE.
+     */
+    fun evaluateCpuVulkanCorrectnessGate(
+        context: Context,
+        cpuNativeRunId: String,
+        vulkanNativeRunId: String
+    ): BackendCorrectnessResult {
+        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+            return BackendCorrectnessResult("UNAVAILABLE", "TEXT_DIAGNOSTICS_DISABLED")
+        }
+        val evaluation = BackendCorrectnessGate.evaluate(
+            EngineDiagnosticsStorage.readAllProcessLogs(context),
+            cpuNativeRunId,
+            vulkanNativeRunId
+        )
+        return BackendCorrectnessResult(
+            status = evaluation.status,
+            reason = evaluation.reason,
+            comparedSteps = evaluation.comparedSteps,
+            minimumTop5Overlap = evaluation.minimumTop5Overlap,
+            firstDivergenceStep = evaluation.firstDivergenceStep
+        )
     }
 
     /**

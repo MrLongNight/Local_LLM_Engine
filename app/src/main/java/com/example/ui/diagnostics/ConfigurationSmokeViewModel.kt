@@ -90,6 +90,7 @@ abstract class ConfigurationSmokeViewModel(
 
         configurationSmokeJob = viewModelScope.launch {
             val rows = mutableListOf<String>()
+            val profileSamples = mutableMapOf<String, ConfigurationSmokeSample>()
             var restoreRequired = false
             val confirmedBackends = mutableListOf<String>()
             var stoppedReason: String? = null
@@ -164,6 +165,7 @@ abstract class ConfigurationSmokeViewModel(
                     val outputMatches = normalizedOutput == expectedOutput
                     val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
                     val outputGatePassed = outputMatches && completedNormally && sample.result.tokensGenerated >= 4
+                    profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
                     val report = String.format(
                         java.util.Locale.US,
                         "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | gate=%s | graphSplits=%d | run=%s",
@@ -212,6 +214,34 @@ abstract class ConfigurationSmokeViewModel(
                         EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_REJECTED", rejection)
                     }
                     if (index < profiles.lastIndex) delay(InferenceConfigSmokePlan.COOLDOWN_MS)
+                }
+                val cpuSample = profileSamples["cpu-reference"]
+                val vulkanSample = profileSamples["vulkan-candidate"]
+                val gate = when {
+                    cpuSample == null || vulkanSample == null ->
+                        EngineDiagnostics.BackendCorrectnessResult("UNAVAILABLE", "CPU_OR_VULKAN_RUN_MISSING")
+                    !cpuSample.outputGatePassed || !vulkanSample.outputGatePassed ->
+                        EngineDiagnostics.BackendCorrectnessResult("FAIL", "EXPECTED_OUTPUT_OR_STOP_GATE_FAILED")
+                    else -> EngineDiagnostics.evaluateCpuVulkanCorrectnessGate(
+                        getApplication<Application>(),
+                        cpuSample.result.nativeRunId,
+                        vulkanSample.result.nativeRunId
+                    )
+                }
+                val gateDetails = "profile=CPU_VULKAN_SMOKE,backend=Vulkan," +
+                    "gateRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable") +
+                    ",cpuReferenceRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
+                    ",status=" + gate.status +
+                    ",reason=" + gate.reason +
+                    ",comparedSteps=" + gate.comparedSteps +
+                    ",minimumTop5Overlap=" + gate.minimumTop5Overlap + "/5" +
+                    ",firstDivergenceStep=" + (gate.firstDivergenceStep ?: "n/a")
+                EngineDiagnostics.info("benchmark", "CORRECTNESS_GATE_RESULT", gateDetails)
+                rows += "CPU/Vulkan-Korrektheits-Gate: " + gate.status +
+                    " (" + gate.reason + ", Schritte=" + gate.comparedSteps +
+                    ", min. Top-5-Überlappung=" + gate.minimumTop5Overlap + "/5)"
+                if (!gate.passed) {
+                    rows += "Keine Performance-/Kernel-Konfiguration durch diesen Lauf freigegeben."
                 }
             } catch (cancelled: CancellationException) {
                 stoppedReason = "Vom Nutzer abgebrochen."
@@ -283,7 +313,8 @@ abstract class ConfigurationSmokeViewModel(
         val result: com.mydocanizer.llm.engine.InferenceResult,
         val firstTokenMs: Long?,
         val promptEvaluationMs: Long?,
-        val promptTokens: Int
+        val promptTokens: Int,
+        val outputGatePassed: Boolean = false
     )
 
     private suspend fun collectConfigurationSmokeSample(
@@ -380,6 +411,11 @@ abstract class ConfigurationSmokeViewModel(
         if (!result.text.contains("322")) {
             EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_CHECK_FAILED", "expectedFirstValue=322")
         }
-        return ConfigurationSmokeSample(result, firstTokenMs, promptElapsedMs, promptTokens)
+        val outputGatePassed = result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP &&
+            result.text.filterNot { it.isWhitespace() } == expectedOutput &&
+            result.tokensGenerated >= 4
+        return ConfigurationSmokeSample(
+            result, firstTokenMs, promptElapsedMs, promptTokens, outputGatePassed
+        )
     }
 }

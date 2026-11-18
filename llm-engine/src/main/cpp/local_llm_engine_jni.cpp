@@ -1967,7 +1967,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             if (i != 0) token_trace << ' ';
             token_trace << tokens[i];
         }
-        log_native_info_message(token_trace.str());
+        log_native_text_trace(token_trace.str());
     }
 #endif
 
@@ -2068,8 +2068,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     const llama_tokens tokens_to_evaluate(tokens.begin() + static_cast<std::ptrdiff_t>(reused_tokens), tokens.end());
     const int evaluated_prompt_tokens = static_cast<int>(tokens_to_evaluate.size());
     const int prompt_size = static_cast<int>(tokens.size());
-    LOGI("Prompt cache plan: promptTokens=%d,reusedTokens=%zu,evaluatedTokens=%d,hybrid=%d",
-         prompt_size, reused_tokens, evaluated_prompt_tokens, memory_is_hybrid ? 1 : 0);
+    LOGI("Prompt cache plan: runId=%s,promptTokens=%d,reusedTokens=%zu,evaluatedTokens=%d,hybrid=%d",
+         engine->inference_run_id.c_str(), prompt_size, reused_tokens, evaluated_prompt_tokens,
+         memory_is_hybrid ? 1 : 0);
 
     report_prompt_eval_progress(&progress_context, 0, evaluated_prompt_tokens);
     LOGI("Prompt evaluation started: evaluated_tokens=%d, reused_tokens=%zu, batch_size=%d",
