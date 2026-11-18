@@ -164,7 +164,22 @@ abstract class ConfigurationSmokeViewModel(
                     val expectedOutput = "322,324,326,328,330"
                     val outputMatches = normalizedOutput == expectedOutput
                     val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
-                    val outputGatePassed = outputMatches && completedNormally && sample.result.tokensGenerated >= 4
+                    val q4kFallbackValidation = if (profile.expectedBackend == "VULKAN") {
+                        Q4kPipelineFallbackPolicy.validateNativeEvidence(
+                            EngineDiagnostics.vulkanQ4kDecodePathLines(
+                                getApplication<Application>(),
+                                sample.result.nativeRunId
+                            )
+                        )
+                    } else {
+                        Q4kPipelineFallbackPolicy.Validation(
+                            Q4kPipelineFallbackPolicy.Status.NOT_APPLICABLE,
+                            "CPU_REFERENCE"
+                        )
+                    }
+                    val outputGatePassed = outputMatches && completedNormally &&
+                        sample.result.tokensGenerated >= 4 &&
+                        q4kFallbackValidation.status != Q4kPipelineFallbackPolicy.Status.INVALID
                     profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
                     val report = String.format(
                         java.util.Locale.US,
@@ -177,7 +192,8 @@ abstract class ConfigurationSmokeViewModel(
                         sample.result.tokensPerSecond, sample.result.finishReason.name,
                         outputMatches, if (outputGatePassed) "PASS" else "FAIL", sample.result.graphSplits,
                         sample.result.diagnosticRunId.ifBlank { "n/a" }
-                    )
+                    ) + " | Q4K-Fallback=" + q4kFallbackValidation.status.name +
+                        " (" + q4kFallbackValidation.reason + ")"
                     rows += report
                     EngineDiagnostics.info(
                         "config_test",
@@ -203,7 +219,9 @@ abstract class ConfigurationSmokeViewModel(
                             ",finishReason=" + sample.result.finishReason.name +
                             ",exactOutput=" + outputMatches +
                             ",normalStop=" + completedNormally +
-                            ",outputGate=" + (if (outputGatePassed) "PASS" else "FAIL")
+                            ",outputGate=" + (if (outputGatePassed) "PASS" else "FAIL") +
+                            ",q4kFallbackStatus=" + q4kFallbackValidation.status.name +
+                            ",q4kFallbackReason=" + q4kFallbackValidation.reason
                     )
                     if (!outputGatePassed) {
                         val rejection = "profile=" + profile.id +

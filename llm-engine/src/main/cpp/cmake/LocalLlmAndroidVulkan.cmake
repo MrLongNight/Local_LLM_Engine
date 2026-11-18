@@ -76,7 +76,7 @@ static void ggml_vk_get_physical_device_features2(
     if(_include_position LESS 0)
         message(FATAL_ERROR "LocalLLM: upstream Vulkan include anchor changed; Android compatibility overlay needs review.")
     endif()
-    string(REPLACE "${_include_anchor}" "${_include_anchor}\n${_helper}" _vulkan_contents "${_vulkan_contents}")
+    string(REPLACE "${_include_anchor}" "${_include_anchor}\n#include \"local_llm_q4k_pipeline_fallback.h\"\n${_helper}" _vulkan_contents "${_vulkan_contents}")
     string(REPLACE "vkGetPhysicalDeviceFeatures2(" "ggml_vk_get_physical_device_features2(" _vulkan_contents "${_vulkan_contents}")
 
     # Instrument Vulkan queue submission independently from fence completion.
@@ -435,27 +435,67 @@ static void ggml_vk_get_physical_device_features2(
         message(FATAL_ERROR "LocalLLM: upstream Q4_K decode pipeline anchor changed.")
     endif()
     set(_q4_decode_replacement [=[
-    if (dmmv == nullptr) {
-        // Fall back to f16 dequant mul mat
-        dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
-        if (src0->type == GGML_TYPE_Q4_K && quantize_y) {
-            local_llm_q4k_decode_reason = "q8_1_pipeline_unavailable_fallback";
+    vk_pipeline q8_1_dmmv = quantize_y
+        ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00)
+        : nullptr;
+    vk_pipeline to_q8_1 = nullptr;
+    bool q8_1_matvec_available = static_cast<bool>(q8_1_dmmv);
+    bool q8_1_quantizer_available = false;
+    bool base_matvec_available = false;
+    const char * q8_1_fallback_stage = "none";
+    if (src0->type == GGML_TYPE_Q4_K) {
+        if (quantize_y && q8_1_dmmv != nullptr) {
+            to_q8_1 = ggml_vk_get_quantize_pipeline(ctx, GGML_TYPE_Q8_1);
         }
-        quantize_y = false;
+        q8_1_quantizer_available = static_cast<bool>(to_q8_1);
+        vk_pipeline base_dmmv = nullptr;
+        if (!quantize_y || q8_1_dmmv == nullptr || to_q8_1 == nullptr) {
+            base_dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
+        }
+        base_matvec_available = static_cast<bool>(base_dmmv);
+        const auto q4k_selection = local_llm::resolve_q4k_pipeline(
+            quantize_y, q8_1_dmmv, to_q8_1, base_dmmv);
+        dmmv = q4k_selection.pipeline;
+        quantize_y = q4k_selection.quantize_y;
+        q8_1_fallback_stage = local_llm::q4k_q8_1_fallback_stage_name(q4k_selection.fallback_stage);
+        if (q4k_selection.fallback) {
+            local_llm_q4k_decode_reason = q4k_selection.available
+                ? "q8_1_pipeline_unavailable_fallback"
+                : "q8_1_path_unavailable_base_pipeline_unavailable";
+        } else if (!q4k_selection.available) {
+            local_llm_q4k_decode_reason = "base_pipeline_unavailable";
+        }
+        if (!quantize_y) {
+            to_q8_1 = nullptr;
+        }
+    } else {
+        dmmv = q8_1_dmmv;
+        if (dmmv == nullptr) {
+            // Preserve the pinned upstream fallback for all non-Q4_K types.
+            dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
+            quantize_y = false;
+        } else if (quantize_y) {
+            to_q8_1 = ggml_vk_get_quantize_pipeline(ctx, GGML_TYPE_Q8_1);
+        }
     }
     if (src0->type == GGML_TYPE_Q4_K) {
         const char * run_id = local_llm_vulkan_profile_run_id();
-        const char * selected_path = quantize_y
-            ? "MMVQ_INTEGER_DOT" : "BASE_TYPE_MMV";
-        if (local_llm_should_log_q4k_path(run_id, false, quantize_y)) {
+        const char * selected_path = dmmv == nullptr
+            ? "UNAVAILABLE"
+            : (quantize_y ? "MMVQ_INTEGER_DOT" : "BASE_TYPE_MMV");
+        if (dmmv == nullptr || local_llm_should_log_q4k_path(run_id, false, quantize_y)) {
             GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - runId=%s,device=%s,intDot=%d,q8_1Eligible=%d,q8_1Eligibility=%s,quantizeY=%d,selected=%s,reason=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
+                "ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH - runId=%s,device=%s,intDot=%d,q8_1Eligible=%d,q8_1Eligibility=%s,quantizeY=%d,q8_1MatvecAvailable=%d,q8_1QuantizeAvailable=%d,baseMatvecAvailable=%d,fallbackStage=%s,selected=%s,reason=%s,src1Type=%s,yKernelType=%s,batchColumns=%llu,hidden=%llu,weightRows=%llu\n",
                 run_id,
                 ctx->device->name.c_str(),
                 ctx->device->integer_dot_product ? 1 : 0,
                 local_llm_q4k_q8_1_eligible ? 1 : 0,
                 local_llm_q4k_q8_1_eligibility_reason,
                 quantize_y ? 1 : 0,
+                q8_1_matvec_available ? 1 : 0,
+                q8_1_quantizer_available ? 1 : 0,
+                base_matvec_available ? 1 : 0,
+                q8_1_fallback_stage,
                 selected_path,
                 local_llm_q4k_decode_reason,
                 ggml_type_name(src1->type),
@@ -469,10 +509,12 @@ static void ggml_vk_get_physical_device_features2(
     # Require the Q8_1 pipeline failure reason to be recorded before quantize_y
     # is cleared; otherwise runtime evidence would lose the actual fallback cause.
     set(_q4k_fallback_order_anchor [=[
-        if (src0->type == GGML_TYPE_Q4_K && quantize_y) {
-            local_llm_q4k_decode_reason = "q8_1_pipeline_unavailable_fallback";
+        if (q4k_selection.fallback) {
+            local_llm_q4k_decode_reason = q4k_selection.available
+                ? "q8_1_pipeline_unavailable_fallback"
+                : "q8_1_path_unavailable_base_pipeline_unavailable";
         }
-        quantize_y = false;]=])
+        quantize_y = q4k_selection.quantize_y;]=])
     string(FIND "${_vulkan_contents}" "${_q4k_fallback_order_anchor}" _q4k_fallback_order_position)
     if(_q4k_fallback_order_position LESS 0)
         message(FATAL_ERROR "LocalLLM: Q4_K Q8_1 pipeline fallback reason is missing or recorded after quantize_y is cleared.")
@@ -1040,6 +1082,8 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "selected=MMVQ_INTEGER_DOT" OR
        NOT _vulkan_contents MATCHES "q8_1Eligible=%d,q8_1Eligibility=%s" OR
        NOT _vulkan_contents MATCHES "q8_1_pipeline_unavailable_fallback" OR
+       NOT _vulkan_contents MATCHES "local_llm::resolve_q4k_pipeline" OR
+       NOT _vulkan_contents MATCHES "q8_1MatvecAvailable=%d,q8_1QuantizeAvailable=%d,baseMatvecAvailable=%d,fallbackStage=%s" OR
        NOT _vulkan_contents MATCHES "mali_auto_base_q8_1_ineligible" OR
        NOT _vulkan_contents MATCHES "mali_auto_base_measured_faster" OR
        NOT _vulkan_contents MATCHES "reason=%s" OR
@@ -1075,30 +1119,36 @@ void vk_perf_logger::print_timings(bool force) {
 
     string(FIND "${_q4k_decode_function_contents}" "local_llm_q4k_integer_dot_batch1" _q4k_selector_position)
     string(FIND "${_q4k_decode_function_contents}"
-        "vk_pipeline dmmv = quantize_y ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00) : nullptr;"
+        "vk_pipeline q8_1_dmmv = quantize_y"
         _q4k_q8_pipeline_position)
     string(FIND "${_q4k_decode_function_contents}"
-        "local_llm_q4k_decode_reason = \"q8_1_pipeline_unavailable_fallback\";"
+        "\"q8_1_pipeline_unavailable_fallback\""
         _q4k_fallback_reason_position)
-    string(FIND "${_q4k_decode_function_contents}" "selected_path = quantize_y" _q4k_selected_log_position)
+    string(FIND "${_q4k_decode_function_contents}" "selected_path = dmmv == nullptr" _q4k_selected_log_position)
+    string(FIND "${_q4k_decode_function_contents}" "base_dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type" _q4k_base_f32_pipeline_position)
+    string(FIND "${_q4k_decode_function_contents}" "local_llm::resolve_q4k_pipeline(" _q4k_resolver_position)
     if(_q4k_selector_position LESS 0 OR
        _q4k_q8_pipeline_position LESS 0 OR
        _q4k_fallback_reason_position LESS 0 OR
-       _q4k_selected_log_position LESS 0)
+       _q4k_selected_log_position LESS 0 OR
+       _q4k_base_f32_pipeline_position LESS 0 OR
+       _q4k_resolver_position LESS 0)
         message(FATAL_ERROR "LocalLLM: Q4_K selector, Q8_1 pipeline, fallback or runtime evidence left ggml_vk_mul_mat_vec_q_f16.")
     endif()
     if(_q4k_selector_position GREATER_EQUAL _q4k_q8_pipeline_position OR
-       _q4k_q8_pipeline_position GREATER_EQUAL _q4k_fallback_reason_position OR
+       _q4k_q8_pipeline_position GREATER_EQUAL _q4k_base_f32_pipeline_position OR
+       _q4k_base_f32_pipeline_position GREATER_EQUAL _q4k_resolver_position OR
+       _q4k_resolver_position GREATER_EQUAL _q4k_fallback_reason_position OR
        _q4k_fallback_reason_position GREATER_EQUAL _q4k_selected_log_position)
         message(FATAL_ERROR "LocalLLM: Q4_K selector/pipeline/fallback/runtime-log order changed; refusing an unverified Vulkan overlay.")
     endif()
     math(EXPR _q4k_after_fallback_position "${_q4k_fallback_reason_position} + 1")
     string(SUBSTRING "${_q4k_decode_function_contents}" ${_q4k_after_fallback_position} -1 _q4k_fallback_tail)
-    string(FIND "${_q4k_fallback_tail}" "quantize_y = false;" _q4k_fallback_disable_position)
+    string(FIND "${_q4k_fallback_tail}" "quantize_y = q4k_selection.quantize_y;" _q4k_fallback_disable_position)
     if(_q4k_fallback_disable_position LESS 0)
-        message(FATAL_ERROR "LocalLLM: Q4_K missing-pipeline fallback no longer disables Q8_1 quantization.")
+        message(FATAL_ERROR "LocalLLM: Q4_K missing-pipeline fallback no longer selects the base F32 quantization mode.")
     endif()
-    message(STATUS "LocalLLM: verified Q4_K decode selector -> Q8_1 pipeline -> explicit fallback -> runtime path evidence")
+    message(STATUS "LocalLLM: verified Q4_K selector, Q8_1 matvec/quantizer availability, F32 base fallback and runtime path evidence")
 
     # Verify every quantization-specific override remains scoped to its intended
     # tensor type and batch shape. These are source-overlay guards, not device
