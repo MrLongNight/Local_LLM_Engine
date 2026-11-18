@@ -177,9 +177,13 @@ abstract class ConfigurationSmokeViewModel(
                             "CPU_REFERENCE"
                         )
                     }
+                    val expectsQ4kDecodeTrace = Regex("Q4[_-]?K", RegexOption.IGNORE_CASE).containsMatchIn(
+                        model.name + " " + model.description + " " + model.path
+                    )
+                    val q4kPathGatePassed = !expectsQ4kDecodeTrace ||
+                        q4kFallbackValidation.status == Q4kPipelineFallbackPolicy.Status.VALID
                     val outputGatePassed = outputMatches && completedNormally &&
-                        sample.result.tokensGenerated >= 4 &&
-                        q4kFallbackValidation.status != Q4kPipelineFallbackPolicy.Status.INVALID
+                        sample.result.tokensGenerated >= 4 && q4kPathGatePassed
                     profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
                     val report = String.format(
                         java.util.Locale.US,
