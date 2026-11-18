@@ -435,26 +435,23 @@ static void ggml_vk_get_physical_device_features2(
         message(FATAL_ERROR "LocalLLM: upstream Q4_K decode pipeline anchor changed.")
     endif()
     set(_q4_decode_replacement [=[
-    vk_pipeline q8_1_dmmv = quantize_y
-        ? ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, GGML_TYPE_Q8_1, ne11, ne20, ne00)
-        : nullptr;
-    vk_pipeline to_q8_1 = nullptr;
-    bool q8_1_matvec_available = static_cast<bool>(q8_1_dmmv);
+    // Reuse upstream's Q8_1 DMMV (dmmv) and quantizer (to_q8_1) declarations.
+    bool q8_1_matvec_available = static_cast<bool>(dmmv);
     bool q8_1_quantizer_available = false;
     bool base_matvec_available = false;
     const char * q8_1_fallback_stage = "none";
     if (src0->type == GGML_TYPE_Q4_K) {
-        if (quantize_y && q8_1_dmmv != nullptr) {
+        if (quantize_y && dmmv != nullptr) {
             to_q8_1 = ggml_vk_get_quantize_pipeline(ctx, GGML_TYPE_Q8_1);
         }
         q8_1_quantizer_available = static_cast<bool>(to_q8_1);
         vk_pipeline base_dmmv = nullptr;
-        if (!quantize_y || q8_1_dmmv == nullptr || to_q8_1 == nullptr) {
+        if (!quantize_y || dmmv == nullptr || to_q8_1 == nullptr) {
             base_dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
         }
         base_matvec_available = static_cast<bool>(base_dmmv);
         const auto q4k_selection = local_llm::resolve_q4k_pipeline(
-            quantize_y, q8_1_dmmv, to_q8_1, base_dmmv);
+            quantize_y, dmmv, to_q8_1, base_dmmv);
         dmmv = q4k_selection.pipeline;
         quantize_y = q4k_selection.quantize_y;
         q8_1_fallback_stage = local_llm::q4k_q8_1_fallback_stage_name(q4k_selection.fallback_stage);
@@ -469,7 +466,6 @@ static void ggml_vk_get_physical_device_features2(
             to_q8_1 = nullptr;
         }
     } else {
-        dmmv = q8_1_dmmv;
         if (dmmv == nullptr) {
             // Preserve the pinned upstream fallback for all non-Q4_K types.
             dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
@@ -1119,7 +1115,7 @@ void vk_perf_logger::print_timings(bool force) {
 
     string(FIND "${_q4k_decode_function_contents}" "local_llm_q4k_integer_dot_batch1" _q4k_selector_position)
     string(FIND "${_q4k_decode_function_contents}"
-        "vk_pipeline q8_1_dmmv = quantize_y"
+        "vk_pipeline dmmv = quantize_y"
         _q4k_q8_pipeline_position)
     string(FIND "${_q4k_decode_function_contents}"
         "\"q8_1_pipeline_unavailable_fallback\""
