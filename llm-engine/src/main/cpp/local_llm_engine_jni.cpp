@@ -33,6 +33,7 @@
 #include "chat_template_inputs.h"
 #include "utf8_conversion_utils.h"
 #include "gdn_fusion_policy.h"
+#include "model_architecture_policy.h"
 
 // Internal llama.cpp scheduler metric bridge compiled into the pinned llama target.
 extern "C" int local_llm_get_graph_splits(struct llama_context* context);
@@ -1312,6 +1313,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         LOGE("llama.cpp model load failed on the selected backend (and CPU fallback if AUTO)");
         close_descriptor_stream();
         return 3;
+    }
+
+    const std::string model_architecture =
+        read_model_metadata_value(model, "general.architecture");
+    if (local_llm::requires_target_model_context(model_architecture)) {
+        LOGE(
+            "Standalone model load rejected: architecture=%s is an assistant draft graph " 
+            "that requires ctx_other, a paired target-model context and shared KV state; " 
+            "this engine currently supports one model/context.",
+            model_architecture.c_str());
+        llama_model_free(model);
+        close_descriptor_stream();
+        return 107;
     }
 
     if (use_vulkan) {

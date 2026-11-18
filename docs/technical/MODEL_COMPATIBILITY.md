@@ -37,7 +37,7 @@ The estimates are admission-policy calculations only. They do not account precis
 | Qwen3.5 dense | `qwen35`; `src/models/qwen35.cpp`; hybrid attention/recurrent state | CPU GDN path is available. The Android Vulkan `supports_op` overlay explicitly rejects `GGML_OP_GATED_DELTA_NET`, routing that operator to CPU. Other eligible graph operations may still run on Vulkan. | **Not verified** |
 | Qwen3.5 MoE | `qwen35moe`; `src/models/qwen35moe.cpp` | Same explicit CPU fallback for GDN; MoE tensor routing and memory use require separate validation. | **Not verified** |
 | Gemma 4 text | `gemma4`; `src/models/gemma4.cpp` | Architecture and graph are present upstream; exact tensor/operator coverage and Android offload split remain to be validated. | **Not verified** |
-| Gemma 4 assistant | `gemma4-assistant`; `src/models/gemma4-assistant.cpp` | Specialized assistant graph/shared-memory path; do not assume it is interchangeable with the ordinary Gemma 4 text architecture. | **Not verified** |
+| Gemma 4 assistant | `gemma4-assistant`; `src/models/gemma4-assistant.cpp` | Specialized assistant draft graph. Upstream requires `ctx_other`, a paired target-model context and shared KV state; the graph reads the target model's token embeddings and follows its Flash Attention setting. This single-model chat engine rejects standalone loads early with native result 107; paired speculative decoding is not implemented here. | **Not supported as standalone chat / not device verified** |
 
 The architecture names are registered in upstream `src/llama-arch.cpp`; model factory dispatch is in `src/llama-model.cpp`. Upstream Vulkan implementation presence is not equivalent to support in this Android build: the CMake overlay can deliberately alter `supports_op` policy, as it currently does for GDN.
 
@@ -58,7 +58,7 @@ Before marking an exact GGUF device-verified:
 3. Confirm actual loaded backend, actual GPU layer count, model-load result, native backend diagnostics and per-run graph distribution.
 4. Exercise the GGUF's own chat template with a deterministic short chat. Confirm roles, stop behavior and output correctness.
 5. Run a longer prompt to exercise prefill and hybrid/recurrent state; test cancellation, a follow-up chat, unload and reload.
-6. Export diagnostics with generated assistant responses correlated to their inference run. Ordinary chat prompts remain excluded; explicit test runs include their test input and expected/actual output. Record load time, prompt-token count, prefill time, time-to-first-token, decode tokens/s, peak process PSS, available RAM and thermal status.
+6. Export diagnostics with generated assistant responses correlated to their inference run. Debug diagnostic builds also include bounded input messages, rendered prompts, prompt token IDs and sampled token traces; Release builds omit raw text. Explicit test runs include test input and expected/actual output. Record load time, prompt-token count, prefill time, time-to-first-token, decode tokens/s, peak process PSS, available RAM and thermal status.
 7. Repeat on the actual target nubia Z2462N / Mali-G57. Emulator results are not a substitute.
 
 ## Qwen3.5 chat-template and GDN policy

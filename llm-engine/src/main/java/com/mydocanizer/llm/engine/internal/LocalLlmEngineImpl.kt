@@ -242,6 +242,9 @@ internal class LocalLlmEngineImpl(
                 106 -> throw IllegalStateException(
                     "Native layer could not duplicate or wrap the borrowed SAF descriptor. See native diagnostics."
                 )
+                107 -> throw IllegalStateException(
+                    "Gemma 4 assistant is a draft head, not a standalone chat model. It requires a paired target-model context and shared KV state."
+                )
                 101 -> throw IllegalStateException(
                     "Vulkan backend was explicitly requested, but no Vulkan GPU device is available or initialization failed."
                 )

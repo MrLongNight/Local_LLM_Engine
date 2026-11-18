@@ -119,7 +119,12 @@ jobs:
             llm-engine/src/test/cpp/gemma4_text_prompt_fixture_test.cpp \
             -o "$RUNNER_TEMP/gemma4-text-prompt-fixture-test"
           "$RUNNER_TEMP/gemma4-text-prompt-fixture-test"
-          echo "Host prompt-cache, UTF-16 conversion, GDN policy, Qwen3.5 dense and Gemma 4 text prompt fixtures passed (also run after JVM test failures)."
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/gemma4_assistant_architecture_fixture_test.cpp \
+            -o "$RUNNER_TEMP/gemma4-assistant-architecture-fixture-test"
+          "$RUNNER_TEMP/gemma4-assistant-architecture-fixture-test"
+          echo "Host prompt-cache, UTF-16 conversion, GDN policy, Qwen3.5 dense, Gemma 4 text and Gemma 4 assistant architecture fixtures passed (also run after JVM test failures)."
 
       - name: Validate and summarize JUnit reports
         if: always()

@@ -2,7 +2,7 @@
 
 **Scope:** This repository develops and verifies the reusable `:llm-engine` runtime. Its `:app` is a prototype/test harness only; the demo UI and screen architecture are not productization targets. The current work concerns engine correctness, backend execution, model lifecycle, reliability, memory and performance. Analysis of future consumer integration is deferred until explicitly requested.
 
-**Source review baseline:** code commit `590dc68030ff37035d8cc5d424c49a609b127cc8` (2026-11-17). The later repository HEAD `5180ce1abbb0f8d5dfe3fe490d5eb80f207936c9` contains documentation changes only; this baseline does not imply physical-device acceptance. Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
+**Source review baseline:** code commit `d77db69166bb02542fb9bc89787e347a61867ce2` (2026-11-18). This baseline does not imply physical-device acceptance. Current follow-up measures are maintained only in [`../active-todos/MASTER_TODO.md`](../active-todos/MASTER_TODO.md).
 
 This is the canonical architecture document for the repository. Update it in the same commit whenever module boundaries, package ownership, process boundaries, public API, model flow, IPC or native backend flow changes. Do not maintain competing copies of these diagrams elsewhere.
 
@@ -93,8 +93,13 @@ sequenceDiagram
   Service->>Service: Memory estimate and effective context selection
   Service->>Impl: loadModel(FilePath(/proc/self/fd/N), effectiveConfig)
   Impl->>JNI: nativeLoadModel
-  JNI->>JNI: Create llama.cpp context and backend
-  JNI-->>Impl: Model metadata and progress
+  alt architecture is gemma4-assistant
+    JNI->>JNI: Detect required ctx_other target context/shared KV
+    JNI-->>Impl: Reject standalone load with native result 107
+  else standalone chat architecture
+    JNI->>JNI: Create llama.cpp context and backend
+    JNI-->>Impl: Model metadata and progress
+  end
   Impl-->>Service: ModelInfo
   Service-->>Client: AIDL callback with result and progress
   Client-->>API: Result and StateFlow updates
