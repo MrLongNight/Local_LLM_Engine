@@ -653,6 +653,36 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun compactExportKeepsNativeTracesForAllRecentAssistantOutputs() {
+        val lines = listOf(
+            "2026-11-18 12:00:00.000 [INFO] [inference] INFERENCE_OUTPUT - " +
+                "runId=normal-run,finishReason=STOP,tokensGenerated=1,part=1/1,text=incorrect generated answer",
+            "2026-11-18 12:00:01.000 [NATIVE] LOCAL_LLM_TEXT_TRACE - " +
+                "runId=normal-run,kind=INPUT_MESSAGES,text=original user question",
+            "2026-11-18 12:00:02.000 [NATIVE] LOCAL_LLM_TEXT_TRACE - " +
+                "runId=normal-run,kind=RENDERED_PROMPT,text=rendered user prompt",
+            "2026-11-18 12:01:00.000 [INFO] [inference] INFERENCE_OUTPUT - " +
+                "runId=cpu-run,finishReason=STOP,tokensGenerated=1,part=1/1,text=cpu output",
+            "2026-11-18 12:01:01.000 [NATIVE] LOCAL_LLM_TEXT_TRACE - " +
+                "runId=cpu-run,kind=INPUT_MESSAGES,text=cpu test input",
+            "2026-11-18 12:02:00.000 [INFO] [inference] INFERENCE_OUTPUT - " +
+                "runId=vulkan-run,finishReason=STOP,tokensGenerated=1,part=1/1,text=vulkan output",
+            "2026-11-18 12:02:01.000 [NATIVE] LOCAL_LLM_TEXT_TRACE - " +
+                "runId=vulkan-run,kind=INPUT_MESSAGES,text=vulkan test input"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+
+        assertTrue(report.contains("incorrect generated answer"))
+        assertTrue(report.contains("runId=normal-run,kind=INPUT_MESSAGES"))
+        assertTrue(report.contains("original user question"))
+        assertTrue(report.contains("runId=normal-run,kind=RENDERED_PROMPT"))
+        assertTrue(report.contains("rendered user prompt"))
+        assertTrue(report.contains("cpu test input"))
+        assertTrue(report.contains("vulkan test input"))
+    }
+
+    @Test
     fun compactExportIncludesNativeTextTracesButOmitsUnmarkedBenchmarkText() {
         val lines = listOf(
             "2026-11-13 09:00:00.000 [NATIVE] llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused,vulkanGdn=cpu-fallback\\n",

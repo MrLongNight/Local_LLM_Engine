@@ -405,11 +405,16 @@ internal object EngineDiagnosticsReportBuilder {
         val nativeTextTraceEvents = nativeLines.filter {
             it.contains("LOCAL_LLM_TEXT_TRACE - ")
         }
-        val recentNativeTraceRunIds = nativeTextTraceEvents
+        val nativeTraceRunIds = nativeTextTraceEvents
             .mapNotNull { field(it, "runId") }
             .distinct()
-            .takeLast(2)
-            .toSet()
+        // Keep native prompt/token evidence for the same recent assistant outputs
+        // shown above, even when later diagnostic-only runs add newer trace IDs.
+        // Also retain the last two native-only runs (for tests without an output row).
+        val recentNativeTraceRunIds = (
+            nativeTraceRunIds.filter { it in recentOutputRunIds } +
+                nativeTraceRunIds.takeLast(2)
+            ).toSet()
         val nativeTextTraceCandidates = nativeTextTraceEvents.filter { line ->
             field(line, "runId") in recentNativeTraceRunIds &&
                 (field(line, "kind") != "TOKEN_PIECE" ||
