@@ -38,6 +38,15 @@ int main() {
     assert(no_compatible_pipeline.pipeline == nullptr);
     assert(!no_compatible_pipeline.quantize_y);
     assert(no_compatible_pipeline.fallback);
+    assert(no_compatible_pipeline.fallback_stage == local_llm::q4k_q8_1_fallback_stage::matvec_pipeline);
+
+    const auto no_quantizer_or_base_pipeline = local_llm::resolve_q4k_pipeline(
+        true, &q8_1_matvec, static_cast<int *>(nullptr), static_cast<int *>(nullptr));
+    assert(!no_quantizer_or_base_pipeline.available);
+    assert(no_quantizer_or_base_pipeline.pipeline == nullptr);
+    assert(!no_quantizer_or_base_pipeline.quantize_y);
+    assert(no_quantizer_or_base_pipeline.fallback);
+    assert(no_quantizer_or_base_pipeline.fallback_stage == local_llm::q4k_q8_1_fallback_stage::quantize_pipeline);
 
     const auto auto_base = local_llm::resolve_q4k_pipeline(
         false, static_cast<int *>(nullptr), static_cast<int *>(nullptr), &base_matvec);

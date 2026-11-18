@@ -506,18 +506,76 @@ static void ggml_vk_get_physical_device_features2(
         }
     }]=])
     string(REPLACE "${_q4_decode_anchor}" "${_q4_decode_replacement}" _vulkan_contents "${_vulkan_contents}")
-    # Require the Q8_1 pipeline failure reason to be recorded before quantize_y
-    # is cleared; otherwise runtime evidence would lose the actual fallback cause.
+    # Verify the complete Q4_K pipeline decision, not just the fallback marker:
+    # - Q8_1 quantization is looked up only when its matvec pipeline exists.
+    # - The compatible base matvec is looked up whenever Q8_1 is not usable.
+    # - The shared resolver selects MMVQ only when both Q8_1 pipelines exist.
+    # - The reason and actual selected path are recorded before the native assertion.
+    set(_q4k_quantizer_lookup_anchor [=[
+        if (quantize_y && dmmv != nullptr) {
+            to_q8_1 = ggml_vk_get_quantize_pipeline(ctx, GGML_TYPE_Q8_1);
+        }]=])
+    set(_q4k_base_lookup_guard_anchor [=[
+        if (!quantize_y || dmmv == nullptr || to_q8_1 == nullptr) {
+            base_dmmv = ggml_vk_get_dequantize_mul_mat_vec(ctx, src0->type, y_kernel_type, ne11, ne20, ne00);
+        }]=])
+    set(_q4k_resolver_call_anchor [=[
+        const auto q4k_selection = local_llm::resolve_q4k_pipeline(
+            quantize_y, dmmv, to_q8_1, base_dmmv);]=])
     set(_q4k_fallback_order_anchor [=[
         if (q4k_selection.fallback) {
             local_llm_q4k_decode_reason = q4k_selection.available
                 ? "q8_1_pipeline_unavailable_fallback"
                 : "q8_1_path_unavailable_base_pipeline_unavailable";
+        } else if (!q4k_selection.available) {
+            local_llm_q4k_decode_reason = "base_pipeline_unavailable";
         }
-        quantize_y = q4k_selection.quantize_y;]=])
-    string(FIND "${_vulkan_contents}" "${_q4k_fallback_order_anchor}" _q4k_fallback_order_position)
-    if(_q4k_fallback_order_position LESS 0)
-        message(FATAL_ERROR "LocalLLM: Q4_K Q8_1 pipeline fallback reason is missing or recorded after quantize_y is cleared.")
+        quantize_y = q4k_selection.quantize_y;
+        if (!quantize_y) {
+            to_q8_1 = nullptr;
+        }]=])
+    set(_q4k_unavailable_log_anchor [=[
+        const char * selected_path = dmmv == nullptr
+            ? "UNAVAILABLE"
+            : (quantize_y ? "MMVQ_INTEGER_DOT" : "BASE_TYPE_MMV");
+        if (dmmv == nullptr || local_llm_should_log_q4k_path(run_id, false, quantize_y)) {]=])
+
+    string(FIND "${_vulkan_contents}" "${_q4k_quantizer_lookup_anchor}" _q4k_quantizer_guard_position)
+    string(FIND "${_vulkan_contents}" "${_q4k_base_lookup_guard_anchor}" _q4k_base_guard_position)
+    string(FIND "${_vulkan_contents}" "${_q4k_resolver_call_anchor}" _q4k_resolver_guard_position)
+    string(FIND "${_vulkan_contents}" "${_q4k_fallback_order_anchor}" _q4k_fallback_guard_position)
+    string(FIND "${_vulkan_contents}" "${_q4k_unavailable_log_anchor}" _q4k_unavailable_guard_position)
+    if(_q4k_quantizer_guard_position LESS 0 OR
+       _q4k_base_guard_position LESS 0 OR
+       _q4k_resolver_guard_position LESS 0 OR
+       _q4k_fallback_guard_position LESS 0 OR
+       _q4k_unavailable_guard_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: Q4_K pipeline resolution guard missing.")
+    endif()
+
+    string(FIND "${_q4k_decode_function_contents}" "${_q4k_quantizer_lookup_anchor}" _q4k_quantizer_lookup_position)
+    string(FIND "${_q4k_decode_function_contents}" "${_q4k_base_lookup_guard_anchor}" _q4k_base_lookup_guard_position)
+    string(FIND "${_q4k_decode_function_contents}" "${_q4k_resolver_call_anchor}" _q4k_resolver_call_position)
+    string(FIND "${_q4k_decode_function_contents}" "${_q4k_fallback_order_anchor}" _q4k_fallback_order_position)
+    string(FIND "${_q4k_decode_function_contents}" "${_q4k_unavailable_log_anchor}" _q4k_unavailable_log_position)
+    string(FIND "${_q4k_decode_function_contents}" "GGML_ASSERT(dmmv != nullptr);" _q4k_pipeline_assert_position)
+    if(_q4k_quantizer_lookup_position LESS 0 OR
+       _q4k_base_lookup_guard_position LESS 0 OR
+       _q4k_resolver_call_position LESS 0 OR
+       _q4k_fallback_order_position LESS 0 OR
+       _q4k_unavailable_log_position LESS 0 OR
+       _q4k_pipeline_assert_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: Q4_K quantizer/base lookup, resolver, unavailable log or native assertion is missing.")
+    endif()
+    if(_q4k_q8_pipeline_position GREATER_EQUAL _q4k_quantizer_lookup_position OR
+       _q4k_quantizer_lookup_position GREATER_EQUAL _q4k_base_lookup_guard_position OR
+       _q4k_base_lookup_guard_position GREATER_EQUAL _q4k_base_f32_pipeline_position OR
+       _q4k_base_f32_pipeline_position GREATER_EQUAL _q4k_resolver_call_position OR
+       _q4k_resolver_call_position GREATER_EQUAL _q4k_fallback_order_position OR
+       _q4k_fallback_order_position GREATER_EQUAL _q4k_selected_log_position OR
+       _q4k_selected_log_position GREATER_EQUAL _q4k_unavailable_log_position OR
+       _q4k_unavailable_log_position GREATER_EQUAL _q4k_pipeline_assert_position)
+        message(FATAL_ERROR "LocalLLM: Q4_K quantization/fallback/log/assert order changed; refusing an unverified Vulkan path.")
     endif()
 
 

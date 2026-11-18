@@ -358,6 +358,12 @@ jobs:
                           "LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH",
                       "Q4_K decode runtime path instrumentation":
                           "LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH",
+                      "Q4_K matvec/quantizer fallback resolver":
+                          "local_llm::resolve_q4k_pipeline",
+                      "Q4_K unavailable path is explicit":
+                          '"UNAVAILABLE"',
+                      "Q4_K fallback quantizer and activation diagnostics":
+                          "q8_1MatvecAvailable=%d,q8_1QuantizeAvailable=%d,baseMatvecAvailable=%d,fallbackStage=%s",
                       "Vulkan integrated-memory budget diagnostics":
                           "LOCAL_LLM_MEMORY_BUDGET",
                       "Vulkan per-operation GPU timestamp diagnostics":
