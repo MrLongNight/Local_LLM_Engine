@@ -379,6 +379,13 @@ internal object EngineDiagnosticsReportBuilder {
             }
             .takeLast(40)
             .map { compactLine(it, 3_000) }
+        val inferenceSetupEvidence = nativeLines
+            .filter {
+                it.contains("LOCAL_LLM_PROMPT_METADATA") ||
+                    it.contains("LOCAL_LLM_SAMPLER_PARAMETERS")
+            }
+            .takeLast(16)
+            .map { compactLine(it, 1_200) }
 
         val performanceEvents = (
             kotlinLines
@@ -721,6 +728,14 @@ internal object EngineDiagnosticsReportBuilder {
             if (gateStatusSummary.isEmpty()) appendLine("Keine Korrektheits-Gate-Ergebnisse vorhanden.")
             else gateStatusSummary.forEach(::appendLine)
             appendLine()
+            appendLine("[GENERIERTE LLM-AUSGABEN / EXPLIZITE TESTTEXTE]")
+            if (textEvidence.isEmpty()) appendLine("Keine gespeicherten Textausgaben/Testtexte vorhanden.")
+            textEvidence.forEach(::appendLine)
+            appendLine()
+            appendLine("[INFERENZ-KONTEXT / TEMPLATE / TOKENIZER / SAMPLER]")
+            if (inferenceSetupEvidence.isEmpty()) appendLine("Keine nativen Prompt-/Sampler-Metadaten vorhanden.")
+            inferenceSetupEvidence.forEach { appendLine(readableNativeLine(it, 1_200)) }
+            appendLine()
             appendLine("[1] CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE")
             if (fullMatrixRows.isEmpty()) {
                 appendLine("Keine Matrix-Profilzeilen vorhanden.")
@@ -753,11 +768,7 @@ internal object EngineDiagnosticsReportBuilder {
             }
             performanceEvents.forEach(::appendLine)
             appendLine()
-            appendLine("[5] GENERIERTE LLM-AUSGABEN / EXPLIZITE TESTTEXTE")
-            if (textEvidence.isEmpty()) appendLine("Keine gespeicherten Textausgaben/Testtexte vorhanden.")
-            textEvidence.forEach(::appendLine)
-            appendLine()
-            appendLine("[6] WICHTIGE EREIGNISSE / FEHLER")
+            appendLine("[5] WICHTIGE EREIGNISSE / FEHLER")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
             events.forEach(::appendLine)
             appendLine()

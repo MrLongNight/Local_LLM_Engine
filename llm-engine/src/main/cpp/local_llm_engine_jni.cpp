@@ -1770,6 +1770,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             out_template_mode = "JINJA";
         } catch (const std::exception& jinja_error) {
             LOGW("Jinja chat-template rendering failed: %s", jinja_error.what());
+            {
+                std::string reason = jinja_error.what();
+                std::replace(reason.begin(), reason.end(), ',', ';');
+                std::replace(reason.begin(), reason.end(), '\n', ' ');
+                log_native_info_message(
+                    "LOCAL_LLM_TEMPLATE_RENDER_ATTEMPT - runId=" + engine->inference_run_id +
+                    ",attempt=JINJA,result=FAILED,error=" + reason);
+            }
             try {
                 common_chat_templates_inputs inputs;
                 inputs.messages = source_messages;
@@ -1783,6 +1791,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
                 out_template_mode = "LEGACY";
             } catch (const std::exception& legacy_error) {
                 LOGE("Legacy chat-template rendering failed: %s", legacy_error.what());
+                {
+                    std::string reason = legacy_error.what();
+                    std::replace(reason.begin(), reason.end(), ',', ';');
+                    std::replace(reason.begin(), reason.end(), '\n', ' ');
+                    log_native_info_message(
+                        "LOCAL_LLM_TEMPLATE_RENDER_ATTEMPT - runId=" + engine->inference_run_id +
+                        ",attempt=LEGACY,result=FAILED,error=" + reason);
+                }
                 if (has_chat_template) {
                     LOGE("Explicit model chat template failed for this message set");
                     return {};

@@ -611,6 +611,10 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("diagnostic-output-run"))
         assertTrue(report.contains("extra-answer-fragment"))
         assertTrue(report.contains("CONFIG_SMOKE_TEST_INPUT"))
+        assertTrue(
+            report.indexOf("extra-answer-fragment") <
+                report.indexOf("[1] CPU/VULKAN-ABNAHMETEST")
+        )
     }
 
     @Test

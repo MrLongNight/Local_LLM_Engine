@@ -321,6 +321,7 @@ internal class LocalLlmEngineImpl(
                 "MODEL_IDENTITY",
                 "model=${info.name},sizeBytes=${info.sizeBytes},architecture=${info.architecture}," +
                     "parameterCount=${info.parameterCount},trainedContext=${info.contextLengthTrain}," +
+                    "description=${info.description}," +
                     "sha256=${info.sha256 ?: "unavailable"}," +
                     "sha256Status=${if (info.sha256 != null) "VERIFIED_OR_TRUSTED_IMPORT" else "SKIPPED_DIRECT_DESCRIPTOR"}"
             )
