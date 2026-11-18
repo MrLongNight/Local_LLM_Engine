@@ -48,7 +48,7 @@
 
 ### P0-03 — CPU-/Vulkan-Korrektheit vor Performanceänderungen absichern
 
-- [ ] **P0-03a** 🛠️ AGENT · CODE/TESTS · M · Impact H — Einen gemeinsamen Vergleichs-Fixture-Builder erstellen, der für CPU und Vulkan dieselben Modellbytes, Nachrichten, Template-Parameter, Context-, Sampler- und Tokenlimits verwendet.
+- [ ] **P0-03a** 🛠️ AGENT · CODE/TESTS · M · Impact H — Einen gemeinsamen Schnelltest-/Baseline-Fixture-Builder erstellen, der CPU und Vulkan mit denselben Modellbytes, festen kurzen Prüfaufgaben, Nachrichten, Template-Parametern, Context-, Sampler- und Tokenlimits prüft. Erwartete Ausgabe-/Inhaltskriterien und zulässige Finish-Gründe validieren; Ladezeit, Prefill, TTFT und Decode im selben Durchlauf messen. Tatsächliche Testeingaben und vollständige Modellausgaben als Testergebnis sichern. Funktion und Baseline-Zeiten gehören in einen Ablauf; keinen separaten, inhaltlich doppelten Kurz-Performancebenchmark schaffen.
 - [ ] **P0-03b** 🛠️ AGENT · CODE/TESTS · S · Impact H — Einen expliziten Korrektheits-Gate für Backend-/Kernel-/Quantisierungs-/Default-Änderungen ergänzen. Numerisch erklärbare Unterschiede von Template-, Tokenizer-, Cache- oder Zustandsfehlern unterscheiden; keine Performance-Konfiguration ohne bestandenen Gate übernehmen.
 
 ### P0-04 — Mali-G57-Q4_K-Decode-Pfad
@@ -77,7 +77,7 @@
 
 ---
 
-## P1 — Vulkan-Leistung, Ressourcen und robuste Modellquellen
+## P1 — Leistung, Ressourcen, Diagnostik und systematische Modellbewertung
 
 ### P1-01 — Vulkan-Bottleneck reproduzierbar diagnostizieren
 
@@ -102,6 +102,16 @@
 - [ ] **P1-04a** 🛠️ AGENT · CODE/TESTS · M · Impact M — Backend-Auswahl, verfügbare Backend-Fähigkeit, angeforderte GPU-Layer, tatsächliche Graph-/Layer-Zuordnung und CPU-Fallback getrennt im Ergebnis darstellen.
 - [ ] **P1-04b** 🛠️ AGENT · CODE/TESTS · M · Impact M — Den Diagnostikexport größenbegrenzen und redundante Ereignisse reduzieren. Wichtige Fehler-, Backend-, Timeout- und Speicherereignisse sowie Run-IDs müssen erhalten bleiben.
 - [ ] **P1-04c** 🛠️ AGENT · CODE/TESTS · S · Impact M — Modelllade- und Inferenzfortschritt an echte Laufzeitphasen binden. Keine künstlichen 0→100-Sprünge und keinen Ready-Zustand vor nativer Einsatzbereitschaft melden.
+- [ ] **P1-04d** 🛠️ AGENT · CODE/DIAGNOSTIK · M · Impact H — Fehler und Auffälligkeiten automatisch am Ort ihres Entstehens mit Run-ID und relevanter Vorgeschichte erfassen: betroffene Phase, Modellidentität (verifizierte SHA-256 soweit verfügbar), effektive Parameter, angefordertes und tatsächliches Backend/Graph-Verteilung, Zeitmessungen, Terminal-/Finish-Grund sowie Exception und Ursache. Den vorhandenen begrenzten Diagnosepuffer nutzen, damit vorausgehende Ereignisse erhalten bleiben. Bei expliziten Testläufen vollständige Testeingabe und tatsächliche Modellausgabe mit dem Ergebnis verknüpfen. Kein separater Diagnose-Inferenzlauf und keine global aktivierte Rohtextdiagnose für normale Chats.
+
+### P1-05 — Modellvorauswahl und repräsentatives LLM-Testlabor (LLM-Test 2026)
+
+- [ ] **P1-05a** 🛠️ AGENT · DIAGNOSE/KONZEPT · M · Impact H — Die tatsächliche Kandidatenbasis und Vergleichbarkeit inventarisieren: lokal verfügbare .gguf-Modelle mit verifizierter Identität/SHA, Größe, Architektur, Quantisierung, Kontext-/Tokenizer-/Template-Metadaten sowie unterstützten CPU-/Vulkan-Pfaden und verfügbaren, modellkompatiblen Parametern erfassen. Fehlende Metadaten von echter Inkompatibilität unterscheiden; noch keine Qualitätsrangliste bilden.
+- [ ] **P1-05b** 🛠️ AGENT · KONZEPT/TESTDESIGN · M · Impact H — Einen kurzen Modell-Vorausscheid definieren, der einfache, aber eindeutig überprüfbare Fakten- und Wissensfragen aus mehreren unabhängigen Bereichen verwendet. Antwortkriterien, Quellen/Referenzfakten, Umgang mit Mehrdeutigkeit, Halluzinationen, Auslassungen und unsicherem Wissen sowie Schwellen und gezielte Bestätigungsprüfung festlegen. Eine einzelne falsche Antwort darf nicht automatisch disqualifizieren; wiederholte, klar belegte Falschaussagen sollen eine begründete Einstufung (geeignet / auffällig / nicht qualifiziert) ermöglichen.
+- [ ] **P1-05c** 🛠️ AGENT · KONZEPT/TESTDESIGN · M · Impact H — Eine repräsentative Szenariostruktur für den großen Modellvergleich entwerfen: tatsächliche Zielaufgaben, Kompetenzabdeckung, Anzahl und Varianten, Schwierigkeits-/Kontextlängen, Prompt- und Ausgabeumfang sowie Verteilung der Szenarien begründen. Verzerrungen durch überrepräsentierte Aufgabentypen, triviale oder unverhältnismäßig schwere Aufgaben und ungeeignete Tokenlimits vermeiden. Optimierungs-/Entwicklungsszenarien von unabhängigen Validierungsszenarien trennen; noch keine endgültige Prompt-Menge ohne Begründung festschreiben.
+- [ ] **P1-05d** 🛠️ AGENT · KONZEPT/TESTDESIGN · M · Impact H — Ein nachvollziehbares, aufgabenspezifisches Bewertungsschema festlegen: objektiv prüfbare Kriterien (z. B. Fakten, Zahlen, JSON/Schema, Vollständigkeit und Finish-Grund) von qualitativen Rubriken unterscheiden. Korrektheit, Halluzinationen, Instruktionsbefolgung, Vollständigkeit, Ausgabeumfang, Zuverlässigkeit, Laufzeit und Ressourcen separat ausweisen; keine undurchsichtige Einzelpunktzahl und kein ungeprüftes LLM als alleinigen Qualitätsrichter verwenden.
+- [ ] **P1-05e** 🛠️ AGENT · KONZEPT/DIAGNOSE · M · Impact H — Eine gestufte Parameteruntersuchung planen: feste Referenzkonfiguration zuerst, danach gezielte Einzelparameter- und nur bei Bedarf Interaktionsprüfungen. Generierungsparameter von Ausführungs-/Backendparametern trennen, modellabhängige Verfügbarkeit berücksichtigen und Wechselwirkungen (z. B. Temperatur/Top-P) untersuchen, ohne den vollständigen kartesischen Produkt-Raum auszuprobieren. Vergleich mit gleichen Einstellungen vom Vergleich mit jeweils optimierten Modellkonfigurationen trennen.
+- [ ] **P1-05f** 🛠️ AGENT · KONZEPT/ARCHITEKTUR · M · Impact H — Den Ablauf des umfangreichen, vorzugsweise nachts ausführbaren Testlabors aus den vorherigen Entscheidungen ableiten: Kandidaten-Vorausscheid → gemeinsame Referenzläufe → gezielte Parameteruntersuchung → unabhängige Validierung. Ergebnisdatensatz mit Modell-/Engine-/Szenario-Version, Parametern, Backend, vollständigen Testeingaben/-ausgaben, Einzelbewertungen, Laufzeiten und Ressourcenwerten definieren. Unterbrechbarkeit/Fortsetzung, Speicher-/RAM-/Temperaturschutz und mögliche Reihenfolgeeffekte berücksichtigen. Erst nach Klärung dieses Designs separate Implementierungsaufgaben ergänzen.
 
 ---
 
