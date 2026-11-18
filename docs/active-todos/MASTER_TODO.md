@@ -53,7 +53,7 @@
 
 ### P0-04 — Mali-G57-Q4_K-Decode-Pfad
 
-- [ ] **P0-04a** 🛠️ AGENT · CODE/DIAGNOSE · S · Impact H — Nur die aktuelle Q4_K-Dispatch-/Policy-Auswahl im Android-Overlay gegen den gepinnten llama.cpp-Quellpfad prüfen. Den tatsächlich für Mali-AUTO gewählten Kernel und alle Q8_1-/Integer-Dot-Voraussetzungen anhand konkreter Quellstellen dokumentieren.
+- [x] **P0-04a** 🛠️ AGENT · CODE/DIAGNOSE · S · Impact H — Abgeschlossen (18.11.2026). Audit des Android-Overlays gegen den unveränderten llama.cpp-Pin `a4d4f2f`: Mali-G57 (`vendorId=0x13B5`) AUTO wählt für Q4_K batch-1 den Basis-DMMV-Pfad (`quantize_y=false`), nicht MMVQ/Q8_1. Die upstream Voraussetzungen für MMVQ sind dokumentiert: `integer_dot_product`, F32- und contiguous-Input, kein nicht-kontiguierliches Y, `(ne11*ne10)%4==0`, erlaubte Q8_1-Präzision und Upstream-Shape-Heuristik; die explizite Override-7-Route prüft die Hardware-/Layoutvoraussetzungen weiterhin. Null Q8_1-DMMV-Pipeline führt im bestehenden Upstream-Pfad zum normalen DMMV-Fallback und wird als `q8_1_pipeline_unavailable_fallback` geloggt. Die im Overlay-Kommentar angeführte 40–48%-Messung stammt von LFM3 1.7B Q4_K_M und ist kein Qwen3-4B-Nachweis. Keine Code-/Default-Änderung. Quellen, Pfadlogik und offene Nachweise in `docs/technical/MODEL_COMPATIBILITY.md` dokumentiert. Zielgeräte-Trace auf Mali-G57 bleibt erforderlich; die automatisierte Fallback-Absicherung ist separat P0-04b.
 - [ ] **P0-04b** 🛠️ AGENT · CODE/TESTS · M · Impact H — Den Fallback bei nicht verfügbarer Q4_K×Q8_1-Pipeline automatisiert absichern. Korrekte Quantisierungsparameter und kompatiblen Kernel nachweisen; ein fehlender Vulkan-Pfad darf nicht als erfolgreicher GPU-Pfad erscheinen.
 
 ### P0-05 — Abbruch, Timeout und Prozess-Recovery

@@ -67,6 +67,25 @@ Before marking an exact GGUF device-verified:
 
 Qwen3.5/Qwen3.5-MoE have an architecture-aware `GdnPolicy` with four AR/CH fusion configurations. The current default uses the conservative unfused Qwen3.5 path. The Android Vulkan overlay routes `GGML_OP_GATED_DELTA_NET` to CPU regardless of Vulkan selection. The four-way policy matrix remains useful for correctness testing, but it must not be described as Vulkan GDN execution.
 
+## Mali-G57 Q4_K batch-1 Vulkan dispatch (pinned source audit)
+
+**Audited code:** Android overlay at `llm-engine/src/main/cpp/cmake/LocalLlmAndroidVulkan.cmake`; pristine submodule `ggml-org/llama.cpp` commit `a4d4f2fd4ec85ec6a0a9ece4870416c1b6cc24f5`, source `ggml/src/ggml-vulkan/ggml-vulkan.cpp`. The overlay creates a build-directory copy of `ggml-vulkan.cpp`; it does not patch the submodule.
+
+### Dispatch path
+
+- The upstream `ggml_vk_mul_mat` routes eligible single-output-row / vector-shaped matrix operations into `ggml_vk_mul_mat_vec_q_f16` (pinned source around lines 7470–7488). The Q4_K selector audited here only changes the **batch-1 decode** branch (`ne11 == 1)); prefill (`ne11 > 1`) is separately instrumented and is not covered by this AUTO override.
+- In upstream `ggml_vk_mul_mat_vec_q_f16`, MMVQ/Q8_1 is initially eligible only if the device reports `integer_dot_product`, `src1` is F32 and contiguous, the vector is not non-contiguous, `(ne11 * ne10) % 4 == 0), output precision allows Q8_1 (unless inputs are swapped), and `ggml_vk_should_use_mmvq(...)` accepts the shape/vendor heuristic (around lines 6790–6815). The upstream default branch of that heuristic returns true for unlisted vendors; it is not a Mali performance measurement.
+- The checked overlay recognizes Mali by Vulkan vendor ID `0x13B5`. For Q4_K, batch-1 and AUTO (override 0), it deliberately sets `quantize_y = false`. This is the selected **BASE_TYPE_MMV / base DMMV** path, including when integer-dot exists and Q8_1 prerequisites are otherwise met. The runtime reason is `mali_auto_base_measured_faster`; if integer-dot is absent it reports `mali_auto_base_without_intDot`, and if the Q8_1 input/layout/precision requirements fail it reports `mali_auto_base_q8_1_ineligible`.
+- Therefore the expected Mali-G57 AUTO decode path is **base DMMV, not MMVQ integer-dot/Q8_1**. The explicit diagnostic override 7 can request MMVQ only when integer-dot, F32 contiguous input, layout/alignment and precision prerequisites pass. It bypasses the upstream shape heuristic, not the hardware/input prerequisites.
+- The overlay first looks up the Q4_K×Q8_1 DMMV pipeline. If that lookup returns null, upstream's existing fallback looks up the ordinary activation-type pipeline and clears `quantize_y`; the overlay records `q8_1_pipeline_unavailable_fallback` before emitting the selected-path trace. The checked CMake guards verify selector → Q8_1 lookup → fallback → runtime-log ordering and ensure the selector remains inside the exact upstream decode function.
+- The upstream shader path for the base Q4_K vector kernel is `ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_q4_k.comp`. This is source-level implementation evidence, not proof that a particular device compiled, selected or executed it.
+
+### What the existing measurement does and does not prove
+
+The overlay comment records repeated runtime-verified Mali-G57 measurements for **LFM3 1.7B Q4_K_M**: base DMMV 4.14/3.92 tok/s versus MMVQ 2.71/2.80 tok/s (about 40–48% slower for MMVQ). That is the stated reason for the Mali AUTO override. It is not a Qwen3-4B measurement and must not be generalized as a measured speedup for the current Qwen3-4B Q4_K_M baseline. Re-run both paths with the same model bytes, prompt, context, batch/micro-batch and sampler before making a Qwen3-specific performance claim.
+
+**No source change or performance-default change was made in this audit.** The actual target-device dispatch still needs confirmation from the run-correlated `LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH` trace on the nubia Mali-G57. A CI build or the presence of Vulkan shaders does not prove GPU execution. The separate P0-04b task must validate the missing-Q8_1-pipeline fallback with automated tests; this audit does not claim that fallback behavior is fully tested.
+
 ## Performance reporting rules
 
 - Report prefill and autoregressive decode separately.
