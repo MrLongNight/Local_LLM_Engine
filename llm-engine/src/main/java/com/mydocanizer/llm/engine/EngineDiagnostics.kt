@@ -29,13 +29,14 @@ object EngineDiagnostics {
      * deterministic test input/expected/actual values, never for ordinary chat prompts.
      */
     fun testText(tag: String, event: String, details: String) {
+        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
         recordTextChunks(tag, event, "", details)
     }
 
     /**
      * Persists the complete generated assistant response (or partial response on
-     * cancellation/error), correlated to the native inference run. The global file
-     * and entry ring buffers remain the hard retention limits.
+     * cancellation/error) only in explicitly enabled Debug text-diagnostics builds.
+     * Release builds and Debug builds with text diagnostics disabled retain no raw output.
      */
     internal fun recordInferenceOutput(
         runId: String,
@@ -43,6 +44,7 @@ object EngineDiagnostics {
         finishReason: String,
         tokensGenerated: Int
     ) {
+        if (!BuildConfig.DEBUG || !BuildConfig.TEXT_DIAGNOSTICS_ENABLED) return
         val metadata = "runId=$runId,finishReason=$finishReason,tokensGenerated=$tokensGenerated"
         recordTextChunks("inference", "INFERENCE_OUTPUT", metadata, text)
     }
