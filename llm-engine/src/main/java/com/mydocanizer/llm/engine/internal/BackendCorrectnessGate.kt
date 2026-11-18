@@ -151,7 +151,7 @@ internal object BackendCorrectnessGate {
                 promptTokens <= 0 || evaluatedTokens < 0
             ) return unavailable(backend + "_PROMPT_CACHE_EVIDENCE_MALFORMED")
             if (reusedTokens != 0 || evaluatedTokens != promptTokens) {
-                return fail(backend + "_PROMPT_CACHE_NOT_FRESH")
+                return fail(backend.uppercase(Locale.US) + "_PROMPT_CACHE_NOT_FRESH")
             }
         }
 
