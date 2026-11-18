@@ -1785,12 +1785,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
 
         llama_tokens result;
         if (out_used_template) {
-            // Template-owned text may contain special tokens; message content stays literal.
-            for (const auto& part : out_rendered.parts) {
-                if (part.text.empty()) continue;
-                auto part_tokens = common_tokenize(engine->context, part.text, false, !part.is_input);
-                result.insert(result.end(), part_tokens.begin(), part_tokens.end());
-            }
+            // Preserve model-template control tokens while keeping message payload literal.
+            result = local_llm::tokenize_rendered_prompt_parts(
+                out_rendered.parts,
+                [&](const std::string& part_text, bool parse_special_tokens) {
+                    return common_tokenize(
+                        engine->context, part_text, false, parse_special_tokens);
+                });
         } else {
             result = common_tokenize(engine->context, out_prompt, false, false);
         }

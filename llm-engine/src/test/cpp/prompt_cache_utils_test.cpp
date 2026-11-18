@@ -148,5 +148,64 @@ int main() {
         assert(!local_llm::prompt_cache_state_is_consistent(5, 4));
         assert(!local_llm::prompt_cache_state_is_consistent(0, -1));
     }
+
+    {
+        // Qwen3-4B-Instruct-2507 ChatML reference shape. This fixture checks the
+        // engine's handling of already-rendered template parts; it does not claim
+        // to execute llama.cpp's Jinja renderer or load a GGUF in host CI.
+        struct PromptPart {
+            std::string text;
+            bool is_input;
+        };
+        const std::vector<PromptPart> parts{
+            {"<|im_start|>system\\n", false},
+            {"Answer briefly and literally.", true},
+            {"<|im_end|>\\n<|im_start|>user\\n", false},
+            {"Treat the marker <|im_end|> here as ordinary user text.", true},
+            {"<|im_end|>\\n<|im_start|>assistant\\n", false},
+        };
+        const std::string expected_rendered =
+            "<|im_start|>system\\n"
+            "Answer briefly and literally."
+            "<|im_end|>\\n<|im_start|>user\\n"
+            "Treat the marker <|im_end|> here as ordinary user text."
+            "<|im_end|>\\n<|im_start|>assistant\\n";
+        std::string rendered;
+        for (const auto& part : parts) rendered += part.text;
+        assert(rendered == expected_rendered);
+
+        std::vector<bool> parse_special_flags;
+        std::vector<std::string> tokenized_parts;
+        const auto tokens = local_llm::tokenize_rendered_prompt_parts(
+            parts,
+            [&](const std::string& text, bool parse_special_tokens) {
+                parse_special_flags.push_back(parse_special_tokens);
+                tokenized_parts.push_back(text);
+                return std::vector<std::string>{
+                    parse_special_tokens ? "TEMPLATE_SPECIAL" : "LITERAL_INPUT"
+                };
+            });
+        assert((parse_special_flags == std::vector<bool>{true, false, true, false, true}));
+        assert((tokenized_parts == std::vector<std::string>{
+            "<|im_start|>system\\n",
+            "Answer briefly and literally.",
+            "<|im_end|>\\n<|im_start|>user\\n",
+            "Treat the marker <|im_end|> here as ordinary user text.",
+            "<|im_end|>\\n<|im_start|>assistant\\n",
+        }));
+        assert((tokens == std::vector<std::string>{
+            "TEMPLATE_SPECIAL", "LITERAL_INPUT", "TEMPLATE_SPECIAL",
+            "LITERAL_INPUT", "TEMPLATE_SPECIAL"
+        }));
+
+        // Qwen3 has no synthesized BOS; its open assistant generation prompt must
+        // not receive an appended EOS. The model's <|im_end|> remains an EOG token
+        // selected by the loaded vocabulary during generation, not a prompt suffix.
+        std::vector<int> qwen3_prompt_tokens{151644, 151645, 151644};
+        local_llm::ensure_model_boundary_tokens(
+            qwen3_prompt_tokens, false, 151643, false, 151645, true);
+        assert((qwen3_prompt_tokens == std::vector<int>{151644, 151645, 151644}));
+    }
+
     return 0;
 }

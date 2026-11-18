@@ -431,8 +431,9 @@ internal class LocalLlmEngineImpl(
 
         _state.value = EngineState.Inferring(request)
         val requestStartNano = System.nanoTime()
-        val roles = request.messages.map { it.role.roleName }.toTypedArray()
-        val contents = request.messages.map { it.content }.toTypedArray()
+        val nativeMessages = NativePromptMessageMapper.map(request.messages)
+        val roles = nativeMessages.roles
+        val contents = nativeMessages.contents
 
         progressEvents.trySend(
             InferenceEvent.Progress(
@@ -660,13 +661,10 @@ internal class LocalLlmEngineImpl(
             }
 
             val rawReason = NativeEngineHandle.nativeGetLastFinishReason(handle)
-            val finishReason = when {
-                isCancelled.get() -> FinishReason.CANCELLED
-                rawReason == 0 -> FinishReason.STOP
-                rawReason == 1 -> FinishReason.MAX_TOKENS
-                rawReason == 2 -> FinishReason.CANCELLED
-                else -> FinishReason.ERROR
-            }
+            val finishReason = NativeFinishReasonMapper.fromNativeCode(
+                rawReason = rawReason,
+                cancellationRequested = isCancelled.get()
+            )
 
             val durationUs = NativeEngineHandle.nativeGetInferenceDurationUs(handle)
             val durationMs = (durationUs / 1000L).coerceAtLeast(1L)

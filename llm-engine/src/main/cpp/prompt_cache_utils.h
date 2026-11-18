@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace local_llm {
@@ -36,6 +38,22 @@ inline std::size_t reusable_prefix_length(
         const std::vector<Token>& prompt) {
     if (prompt.size() <= 1) return 0;
     return std::min(common_prefix_length(cached, prompt), prompt.size() - 1);
+}
+
+// Tokenize llama.cpp rendered chat-template parts without reinterpreting user content.
+// Template-owned parts may contain control-token spellings; input parts must stay literal.
+// This is shared by the JNI path and host fixtures so the special-token policy is testable.
+template <typename Parts, typename Tokenize>
+auto tokenize_rendered_prompt_parts(const Parts& parts, Tokenize&& tokenize)
+        -> decltype(tokenize(std::declval<const std::string&>(), false)) {
+    using TokenList = decltype(tokenize(std::declval<const std::string&>(), false));
+    TokenList result;
+    for (const auto& part : parts) {
+        if (part.text.empty()) continue;
+        auto part_tokens = tokenize(part.text, !part.is_input);
+        result.insert(result.end(), part_tokens.begin(), part_tokens.end());
+    }
+    return result;
 }
 
 // Ensure model-required BOS/EOS markers exist exactly once at sequence boundaries.
