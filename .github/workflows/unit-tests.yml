@@ -109,7 +109,12 @@ jobs:
             llm-engine/src/test/cpp/gdn_fusion_policy_test.cpp \
             -o "$RUNNER_TEMP/gdn-fusion-policy-test"
           "$RUNNER_TEMP/gdn-fusion-policy-test"
-          echo "Host prompt-cache, UTF-16 conversion and Qwen3.5 GDN policy tests passed (also run after JVM test failures)."
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Illm-engine/src/main/cpp \
+            llm-engine/src/test/cpp/qwen35_dense_prompt_fixture_test.cpp \
+            -o "$RUNNER_TEMP/qwen35-dense-prompt-fixture-test"
+          "$RUNNER_TEMP/qwen35-dense-prompt-fixture-test"
+          echo "Host prompt-cache, UTF-16 conversion, GDN policy and Qwen3.5 dense prompt fixtures passed (also run after JVM test failures)."
 
       - name: Validate and summarize JUnit reports
         if: always()

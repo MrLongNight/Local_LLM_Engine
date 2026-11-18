@@ -30,6 +30,7 @@
 #include "chat.h"
 #include "sampling.h"
 #include "prompt_cache_utils.h"
+#include "chat_template_inputs.h"
 #include "utf8_conversion_utils.h"
 #include "gdn_fusion_policy.h"
 
@@ -1758,11 +1759,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         out_used_template = false;
         out_template_mode = "FALLBACK";
         try {
-            common_chat_templates_inputs inputs;
-            inputs.messages = source_messages;
-            inputs.add_generation_prompt = add_generation_prompt;
-            inputs.use_jinja = true;
-            inputs.enable_thinking = (enable_thinking == JNI_TRUE);
+            const auto inputs =
+                local_llm::make_chat_template_inputs<common_chat_templates_inputs>(
+                    source_messages, add_generation_prompt, true, enable_thinking == JNI_TRUE);
             const auto rendered = common_chat_templates_apply(engine->chat_templates.get(), inputs);
             out_rendered = rendered.prompt;
             out_prompt = out_rendered.str();
@@ -1779,11 +1778,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
                     ",attempt=JINJA,result=FAILED,error=" + reason);
             }
             try {
-                common_chat_templates_inputs inputs;
-                inputs.messages = source_messages;
-                inputs.add_generation_prompt = add_generation_prompt;
-                inputs.use_jinja = false;
-                inputs.enable_thinking = (enable_thinking == JNI_TRUE);
+                const auto inputs =
+                    local_llm::make_chat_template_inputs<common_chat_templates_inputs>(
+                        source_messages, add_generation_prompt, false, enable_thinking == JNI_TRUE);
                 const auto rendered = common_chat_templates_apply(engine->chat_templates.get(), inputs);
                 out_rendered = rendered.prompt;
                 out_prompt = out_rendered.str();

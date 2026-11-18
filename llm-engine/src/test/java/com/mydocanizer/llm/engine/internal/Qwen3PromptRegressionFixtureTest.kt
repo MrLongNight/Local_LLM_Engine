@@ -49,6 +49,17 @@ class Qwen3PromptRegressionFixtureTest {
     }
 
     @Test
+    fun qwen35DenseFixtureMapsEveryNativeFinishCodeAndCancellationOverride() {
+        assertEquals(FinishReason.STOP, NativeFinishReasonMapper.fromNativeCode(0, false))
+        assertEquals(FinishReason.MAX_TOKENS, NativeFinishReasonMapper.fromNativeCode(1, false))
+        assertEquals(FinishReason.CANCELLED, NativeFinishReasonMapper.fromNativeCode(2, false))
+        assertEquals(FinishReason.ERROR, NativeFinishReasonMapper.fromNativeCode(3, false))
+        assertEquals(FinishReason.ERROR, NativeFinishReasonMapper.fromNativeCode(Int.MIN_VALUE, false))
+        assertEquals(FinishReason.CANCELLED, NativeFinishReasonMapper.fromNativeCode(0, true))
+        assertEquals(FinishReason.CANCELLED, NativeFinishReasonMapper.fromNativeCode(3, true))
+    }
+
+    @Test
     fun mapsEveryNativeTerminalCodeAndCallerCancellationDeterministically() {
         assertEquals(FinishReason.STOP, NativeFinishReasonMapper.fromNativeCode(0, false))
         assertEquals(FinishReason.MAX_TOKENS, NativeFinishReasonMapper.fromNativeCode(1, false))
