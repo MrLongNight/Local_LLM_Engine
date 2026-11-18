@@ -787,12 +787,17 @@ internal object EngineDiagnosticsReportBuilder {
                 .eachCount().toSortedMap()
                 .forEach { (status, count) -> add("$status=$count") }
             val smokePasses = configSmokeResults.count {
-                field(it, "exactOutput") == "true" && field(it, "normalStop") == "true"
+                field(it, "status")?.equals("PASS", ignoreCase = true)
+                    ?: (field(it, "exactOutput") == "true" && field(it, "normalStop") == "true")
             }
-            val smokeFailures = configSmokeResults.size - smokePasses
+            val smokeUnavailable = configSmokeResults.count {
+                field(it, "status")?.equals("UNAVAILABLE", ignoreCase = true) == true
+            }
+            val smokeFailures = configSmokeResults.size - smokePasses - smokeUnavailable
             if (configSmokeResults.isNotEmpty()) {
                 add("CONFIG_SMOKE_PASS=$smokePasses")
                 add("CONFIG_SMOKE_FAIL=$smokeFailures")
+                if (smokeUnavailable > 0) add("CONFIG_SMOKE_UNAVAILABLE=$smokeUnavailable")
             }
             val outputGateResults = kotlinLines.filter { eventName(it) == "OUTPUT_GATE_RESULT" }
             outputGateResults.groupingBy { field(it, "status") ?: "UNKNOWN" }

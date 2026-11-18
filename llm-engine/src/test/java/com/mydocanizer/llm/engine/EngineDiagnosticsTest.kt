@@ -548,6 +548,22 @@ class EngineDiagnosticsTest {
         assertFalse(report.contains("Keine Korrektheits-Gate-Ergebnisse vorhanden."))
     }
 
+    @Test
+    fun compactExportSeparatesUnavailableSmokeBackendFromCorrectnessFailure() {
+        val lines = listOf(
+            "2026-11-18 12:01:00.000 [INFO] [config_test] CONFIG_SMOKE_RESULT - " +
+                "profile=cpu-reference,status=PASS,exactOutput=true,normalStop=true",
+            "2026-11-18 12:01:01.000 [INFO] [config_test] CONFIG_SMOKE_RESULT - " +
+                "profile=vulkan-candidate,status=UNAVAILABLE,backend=UNAVAILABLE"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+
+        assertTrue(report.contains("CONFIG_SMOKE_PASS=1"))
+        assertTrue(report.contains("CONFIG_SMOKE_FAIL=0"))
+        assertTrue(report.contains("CONFIG_SMOKE_UNAVAILABLE=1"))
+    }
+
     private fun vulkanOperationMetric(
         pid: Int,
         runId: String,

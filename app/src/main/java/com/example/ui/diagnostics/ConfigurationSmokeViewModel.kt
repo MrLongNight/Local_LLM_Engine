@@ -163,16 +163,17 @@ abstract class ConfigurationSmokeViewModel(
                     val expectedOutput = "322,324,326,328,330"
                     val outputMatches = normalizedOutput == expectedOutput
                     val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
+                    val outputGatePassed = outputMatches && completedNormally && sample.result.tokensGenerated >= 4
                     val report = String.format(
                         java.util.Locale.US,
-                        "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | graphSplits=%d | run=%s",
+                        "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | gate=%s | graphSplits=%d | run=%s",
                         profile.label, profile.expectedBackend, backend, loadMs, cfg.threads, cfg.effectiveBatchThreads,
                         cfg.batchSize, InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend), sample.promptTokens,
                         sample.promptEvaluationMs?.toString() ?: "n/a",
                         sample.firstTokenMs?.toString() ?: "n/a",
                         sample.result.durationMs, sample.result.tokensGenerated,
                         sample.result.tokensPerSecond, sample.result.finishReason.name,
-                        outputMatches && completedNormally, sample.result.graphSplits,
+                        outputMatches, if (outputGatePassed) "PASS" else "FAIL", sample.result.graphSplits,
                         sample.result.diagnosticRunId.ifBlank { "n/a" }
                     )
                     rows += report
@@ -181,7 +182,7 @@ abstract class ConfigurationSmokeViewModel(
                         "CONFIG_SMOKE_RESULT",
                         "profile=" + profile.id + ",requestedBackend=" + profile.expectedBackend +
                             ",backend=" + backend + ",status=" +
-                            (if (outputMatches && completedNormally) "PASS" else "FAIL") +
+                            (if (outputGatePassed) "PASS" else "FAIL") +
                             ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
                             ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
                             ",loadMs=" + loadMs + ",nThreads=" + cfg.threads +
@@ -199,16 +200,16 @@ abstract class ConfigurationSmokeViewModel(
                             ",tokensPerSecond=" + sample.result.tokensPerSecond +
                             ",finishReason=" + sample.result.finishReason.name +
                             ",exactOutput=" + outputMatches +
-                            ",normalStop=" + completedNormally
+                            ",normalStop=" + completedNormally +
+                            ",outputGate=" + (if (outputGatePassed) "PASS" else "FAIL")
                     )
-                    if (sample.result.tokensGenerated < 4) {
-                        throw IllegalStateException("Zu wenige Ausgabetokens im " + profile.expectedBackend + "-Diagnoselauf.")
-                    }
-                    if (!outputMatches || !completedNormally) {
-                        throw IllegalStateException(
-                            "Korrektheitsprüfung fehlgeschlagen: exactOutput=" + outputMatches +
-                                ", finishReason=" + sample.result.finishReason.name
-                        )
+                    if (!outputGatePassed) {
+                        val rejection = "profile=" + profile.id +
+                            ",outputTokens=" + sample.result.tokensGenerated +
+                            ",exactOutput=" + outputMatches +
+                            ",finishReason=" + sample.result.finishReason.name
+                        rows += "Korrektheits-Gate fehlgeschlagen: " + rejection
+                        EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_REJECTED", rejection)
                     }
                     if (index < profiles.lastIndex) delay(InferenceConfigSmokePlan.COOLDOWN_MS)
                 }
