@@ -3,9 +3,8 @@ plugins {
 }
 
 // Profiler builds are intentionally opt-in: timestamp queries perturb throughput.
-// Explicit opt-in for numeric token-selection diagnostics. Disabled by default:
- // normal diagnostic runs must keep backend sampling active and must not persist
- // full prompts, token pieces or generated responses.
+// Debug APKs are the diagnostic harness. Capture complete, bounded inference
+// evidence by default; use -PlocalLlmSyntheticTokenDiagnostics=false to opt out.
 // Release builds explicitly keep every text-diagnostic compile flag disabled.
 val localLlmVulkanPerfProfiler = providers.gradleProperty("localLlmVulkanPerfProfiler")
     .map { it.equals("true", ignoreCase = true) }
@@ -21,7 +20,7 @@ val localLlmSyntheticTokenDiagnostics = providers.gradleProperty("localLlmSynthe
             )
         }
     }
-    .getOrElse(false)
+    .getOrElse(true)
 
 // ARM CPU kernels: the baseline arm64 build has no dot-product instructions
 // (runtime log: DOTPROD=0). Every Armv8.2-A core (Cortex-A55/A75/A76 and newer, i.e. every

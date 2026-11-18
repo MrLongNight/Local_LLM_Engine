@@ -222,11 +222,9 @@ static void local_llm_native_log_callback(enum ggml_log_level level, const char*
     // llama.cpp reports Vulkan capabilities and detailed backend diagnostics at DEBUG.
     // Full diagnostic Debug builds retain all levels; normal builds keep the compact
     // capability line while excluding noisy per-operation DEBUG messages.
-#if !defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
-    const bool is_vulkan_capability_line =
+const bool is_vulkan_capability_line =
         level == GGML_LOG_LEVEL_DEBUG && std::strstr(text, "ggml_vulkan:") != nullptr;
     if (level < GGML_LOG_LEVEL_INFO && !is_vulkan_capability_line) return;
-#endif
 
     int android_priority = ANDROID_LOG_INFO;
     switch (level) {
@@ -308,13 +306,56 @@ static void log_native_info_message(const std::string& message) {
 // debug traces preserve their position instead of silently truncating at the first NUL.
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
 static void log_native_text_trace(const std::string& message) {
+    const size_t header_end = message.find('\n');
+    if (header_end == std::string::npos) {
+        log_native_info_message(message);
+        return;
+    }
+
+    const std::string header = message.substr(0, header_end);
+    const std::string raw_body = message.substr(header_end + 1);
+    const size_t max_body_bytes =
+        header.find("kind=FINAL_ASSISTANT_OUTPUT") != std::string::npos
+            ? 64U * 1024U
+            : 16U * 1024U;
+    const bool truncated = raw_body.size() > max_body_bytes;
+    const std::string bounded_body = truncated
+        ? raw_body.substr(0, max_body_bytes)
+        : raw_body;
+
+    // Encode line breaks and NULs so every part is a single independently
+    // parseable log record with the same run ID and an explicit part index.
     std::string escaped;
-    escaped.reserve(message.size());
-    for (const char value : message) {
+    escaped.reserve(bounded_body.size() + 64);
+    for (const char value : bounded_body) {
         if (value == '\0') escaped += "\\0";
+        else if (value == '\r') escaped += "\\r";
+        else if (value == '\n') escaped += "\\n";
         else escaped.push_back(value);
     }
-    log_native_info_message(escaped);
+    if (truncated) escaped += "...[native trace truncated at byte limit]";
+
+    constexpr size_t TRACE_CHUNK_BYTES = 2400;
+    std::vector<std::string> chunks;
+    size_t offset = 0;
+    while (offset < escaped.size()) {
+        size_t chunk_end = std::min(offset + TRACE_CHUNK_BYTES, escaped.size());
+        // Do not split a UTF-8 code point across independently exported records.
+        while (chunk_end > offset && chunk_end < escaped.size() &&
+               (static_cast<unsigned char>(escaped[chunk_end]) & 0xC0U) == 0x80U) {
+            --chunk_end;
+        }
+        if (chunk_end == offset) chunk_end = std::min(offset + TRACE_CHUNK_BYTES, escaped.size());
+        chunks.emplace_back(escaped.substr(offset, chunk_end - offset));
+        offset = chunk_end;
+    }
+    if (chunks.empty()) chunks.emplace_back("");
+
+    for (size_t index = 0; index < chunks.size(); ++index) {
+        log_native_info_message(
+            header + ",part=" + std::to_string(index + 1) + "/" +
+            std::to_string(chunks.size()) + ",text=" + chunks[index]);
+    }
 }
 #endif
 
@@ -785,6 +826,7 @@ static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {
 }
 
 static jstring finish_native_generation(JNIEnv* env, EngineInstance* engine) {
+    jstring final_piece = flush_incomplete_utf8(env, engine);
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     if (engine != nullptr && !engine->assistant_ss.str().empty()) {
         log_native_text_trace(
@@ -792,7 +834,6 @@ static jstring finish_native_generation(JNIEnv* env, EngineInstance* engine) {
             ",kind=FINAL_ASSISTANT_OUTPUT\n" + engine->assistant_ss.str());
     }
 #endif
-    jstring final_piece = flush_incomplete_utf8(env, engine);
     flush_native_log_file();
     return final_piece;
 }
@@ -2260,7 +2301,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         local_llm::normalize_utf8_incremental(token_piece, engine->cached_token_chars);
     const int64_t piece_duration_us = llama_time_us() - piece_start_us;
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
-    {
+    if (engine->tokens_generated <= 8 || engine->tokens_generated % 64 == 0) {
         std::ostringstream token_piece_trace;
         token_piece_trace << "LOCAL_LLM_TEXT_TRACE - runId=" << engine->inference_run_id
                           << ",kind=TOKEN_PIECE,step=" << engine->tokens_generated

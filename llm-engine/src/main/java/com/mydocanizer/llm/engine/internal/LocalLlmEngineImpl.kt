@@ -657,7 +657,9 @@ internal class LocalLlmEngineImpl(
                 // Read the trace before checking for null: native returns null after
                 // terminal EOG/STOP, but that sampling step is the most important
                 // evidence when diagnosing an empty first response.
-                if (BuildConfig.TEXT_DIAGNOSTICS_ENABLED) {
+                if (BuildConfig.TEXT_DIAGNOSTICS_ENABLED &&
+                    (nativeTokenSteps < 8 || nativeTokenSteps % 16 == 0)
+                ) {
                     val tokenTrace = NativeEngineHandle.nativeGetLastTokenSelectionTrace(handle)
                     if (tokenTrace.isNotBlank()) {
                         EngineDiagnostics.recordTokenSelectionTrace(

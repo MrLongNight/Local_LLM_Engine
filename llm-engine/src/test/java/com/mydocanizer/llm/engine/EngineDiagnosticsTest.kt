@@ -529,6 +529,24 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("abortGracePeriodMs=3000"))
     }
 
+    @Test
+    fun compactExportKeepsAllChunksForRecentAssistantOutputsAndReportsSmokeGateFailure() {
+        val outputChunks = (1..48).map { part ->
+            val suffix = if (part == 1) "FIRST_OUTPUT_CHUNK" else if (part == 48) "LAST_OUTPUT_CHUNK" else "chunk-$part"
+            "2026-11-18 12:00:%02d.000 [INFO] [inference] INFERENCE_OUTPUT_PART_%d_OF_48 - ".format(part % 60, part) +
+                "runId=latest-run,finishReason=MAX_TOKENS,tokensGenerated=48,part=$part/48,text=$suffix"
+        }
+        val smokeResult =
+            "2026-11-18 12:01:00.000 [INFO] [config_test] CONFIG_SMOKE_RESULT - " +
+                "profile=vulkan-single-run,finishReason=MAX_TOKENS,exactOutput=false,normalStop=false"
+        val report = EngineDiagnostics.buildCompactReportForTest(outputChunks + smokeResult)
+
+        assertTrue(report.contains("FIRST_OUTPUT_CHUNK"))
+        assertTrue(report.contains("LAST_OUTPUT_CHUNK"))
+        assertTrue(report.contains("CONFIG_SMOKE_FAIL=1"))
+        assertFalse(report.contains("Keine Korrektheits-Gate-Ergebnisse vorhanden."))
+    }
+
     private fun vulkanOperationMetric(
         pid: Int,
         runId: String,
@@ -618,7 +636,7 @@ class EngineDiagnosticsTest {
     }
 
     @Test
-    fun compactExportFormatsEventsAndOmitsRawPromptTokenAndResponseText() {
+    fun compactExportIncludesNativeTextTracesButOmitsUnmarkedBenchmarkText() {
         val lines = listOf(
             "2026-11-13 09:00:00.000 [NATIVE] llama_context: LOCAL_LLM_QWEN35_GDN_POLICY - autoregressive=unfused,chunked=unfused,vulkanGdn=cpu-fallback\\n",
             "2026-11-13 09:00:01.000 [NATIVE] llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - " +
@@ -636,11 +654,13 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("cpuNodes=5(5.0%)"))
         assertTrue(report.contains("vulkanNodes=90(90.0%)"))
         assertTrue(report.contains("PASS=1"))
-        assertFalse(report.contains("private prompt text"))
-        assertFalse(report.contains("secret-token-piece"))
+        assertTrue(report.contains("private prompt text"))
+        assertTrue(report.contains("secret-token-piece"))
         assertFalse(report.contains("private generated response"))
         assertFalse(report.contains("BACKEND_BENCHMARK_TEST_OUTPUT"))
-        assertFalse(report.contains("LOCAL_LLM_TEXT_TRACE"))
+        assertTrue(report.contains("LOCAL_LLM_TEXT_TRACE"))
+        assertTrue(report.contains("Export-Schema: 2"))
+        assertTrue(report.contains("textDiagnostics=true"))
         assertTrue(report.contains("Korrektheitsprüfung [CORRECTNESS_GATE_RESULT]"))
         assertTrue(report.contains("• Backend: Vulkan"))
         assertTrue(report.contains("• Status: PASS"))

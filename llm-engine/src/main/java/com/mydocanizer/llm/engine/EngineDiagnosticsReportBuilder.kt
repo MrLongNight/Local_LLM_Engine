@@ -31,6 +31,7 @@ internal object EngineDiagnosticsReportBuilder {
     private const val MAX_NATIVE_LINES = 14
     private const val MAX_MEMORY_TIMELINE_LINES = 16
     private const val MAX_VULKAN_PROFILE_SNAPSHOTS = 12
+    private const val MAX_NATIVE_TEXT_EVIDENCE_CHARS = 24 * 1024
 
     internal fun field(line: String, key: String): String? {
         val marker = "$key="
@@ -370,15 +371,59 @@ internal object EngineDiagnosticsReportBuilder {
             }
             .filterNot { correctnessGateKey(it, "status") in representedGateResults }
             .takeLast(8)
-        val textEvidence = kotlinLines
-            .filter { line ->
-                val event = eventName(line)
-                event.startsWith("INFERENCE_OUTPUT") ||
-                    event.startsWith("CONFIG_SMOKE_TEST_INPUT") ||
-                    event.startsWith("CONFIG_SMOKE_TEST_OUTPUT")
-            }
-            .takeLast(40)
+        val inferenceOutputEvents = kotlinLines.filter {
+            eventName(it).startsWith("INFERENCE_OUTPUT")
+        }
+        val recentOutputRunIds = inferenceOutputEvents
+            .mapNotNull { field(it, "runId") }
+            .distinct()
+            .takeLast(3)
+            .toSet()
+        val inferenceOutputEvidence = inferenceOutputEvents.filter {
+            field(it, "runId") in recentOutputRunIds
+        }
+        val explicitTestTextEvidence = kotlinLines.filter {
+            val event = eventName(it)
+            event.startsWith("CONFIG_SMOKE_TEST_INPUT") ||
+                event.startsWith("CONFIG_SMOKE_TEST_OUTPUT")
+        }.takeLast(24)
+        val tokenSelectionEvidence = kotlinLines
+            .filter { eventName(it) == "TOKEN_SELECTION_TRACE" }
+            .takeLast(32)
+        val textEvidence = (inferenceOutputEvidence + explicitTestTextEvidence + tokenSelectionEvidence)
+            .distinct()
+            .sorted()
             .map { compactLine(it, 3_000) }
+
+        val nativeTextTraceEvents = nativeLines.filter {
+            it.contains("LOCAL_LLM_TEXT_TRACE - ")
+        }
+        val recentNativeTraceRunIds = nativeTextTraceEvents
+            .mapNotNull { field(it, "runId") }
+            .distinct()
+            .takeLast(2)
+            .toSet()
+        val nativeTextTraceCandidates = nativeTextTraceEvents.filter { line ->
+            field(line, "runId") in recentNativeTraceRunIds &&
+                (field(line, "kind") != "TOKEN_PIECE" ||
+                    (field(line, "step")?.toIntOrNull()?.let { it <= 8 || it % 64 == 0 } == true)) &&
+                !(field(line, "kind") == "FINAL_ASSISTANT_OUTPUT" &&
+                    field(line, "runId") in recentOutputRunIds)
+        }
+        var nativeTextBudget = MAX_NATIVE_TEXT_EVIDENCE_CHARS
+        val nativeTextEvidence = buildList {
+            for (line in nativeTextTraceCandidates) {
+                if (nativeTextBudget <= 0) break
+                val compact = compactLine(line, 3_000)
+                if (compact.length <= nativeTextBudget) {
+                    add(compact)
+                    nativeTextBudget -= compact.length
+                } else {
+                    add(compact.take(nativeTextBudget) + " …[native text evidence truncated]")
+                    nativeTextBudget = 0
+                }
+            }
+        }
         val kotlinInferenceContextEvidence = kotlinLines
             .filter {
                 eventName(it) in setOf(
@@ -704,11 +749,14 @@ internal object EngineDiagnosticsReportBuilder {
         }
         val periodStart = timestampedRows.minOrNull() ?: "n/a"
         val periodEnd = timestampedRows.maxOrNull() ?: "n/a"
+        val latestModelArchitecture = kotlinLines
+            .lastOrNull { eventName(it) == "MODEL_IDENTITY" }
+            ?.let { field(it, "architecture") }
         val latestGdnPolicy = qwen35GdnPolicyEvidence.lastOrNull()
             ?.substringAfter("LOCAL_LLM_QWEN35_GDN_POLICY - ")
             ?.replace("\\n", "")
             ?.trim()
-            ?: "n/a"
+            ?: "n/a (no GDN policy event; architecture=${latestModelArchitecture ?: "unknown"})"
         val latestGraphDistribution = graphBackendDistributionEvidence.lastOrNull()
         fun nodePercent(nodes: Int?, total: Int?): String =
             if (nodes == null || total == null || total <= 0) "n/a"
@@ -722,21 +770,33 @@ internal object EngineDiagnosticsReportBuilder {
                 "cpuNodes=${cpu ?: "n/a"}(${nodePercent(cpu, total)})," +
                 "vulkanNodes=${vulkan ?: "n/a"}(${nodePercent(vulkan, total)})," +
                 "otherNodes=${other ?: "n/a"}(${nodePercent(other, total)})"
-        } ?: "graphSplits=n/a,graphNodes=n/a,cpuNodes=n/a,vulkanNodes=n/a,otherNodes=n/a"
+        } ?: "graphSplits=n/a,graphNodes=n/a,cpuNodes=n/a,vulkanNodes=n/a,otherNodes=n/a (graph distribution not recorded)"
         val correctnessGateEvents = kotlinLines
             .filter { eventName(it) == "CORRECTNESS_GATE_RESULT" }
-        val gateStatusSummary = correctnessGateEvents
-            .groupingBy { field(it, "status") ?: "UNKNOWN" }
-            .eachCount()
-            .toSortedMap()
-            .map { (status, count) -> "$status=$count" }
+        val configSmokeResults = kotlinLines
+            .filter { eventName(it) == "CONFIG_SMOKE_RESULT" }
+        val gateStatusSummary = buildList {
+            correctnessGateEvents.groupingBy { field(it, "status") ?: "UNKNOWN" }
+                .eachCount().toSortedMap()
+                .forEach { (status, count) -> add("$status=$count") }
+            val smokePasses = configSmokeResults.count {
+                field(it, "exactOutput") == "true" && field(it, "normalStop") == "true"
+            }
+            val smokeFailures = configSmokeResults.size - smokePasses
+            if (configSmokeResults.isNotEmpty()) {
+                add("CONFIG_SMOKE_PASS=$smokePasses")
+                add("CONFIG_SMOKE_FAIL=$smokeFailures")
+            }
+        }
 
         return buildString {
             appendLine("LOCAL LLM ENGINE – DIAGNOSEBERICHT")
             appendLine("============================================================")
             appendLine("Erstellt: ${Date()}")
+            appendLine("Export-Schema: 2")
+            appendLine("Build: variant=${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"},textDiagnostics=${BuildConfig.TEXT_DIAGNOSTICS_ENABLED},vulkanProfiler=${BuildConfig.VULKAN_PERF_PROFILER_ENABLED}")
             appendLine("Datenbasis: ${ordered.size} Logeinträge · ${samples.size} RAM-Messpunkte")
-            appendLine("Export: kompakt, nach Themen gruppiert, ohne Prompt-/Antwort-Rohtexte")
+            appendLine("Export: kompakt, nach Themen gruppiert, mit begrenzten run-korrelierten Text-/Token-Traces im Debug-Diagnosemodus")
             appendLine("------------------------------------------------------------")
             appendLine("Zeitraum: $periodStart bis $periodEnd")
             appendLine("gdnPolicy=$latestGdnPolicy")
@@ -745,9 +805,16 @@ internal object EngineDiagnosticsReportBuilder {
             if (gateStatusSummary.isEmpty()) appendLine("Keine Korrektheits-Gate-Ergebnisse vorhanden.")
             else gateStatusSummary.forEach(::appendLine)
             appendLine()
-            appendLine("[GENERIERTE LLM-AUSGABEN / EXPLIZITE TESTTEXTE]")
-            if (textEvidence.isEmpty()) appendLine("Keine gespeicherten Textausgaben/Testtexte vorhanden.")
+            appendLine("[GENERIERTE LLM-AUSGABEN / EXPLIZITE TESTTEXTE / TOKEN-SELECTION]")
+            if (textEvidence.isEmpty()) appendLine("Keine gespeicherten Antwort-/Testtext-/Token-Selection-Ereignisse vorhanden.")
             textEvidence.forEach(::appendLine)
+            appendLine()
+            appendLine("[NATIVE PROMPT-/TEMPLATE-/TOKEN-TRACES]")
+            when {
+                !BuildConfig.TEXT_DIAGNOSTICS_ENABLED -> appendLine("Nicht aktiviert: Debug-APK mit Textdiagnostik bauen; Release-Builds deaktivieren diese Traces.")
+                nativeTextEvidence.isEmpty() -> appendLine("Aktiviert, aber für die letzten Inferenzläufe wurden keine nativen Text-Traces gefunden.")
+                else -> nativeTextEvidence.forEach(::appendLine)
+            }
             appendLine()
             appendLine("[INFERENZ-KONTEXT / TEMPLATE / TOKENIZER / SAMPLER]")
             if (inferenceSetupEvidence.isEmpty()) appendLine("Keine nativen Prompt-/Sampler-Metadaten vorhanden.")
@@ -801,8 +868,9 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[8] RAM-ZEITVERLAUF")
             memoryTimeline.forEach(::appendLine)
             appendLine()
-            appendLine("[ROHTEXT – NICHT ERFASST]")
-            appendLine("Normale Chat-Eingaben und gerenderte Prompts werden nicht protokolliert. Generierte Antworten sowie ausdrücklich markierte Testeingaben und Sollwerte stehen oben im Textabschnitt.")
+            appendLine("[DIAGNOSTIK-VOLLSTÄNDIGKEIT]")
+            appendLine("Debug-Textdiagnostik=${BuildConfig.TEXT_DIAGNOSTICS_ENABLED}; Antworttext wird run-korreliert exportiert; native Eingaben/gerenderte Prompts/Token-IDs und Stichproben der Token-Pieces erscheinen nur bei aktivierter Debug-Textdiagnostik.")
+            appendLine("Export-Schema 2 kennzeichnet diesen Export eindeutig; ältere Exporte ohne Schema-Kennung enthalten die vollständigen Text-Traces nicht.")
             appendLine()
             appendLine("[9] NATIVE / VULKAN – AUSGEWÄHLTE EREIGNISSE")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
