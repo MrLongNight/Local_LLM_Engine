@@ -795,11 +795,11 @@ internal class LocalLlmEngineImpl(
                 "inference", "INFERENCE_TERMINAL_FAILURE",
                 "runId=$inferenceRunId,phase=GENERATION,backend=${modelInfo.activeBackend},outputChars=${outputBuilder.length}"
             )
+            finalizePendingNativeOutput()
             EngineDiagnostics.recordInferenceOutput(
                 inferenceRunId, outputBuilder.toString(), "ERROR", tokenCount
             )
             EngineDiagnostics.error("inference", "GENERATION_LOOP_FAILED", t)
-            finalizePendingNativeOutput()
             trySend(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
             nativeWorkActive.set(false)

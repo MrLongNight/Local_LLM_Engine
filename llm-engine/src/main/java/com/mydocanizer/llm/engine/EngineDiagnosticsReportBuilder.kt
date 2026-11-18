@@ -379,13 +379,30 @@ internal object EngineDiagnosticsReportBuilder {
             }
             .takeLast(40)
             .map { compactLine(it, 3_000) }
-        val inferenceSetupEvidence = nativeLines
+        val kotlinInferenceContextEvidence = kotlinLines
+            .filter {
+                eventName(it) in setOf(
+                    "MODEL_IDENTITY",
+                    "MODEL_SHA256_COMPLETED",
+                    "MODEL_SHA256_REUSED_IMPORT_DIGEST",
+                    "MODEL_SHA256_SKIPPED_DIRECT_SOURCE",
+                    "MODEL_LOAD_STARTED",
+                    "MODEL_NATIVE_RUNTIME_READY",
+                    "INFERENCE_RUN_CONTEXT"
+                )
+            }
+            .takeLast(24)
+            .map { compactLine(it, 2_000) }
+        val nativeInferenceSetupEvidence = nativeLines
             .filter {
                 it.contains("LOCAL_LLM_PROMPT_METADATA") ||
-                    it.contains("LOCAL_LLM_SAMPLER_PARAMETERS")
+                    it.contains("LOCAL_LLM_SAMPLER_PARAMETERS") ||
+                    it.contains("LOCAL_LLM_TEMPLATE_RENDER_ATTEMPT")
             }
             .takeLast(16)
             .map { compactLine(it, 1_200) }
+
+        val inferenceSetupEvidence = kotlinInferenceContextEvidence + nativeInferenceSetupEvidence
 
         val performanceEvents = (
             kotlinLines
