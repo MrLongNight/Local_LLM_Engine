@@ -112,6 +112,6 @@ class InferenceConfigSmokePlanTest {
     fun resolvesAutoMicroBatchByActualBackendWithoutChangingProfile() {
         val config = EngineConfig(batchSize = 128, backendPreference = BackendPreference.VULKAN)
         assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(config, "Vulkan selected"))
-        assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(config, "CPU backend"))
+        assertEquals(128, InferenceConfigSmokePlan.resolvedUbatchForTest(config, "CPU backend"))
     }
 }
