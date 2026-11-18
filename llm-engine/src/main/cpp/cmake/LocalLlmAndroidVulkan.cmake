@@ -457,7 +457,6 @@ static void ggml_vk_get_physical_device_features2(
         const auto q4k_selection = local_llm::resolve_q4k_pipeline(
             quantize_y, dmmv, to_q8_1, base_dmmv);
         dmmv = q4k_selection.pipeline;
-        quantize_y = q4k_selection.quantize_y;
         q8_1_fallback_stage = local_llm::q4k_q8_1_fallback_stage_name(q4k_selection.fallback_stage);
         if (q4k_selection.fallback) {
             local_llm_q4k_decode_reason = q4k_selection.available
@@ -466,6 +465,7 @@ static void ggml_vk_get_physical_device_features2(
         } else if (!q4k_selection.available) {
             local_llm_q4k_decode_reason = "base_pipeline_unavailable";
         }
+        quantize_y = q4k_selection.quantize_y;
         if (!quantize_y) {
             to_q8_1 = nullptr;
         }
