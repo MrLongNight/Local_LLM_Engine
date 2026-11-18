@@ -116,8 +116,26 @@ abstract class ConfigurationSmokeViewModel(
                         "Profil " + (index + 1) + "/" + profiles.size + ": " + profile.label + " – Modell wird neu geladen…"
                     restoreRequired = true
                     val loadStart = System.nanoTime()
-                    val loaded = engine.loadModel(source, profile.config).getOrElse { throw it }
+                    val loadResult = engine.loadModel(source, profile.config)
                     val loadMs = (System.nanoTime() - loadStart) / 1_000_000L
+                    if (loadResult.isFailure) {
+                        val loadError = loadResult.exceptionOrNull() ?: IllegalStateException("Unbekannter Modellladefehler")
+                        if (profile.expectedBackend == "VULKAN" && isVulkanBackendUnavailable(loadError)) {
+                            val reason = "VULKAN_DEVICE_UNAVAILABLE_OR_INITIALIZATION_FAILED"
+                            rows += "Vulkan nicht verfügbar (nicht als Pass gewertet): " +
+                                (loadError.message ?: loadError.javaClass.simpleName)
+                            stoppedReason = "Vulkan-Backend nicht verfügbar; CPU-Referenz bleibt separat dokumentiert."
+                            EngineDiagnostics.info(
+                                "config_test",
+                                "CONFIG_SMOKE_RESULT",
+                                "profile=" + profile.id + ",requestedBackend=VULKAN,backend=UNAVAILABLE," +
+                                    "status=UNAVAILABLE,reason=" + reason + ",loadMs=" + loadMs
+                            )
+                            break
+                        }
+                        throw loadError
+                    }
+                    val loaded = loadResult.getOrThrow()
                     val backend = backendFamily(loaded.activeBackend)
                     if (backend == "UNKNOWN") throw IllegalStateException("Aktives Backend nicht eindeutig: " + loaded.activeBackend)
                     if (backend != profile.expectedBackend) {
@@ -128,8 +146,13 @@ abstract class ConfigurationSmokeViewModel(
                     }
                     confirmedBackends += profile.id + "=" + backend
                     if (loaded.sizeBytes != model.sizeBytes ||
-                        (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
-                    ) throw IllegalStateException("Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt.")
+                        (!model.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
+                    ) throw IllegalStateException("Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt (Größe/SHA-256).")
+                    val shaStatus = if (!model.sha256.isNullOrBlank() && model.sha256 == loaded.sha256) {
+                        "VERIFIED"
+                    } else {
+                        "UNAVAILABLE"
+                    }
 
                     val sample = collectConfigurationSmokeSample(
                         InferenceConfigSmokePlan.MEASURED_TOKENS,
@@ -142,25 +165,32 @@ abstract class ConfigurationSmokeViewModel(
                     val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
                     val report = String.format(
                         java.util.Locale.US,
-                        "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s",
+                        "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | graphSplits=%d | run=%s",
                         profile.label, profile.expectedBackend, backend, loadMs, cfg.threads, cfg.effectiveBatchThreads,
                         cfg.batchSize, InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend), sample.promptTokens,
                         sample.promptEvaluationMs?.toString() ?: "n/a",
                         sample.firstTokenMs?.toString() ?: "n/a",
                         sample.result.durationMs, sample.result.tokensGenerated,
                         sample.result.tokensPerSecond, sample.result.finishReason.name,
-                        outputMatches && completedNormally
+                        outputMatches && completedNormally, sample.result.graphSplits,
+                        sample.result.diagnosticRunId.ifBlank { "n/a" }
                     )
                     rows += report
                     EngineDiagnostics.info(
                         "config_test",
                         "CONFIG_SMOKE_RESULT",
                         "profile=" + profile.id + ",requestedBackend=" + profile.expectedBackend +
-                            ",backend=" + backend + ",gpuLayersRequested=" + cfg.gpuLayers +
+                            ",backend=" + backend + ",status=" +
+                            (if (outputMatches && completedNormally) "PASS" else "FAIL") +
+                            ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
+                            ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
                             ",loadMs=" + loadMs + ",nThreads=" + cfg.threads +
                             ",nThreadsBatch=" + cfg.effectiveBatchThreads +
                             ",nBatch=" + cfg.batchSize +
                             ",nUbatch=" + InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend) +
+                            ",diagnosticRunId=" + sample.result.diagnosticRunId +
+                            ",nativeRunId=" + sample.result.nativeRunId +
+                            ",graphSplits=" + sample.result.graphSplits +
                             ",promptTokens=" + sample.promptTokens +
                             ",promptElapsedMs=" + (sample.promptEvaluationMs ?: -1L) +
                             ",ttftMs=" + (sample.firstTokenMs ?: -1L) +
@@ -234,6 +264,18 @@ abstract class ConfigurationSmokeViewModel(
         engine.cancelInference()
         configurationSmokeJob?.cancel(CancellationException("Configuration smoke test cancelled"))
         _configSmokeReport.value = "Abbruch angefordert – sichere Wiederherstellung wird ausgeführt…"
+    }
+
+    private fun isVulkanBackendUnavailable(error: Throwable): Boolean {
+        var current: Throwable? = error
+        repeat(8) {
+            val message = current?.message
+            if (message?.contains("Vulkan backend was explicitly requested", ignoreCase = true) == true) {
+                return true
+            }
+            current = current?.cause
+        }
+        return false
     }
 
     private data class ConfigurationSmokeSample(

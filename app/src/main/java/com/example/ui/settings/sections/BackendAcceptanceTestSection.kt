@@ -34,7 +34,7 @@ internal fun BackendAcceptanceTestSection(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Je ein kurzer deterministischer CPU-Referenz- und Vulkan-Kandidatenlauf mit derselben Modelldatei, Testeingabe und gemeinsamen Parametern. " +
+                text = "Je ein kurzer deterministischer CPU-Referenz- und Vulkan-Kandidatenlauf (falls Vulkan verfügbar ist) mit derselben Modelldatei, Testeingabe und gemeinsamen Parametern. " +
                     "Der Export erfasst pro Backend die tatsächliche Auswahl, Konfiguration, Ausgabe, Finish-Grund, " +
                     "Graph-Verteilung, Tokenzeiten und RAM. Keine Parameter-Sweeps.",
                 style = MaterialTheme.typography.bodySmall,
@@ -46,7 +46,7 @@ internal fun BackendAcceptanceTestSection(
                 enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
                 modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
             ) {
-                Text(if (isBenchmarking) "Vulkan-Diagnose läuft…" else "CPU + Vulkan prüfen")
+                Text(if (isBenchmarking) "CPU/Vulkan-Test läuft…" else "CPU + Vulkan prüfen")
             }
         }
     }
