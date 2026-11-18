@@ -86,39 +86,76 @@ The overlay comment records repeated runtime-verified Mali-G57 measurements for 
 
 **No source change or performance-default change was made in this audit.** The actual target-device dispatch still needs confirmation from the run-correlated `LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH` trace on the nubia Mali-G57. A CI build or the presence of Vulkan shaders does not prove GPU execution. The separate P0-04b task must validate the missing-Q8_1-pipeline fallback with automated tests; this audit does not claim that fallback behavior is fully tested.
 
-## Standard short device functional check
+## Standard paired device functional and performance smoke test
 
-Use this single, deterministic smoke test after changes that affect inference, prompt/template handling, token output, backend selection or native runtime behavior. It is a **functional regression check**, not a throughput benchmark and not a substitute for D1a/D2.
+Run this paired test after changes that may affect inference correctness, prompt/template handling, token output, backend selection, memory behavior or native execution. CPU and Vulkan are **both mandatory**. This is the repeatable short regression baseline between TODO tasks; it does not replace the deeper D1a/D2 acceptance runs.
 
-### Fixed model and configuration
+### Fixed model and conversation
 
-- **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Use the same unchanged GGUF file for every repeat. The catalogue entry above links the reference GGUF source; do not silently switch to Qwen3.5, Qwen3-VL or a different community conversion.
-- **Conversation:** start a new/empty chat for every run. Keep the engine's default German system message (`Du bist ein hilfreicher, präziser KI-Assistent.`) and do not include previous user/assistant messages.
-- **Backend:** request Vulkan; request 99 GPU layers so the backend can clamp to the model/device limit. A CPU selection is a failure for this test, not a successful fallback.
-- **Memory-conscious fixed shape:** context 256, batch 128, micro-batch 64, threads 2, batch threads 2. Keep `enableThinking=false`.
-- **Sampling:** temperature 0 / greedy; retain top-K 20, top-P 1.0 and min-P 0.05 if the UI requires explicit values. Limit the answer to 16 generated tokens. Do not change sampler values between repeated runs.
-- Record the actual model file size and SHA-256. A direct SAF descriptor that reports SHA as `UNAVAILABLE` can still provide a one-off functional smoke result, but it is **not** an identity-verified or comparable baseline. D1a and D2 require verified identical model bytes.
+- **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Use the same unchanged GGUF bytes for every CPU and Vulkan run. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF).
+- Start a new/empty chat for each inference. Keep the default system message (`Du bist ein hilfreicher, präziser KI-Assistent.`); no preceding user/assistant messages.
+- Do not switch model revision, tokenizer, chat template, sampler, context or batch parameters between the two backend runs.
+
+### Fixed parameters
+
+| Parameter | CPU run | Vulkan run |
+|---|---:|---:|
+| Requested backend | CPU | Vulkan |
+| GPU layers | 0 | 99 (backend clamps to device/model limit) |
+| Context | 256 | 256 |
+| Batch | 128 | 128 |
+| Micro-batch | 64 | 64 |
+| Threads | 6 | 6 |
+| Batch threads | 6 | 6 |
+| Thinking | Off | Off |
+| Temperature | 0 / greedy | 0 / greedy |
+| Top-K | 20 | 20 |
+| Top-P | 1.0 | 1.0 |
+| Min-P | 0.05 | 0.05 |
+| Maximum generated tokens | 128 | 128 |
+
+The effective context must remain 256; a lower context makes the run invalid. If a control is not exposed by the UI, leave its engine default unchanged and record the effective value from diagnostics. The only intended configuration difference is CPU versus Vulkan and the corresponding GPU-layer request.
 
 ### Fixed prompt
 
 Send this exact text as the only user message:
 
 ~~~text
-Ein Lager hat 8 Kisten mit je 24 Flaschen. 37 Flaschen werden entnommen. Wie viele Flaschen bleiben? Antworte ausschließlich im Format ERGEBNIS=Zahl.
+Berechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. Keine Einleitung, keine Erklärung und kein weiterer Text.
 ~~~
 
-Expected output after trimming leading/trailing whitespace:
+Expected output after normalizing only line endings and trimming the outer whitespace:
 
-`ERGEBNIS=155`
+~~~text
+ERGEBNIS=155
+FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
+~~~
 
-### Pass criteria
+Do not strip or rewrite interior text before checking equality.
 
-1. The GGUF identity is Qwen3-4B-Instruct-2507 / `qwen3` / Q4_K_M; record actual bytes and SHA status.
-2. Model load completes and diagnostics identify Vulkan as the **actual** active backend. Record actual GPU layers and the run-correlated graph/backend distribution; a requested Vulkan backend or registered Vulkan device alone is insufficient.
-3. The trimmed response is exactly `ERGEBNIS=155`, the finish reason is `STOP` and `OUTPUT_GATE=PASS`. `MAX_TOKENS`, cancel, error, missing output or CPU execution fails the smoke test.
-4. Save the diagnostic export and its run ID. Do not compare tokens/s from this short prompt; use the dedicated D2 performance scenario for that.
+### Pass criteria — check each backend independently
 
-The 256-token context is intentional: the 18.11.2026 report showed the Memory Guard reducing a requested 2048-token context to 256 under the then-current available-memory pressure. The smoke test fixes the effective context at 256 so ordinary memory variation does not change the test shape.
+1. The exact model file is Qwen3-4B-Instruct-2507 / `qwen3` / Q4_K_M. Record filename, actual byte count and SHA-256. Both runs must use the same identity. A missing SHA (`UNAVAILABLE`) permits a one-off functional check but **does not establish a comparable baseline**.
+2. Model load completes, the effective context is 256 and the response finishes with `STOP` and `OUTPUT_GATE=PASS`. The trimmed output must match the two lines above exactly. `MAX_TOKENS`, cancel, error, partial output or any text mismatch fails that backend run.
+3. **CPU run:** diagnostics must prove CPU was the actual execution backend and GPU offload was zero. A requested CPU mode alone is insufficient.
+4. **Vulkan run:** diagnostics must prove actual Vulkan node/layer execution and record actual GPU layers plus the run-correlated graph/backend distribution. A registered Vulkan device or requested Vulkan mode alone is insufficient. CPU nodes are allowed only when the graph/operator policy explicitly assigns them to CPU; record their count and reasons.
+5. A silent CPU fallback during the Vulkan run is a failure, not a successful Vulkan test. A silent Vulkan assignment during the CPU run is likewise a failure.
+
+### Comparison record
+
+Save a diagnostic export for each run and record the two run IDs together as one pair. For each backend capture:
+
+- model-load time and effective context;
+- prompt-token count, prefill time and time-to-first-token;
+- generated-token count, decode tokens/s and total generation time;
+- actual CPU/Vulkan graph distribution and GPU-layer count;
+- process PSS, available system RAM, memory-guard decisions and Android thermal status.
+
+The initial D0 baseline should use three measured inferences per backend after one warm-up per backend; compare medians. For a quick check between TODO tasks, one clean inference per backend is sufficient to catch correctness or backend-selection regressions. Treat a single-run throughput delta as a warning only; repeat three times per backend under comparable thermal and memory conditions before calling it a performance regression or improvement. Alternate which backend runs first on subsequent comparison sessions to reduce order bias.
+
+The paired result is the engine's CPU/Vulkan comparison baseline. Keep functional pass/fail separate from performance interpretation: a faster run with wrong output or incorrect backend selection is still a failure. Do not use the short smoke result as final model-performance acceptance; D2 remains the dedicated longer benchmark.
+
+The 256-token context is intentional: the 18.11.2026 device report showed the Memory Guard reducing a requested 2048-token context to 256 under the then-current memory pressure. Fixing the effective context at 256 keeps this repeatable regression test within the observed device budget; the separate D1a/D2 runs retain their own explicitly matched context settings.
 
 ## Performance reporting rules
 
