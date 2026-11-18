@@ -10,10 +10,34 @@ class BackendCorrectnessGateTest {
     fun acceptsMatchingGreedyChoicesWithAtLeastFourTopFiveCandidatesInCommon() {
         val result = BackendCorrectnessGate.evaluate(fixture(), "cpu-run", "vulkan-run")
         assertEquals("PASS", result.status)
-        assertEquals("TOP1_IDENTICAL_TOP5_OVERLAP_GE_4;modelIdentity=SHA256_MATCHED", result.reason)
+        assertEquals("TOP1_IDENTICAL_TOP5_OVERLAP_GE_4", result.reason)
         assertEquals(4, result.comparedSteps)
         assertEquals(4, result.minimumTop5Overlap)
         assertTrue(result.passed)
+    }
+
+    @Test
+    fun refusesToPassWhenEitherModelSha256IsUnavailable() {
+        val lines = fixture().map {
+            if (it.contains("runId=vulkan-run,pid=100")) {
+                it.replace("modelSha256=" + "a".repeat(64), "modelSha256=unavailable")
+            } else it
+        }
+        val result = BackendCorrectnessGate.evaluate(lines, "cpu-run", "vulkan-run")
+        assertEquals("UNAVAILABLE", result.status)
+        assertEquals("MODEL_SHA256_UNAVAILABLE_OR_INVALID", result.reason)
+    }
+
+    @Test
+    fun rejectsDifferentEffectiveMicroBatchSettings() {
+        val lines = fixture().map {
+            if (it.contains("runId=vulkan-run,pid=100")) {
+                it.replace("microBatchEffective=64", "microBatchEffective=128")
+            } else it
+        }
+        val result = BackendCorrectnessGate.evaluate(lines, "cpu-run", "vulkan-run")
+        assertEquals("FAIL", result.status)
+        assertEquals("MODEL_OR_INFERENCE_CONFIGURATION_MISMATCH:microBatchEffective", result.reason)
     }
 
     @Test
@@ -125,7 +149,7 @@ class BackendCorrectnessGateTest {
             val preference = profile[2]
             val layers = profile[3]
             lines += "2026-11-18 10:00:00.000 [INFO] [inference] INFERENCE_RUN_CONTEXT - " +
-                "runId=" + runId + ",pid=100,model=7,modelBytes=1000,modelSha256=sha256," +
+                "runId=" + runId + ",pid=100,model=7,modelBytes=1000,modelSha256=" + "a".repeat(64) + "," +
                 "architecture=qwen3,activeBackend=" + backend + ",backendPreference=" + preference +
                 ",contextSize=2048,batchSize=128,microBatchRequested=0,microBatchEffective=64," +
                 "threads=2,batchThreads=2,gpuLayersRequested=" + layers + ",flashAttention=AUTO," +

@@ -1,5 +1,7 @@
 package com.mydocanizer.llm.engine.internal
 
+import java.util.Locale
+
 /**
  * Fail-closed comparison of a CPU reference run and a Vulkan candidate run.
  * The request contract is checked before token-selection logits are compared.
@@ -25,8 +27,8 @@ internal object BackendCorrectnessGate {
     private const val CACHE_PLAN_MARKER = "Prompt cache plan:"
 
     private val comparableRunFields = listOf(
-        "modelBytes", "modelSha256", "architecture",
-        "contextSize", "batchSize", "microBatchRequested",
+        "modelBytes", "architecture",
+        "contextSize", "batchSize", "microBatchRequested", "microBatchEffective",
         "threads", "batchThreads", "flashAttention",
         "temperatureDefault", "temperatureOverride",
         "topPDefault", "topPOverride", "topK", "minP",
@@ -61,6 +63,16 @@ internal object BackendCorrectnessGate {
         if (missingRunFields.isNotEmpty()) {
             return unavailable("RUN_CONFIGURATION_EVIDENCE_MISSING:" + missingRunFields.joinToString("|"))
         }
+        val sha256Pattern = Regex("[0-9a-fA-F]{64}")
+        val cpuSha256 = cpuContext["modelSha256"].orEmpty()
+        val candidateSha256 = candidateContext["modelSha256"].orEmpty()
+        if (!sha256Pattern.matches(cpuSha256) || !sha256Pattern.matches(candidateSha256)) {
+            return unavailable("MODEL_SHA256_UNAVAILABLE_OR_INVALID")
+        }
+        if (!cpuSha256.equals(candidateSha256, ignoreCase = true)) {
+            return fail("MODEL_CONTENT_SHA256_MISMATCH")
+        }
+
         val runMismatches = comparableRunFields.filter { cpuContext[it] != candidateContext[it] }
         if (runMismatches.isNotEmpty()) {
             return fail("MODEL_OR_INFERENCE_CONFIGURATION_MISMATCH:" + runMismatches.joinToString("|"))
@@ -175,13 +187,8 @@ internal object BackendCorrectnessGate {
             }
         }
 
-        val identityNote = if (cpuContext["modelSha256"] == "unavailable") {
-            ";modelIdentity=SIZE_AND_METADATA_ONLY_SHA_UNAVAILABLE"
-        } else {
-            ";modelIdentity=SHA256_MATCHED"
-        }
         return Evaluation(
-            "PASS", "TOP1_IDENTICAL_TOP5_OVERLAP_GE_4" + identityNote,
+            "PASS", "TOP1_IDENTICAL_TOP5_OVERLAP_GE_4",
             cpuTraces.size, minimumOverlap
         )
     }

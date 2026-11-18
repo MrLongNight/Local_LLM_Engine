@@ -25,6 +25,9 @@ internal object InferenceConfigSmokePlan {
         activeBackend: String? = null
     ): List<Profile> {
         val common = base.copy(
+            // CPU and Vulkan must evaluate the same prompt micro-batch for a valid
+            // numeric comparison. AUTO resolves to different backend-specific sizes.
+            microBatchSize = minOf(64, base.batchSize),
             temperature = 0f,
             topP = 1f,
             maxPredictTokens = MEASURED_TOKENS
