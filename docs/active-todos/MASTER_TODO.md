@@ -143,7 +143,8 @@
 
 Diese Sessions benötigen das echte nubia Z2462N / Android 16 / ARM64 / Mali-G57. Emulator- und CI-Ergebnisse ersetzen sie nicht.
 
-- [ ] **D1a** 📱 DU · ENDGERÄT · Impact H — Qwen3-4B-Instruct-2507 Q4_K_M auf CPU und Vulkan mit identischen Eingaben prüfen. Template, Tokenizer, Special Tokens, UTF-8, Ausgabe, Finish-Grund und eine Folgeanfrage kontrollieren. Exakte Modellbytes/SHA und Laufparameter protokollieren.
+- [ ] **D0** 📱 DU · ENDGERÄT · Impact H — Den standardisierten Kurztest aus [`technical/MODEL_COMPATIBILITY.md`](../technical/MODEL_COMPATIBILITY.md#standard-short-device-functional-check) auf dem nubia Z2462N ausführen: Qwen3-4B-Instruct-2507 Q4_K_M, frischer Chat, identische Konfiguration und feste Rechenaufgabe. Tatsächliches Vulkan-Backend/Offload, Output Gate, Finish-Grund, Modellbytes und SHA-Status dokumentieren. Dieser Test ist der wiederverwendbare Funktions-Smoke-Test, kein Performancevergleich.
+- [ ] **D1a** 📱 DU · ENDGERÄT · Impact H — Qwen3-4B-Instruct-2507 Q4_K_M auf CPU und Vulkan mit dem in D0 definierten identischen Prompt und derselben Konfiguration vergleichen. Template, Tokenizer, Special Tokens, UTF-8, Ausgabe, Finish-Grund und eine Folgeanfrage kontrollieren. Exakte Modellbytes/SHA und Laufparameter protokollieren.
 - [ ] **D1b** 📱 DU · ENDGERÄT · Impact H — Qwen3.5-4B dense auf CPU und Vulkan prüfen. GDN-CPU-Fallback, übrige Graph-Verteilung, hybride/recurrente State-Behandlung, Ausgabe, Finish-Grund und Folgeanfrage kontrollieren.
 - [ ] **D1c** 📱 DU · ENDGERÄT · Impact H — Ein konkretes Gemma-4-Text-GGUF laden und dessen Template, korrekte kurze Ausgabe, Finish-Grund, CPU/Vulkan-Verteilung und Folgeanfrage verifizieren.
 - [ ] **D1d** 📱 DU · ENDGERÄT · Impact H — Ein konkretes Gemma-4-Assistant-GGUF separat laden und dessen Assistant-Graph, Template, Ausgabe und Finish-Verhalten prüfen. Nicht aus D1c auf Assistant-Kompatibilität schließen.

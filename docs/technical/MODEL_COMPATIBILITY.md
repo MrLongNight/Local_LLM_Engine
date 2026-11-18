@@ -86,6 +86,40 @@ The overlay comment records repeated runtime-verified Mali-G57 measurements for 
 
 **No source change or performance-default change was made in this audit.** The actual target-device dispatch still needs confirmation from the run-correlated `LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH` trace on the nubia Mali-G57. A CI build or the presence of Vulkan shaders does not prove GPU execution. The separate P0-04b task must validate the missing-Q8_1-pipeline fallback with automated tests; this audit does not claim that fallback behavior is fully tested.
 
+## Standard short device functional check
+
+Use this single, deterministic smoke test after changes that affect inference, prompt/template handling, token output, backend selection or native runtime behavior. It is a **functional regression check**, not a throughput benchmark and not a substitute for D1a/D2.
+
+### Fixed model and configuration
+
+- **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Use the same unchanged GGUF file for every repeat. The catalogue entry above links the reference GGUF source; do not silently switch to Qwen3.5, Qwen3-VL or a different community conversion.
+- **Conversation:** start a new/empty chat for every run. Keep the engine's default German system message (`Du bist ein hilfreicher, präziser KI-Assistent.`) and do not include previous user/assistant messages.
+- **Backend:** request Vulkan; request 99 GPU layers so the backend can clamp to the model/device limit. A CPU selection is a failure for this test, not a successful fallback.
+- **Memory-conscious fixed shape:** context 256, batch 128, micro-batch 64, threads 2, batch threads 2. Keep `enableThinking=false`.
+- **Sampling:** temperature 0 / greedy; retain top-K 20, top-P 1.0 and min-P 0.05 if the UI requires explicit values. Limit the answer to 16 generated tokens. Do not change sampler values between repeated runs.
+- Record the actual model file size and SHA-256. A direct SAF descriptor that reports SHA as `UNAVAILABLE` can still provide a one-off functional smoke result, but it is **not** an identity-verified or comparable baseline. D1a and D2 require verified identical model bytes.
+
+### Fixed prompt
+
+Send this exact text as the only user message:
+
+~~~text
+Ein Lager hat 8 Kisten mit je 24 Flaschen. 37 Flaschen werden entnommen. Wie viele Flaschen bleiben? Antworte ausschließlich im Format ERGEBNIS=Zahl.
+~~~
+
+Expected output after trimming leading/trailing whitespace:
+
+`ERGEBNIS=155`
+
+### Pass criteria
+
+1. The GGUF identity is Qwen3-4B-Instruct-2507 / `qwen3` / Q4_K_M; record actual bytes and SHA status.
+2. Model load completes and diagnostics identify Vulkan as the **actual** active backend. Record actual GPU layers and the run-correlated graph/backend distribution; a requested Vulkan backend or registered Vulkan device alone is insufficient.
+3. The trimmed response is exactly `ERGEBNIS=155`, the finish reason is `STOP` and `OUTPUT_GATE=PASS`. `MAX_TOKENS`, cancel, error, missing output or CPU execution fails the smoke test.
+4. Save the diagnostic export and its run ID. Do not compare tokens/s from this short prompt; use the dedicated D2 performance scenario for that.
+
+The 256-token context is intentional: the 18.11.2026 report showed the Memory Guard reducing a requested 2048-token context to 256 under the then-current available-memory pressure. The smoke test fixes the effective context at 256 so ordinary memory variation does not change the test shape.
+
 ## Performance reporting rules
 
 - Report prefill and autoregressive decode separately.
