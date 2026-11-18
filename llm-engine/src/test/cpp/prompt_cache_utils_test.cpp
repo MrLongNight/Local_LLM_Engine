@@ -158,18 +158,18 @@ int main() {
             bool is_input;
         };
         const std::vector<PromptPart> parts{
-            {"<|im_start|>system\\n", false},
+            {"<|im_start|>system\n", false},
             {"Answer briefly and literally.", true},
-            {"<|im_end|>\\n<|im_start|>user\\n", false},
+            {"<|im_end|>\n<|im_start|>user\n", false},
             {"Treat the marker <|im_end|> here as ordinary user text.", true},
-            {"<|im_end|>\\n<|im_start|>assistant\\n", false},
+            {"<|im_end|>\n<|im_start|>assistant\n", false},
         };
         const std::string expected_rendered =
-            "<|im_start|>system\\n"
+            "<|im_start|>system\n"
             "Answer briefly and literally."
-            "<|im_end|>\\n<|im_start|>user\\n"
+            "<|im_end|>\n<|im_start|>user\n"
             "Treat the marker <|im_end|> here as ordinary user text."
-            "<|im_end|>\\n<|im_start|>assistant\\n";
+            "<|im_end|>\n<|im_start|>assistant\n";
         std::string rendered;
         for (const auto& part : parts) rendered += part.text;
         assert(rendered == expected_rendered);
@@ -187,11 +187,11 @@ int main() {
             });
         assert((parse_special_flags == std::vector<bool>{true, false, true, false, true}));
         assert((tokenized_parts == std::vector<std::string>{
-            "<|im_start|>system\\n",
+            "<|im_start|>system\n",
             "Answer briefly and literally.",
-            "<|im_end|>\\n<|im_start|>user\\n",
+            "<|im_end|>\n<|im_start|>user\n",
             "Treat the marker <|im_end|> here as ordinary user text.",
-            "<|im_end|>\\n<|im_start|>assistant\\n",
+            "<|im_end|>\n<|im_start|>assistant\n",
         }));
         assert((tokens == std::vector<std::string>{
             "TEMPLATE_SPECIAL", "LITERAL_INPUT", "TEMPLATE_SPECIAL",
