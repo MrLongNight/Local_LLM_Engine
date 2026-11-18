@@ -506,6 +506,21 @@ static void ggml_vk_get_physical_device_features2(
         }
     }]=])
     string(REPLACE "${_q4_decode_anchor}" "${_q4_decode_replacement}" _vulkan_contents "${_vulkan_contents}")
+
+    # Guard the Q4_K batch-1 selection in the exact upstream decode function.
+    # A mere presence check is insufficient: a future upstream change could move
+    # the selector outside this function, after pipeline lookup, or after fallback.
+    set(_q4k_decode_function_start_anchor "static void ggml_vk_mul_mat_vec_q_f16(")
+    set(_q4k_decode_function_end_anchor "static void ggml_vk_mul_mat_vec_id_q_f16(")
+    string(FIND "${_vulkan_contents}" "${_q4k_decode_function_start_anchor}" _q4k_decode_function_start)
+    string(FIND "${_vulkan_contents}" "${_q4k_decode_function_end_anchor}" _q4k_decode_function_end)
+    if(_q4k_decode_function_start LESS 0 OR
+       _q4k_decode_function_end LESS 0 OR
+       _q4k_decode_function_end LESS_EQUAL _q4k_decode_function_start)
+        message(FATAL_ERROR "LocalLLM: Q4_K decode function boundary changed; review the batch-1 overlay.")
+    endif()
+    math(EXPR _q4k_decode_function_length "${_q4k_decode_function_end} - ${_q4k_decode_function_start}")
+    string(SUBSTRING "${_vulkan_contents}" ${_q4k_decode_function_start} ${_q4k_decode_function_length} _q4k_decode_function_contents)
     # Verify the complete Q4_K pipeline decision, not just the fallback marker:
     # - Q8_1 quantization is looked up only when its matvec pipeline exists.
     # - The compatible base matvec is looked up whenever Q8_1 is not usable.
@@ -1160,20 +1175,6 @@ void vk_perf_logger::print_timings(bool force) {
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
     endif()
-    # Guard the Q4_K batch-1 selection in the exact upstream decode function.
-    # A mere presence check is insufficient: a future upstream change could move
-    # the selector outside this function, after pipeline lookup, or after fallback.
-    set(_q4k_decode_function_start_anchor "static void ggml_vk_mul_mat_vec_q_f16(")
-    set(_q4k_decode_function_end_anchor "static void ggml_vk_mul_mat_vec_id_q_f16(")
-    string(FIND "${_vulkan_contents}" "${_q4k_decode_function_start_anchor}" _q4k_decode_function_start)
-    string(FIND "${_vulkan_contents}" "${_q4k_decode_function_end_anchor}" _q4k_decode_function_end)
-    if(_q4k_decode_function_start LESS 0 OR
-       _q4k_decode_function_end LESS 0 OR
-       _q4k_decode_function_end LESS_EQUAL _q4k_decode_function_start)
-        message(FATAL_ERROR "LocalLLM: Q4_K decode function boundary changed; review the batch-1 overlay.")
-    endif()
-    math(EXPR _q4k_decode_function_length "${_q4k_decode_function_end} - ${_q4k_decode_function_start}")
-    string(SUBSTRING "${_vulkan_contents}" ${_q4k_decode_function_start} ${_q4k_decode_function_length} _q4k_decode_function_contents)
 
     string(FIND "${_q4k_decode_function_contents}" "local_llm_q4k_integer_dot_batch1" _q4k_selector_position)
     string(FIND "${_q4k_decode_function_contents}"
