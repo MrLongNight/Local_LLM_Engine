@@ -157,7 +157,6 @@ int main() {
         assert(!incomplete);
         assert(empty_pending.empty());
     }
-    return 0;
     {
         constexpr uint32_t normal = 1u << 2;
         constexpr uint32_t unknown = 1u << 0;
@@ -177,5 +176,7 @@ int main() {
         assert(!local_llm::is_renderable_output_token(unused, renderable, forbidden));
         assert(!local_llm::is_renderable_output_token(1u << 4, renderable, forbidden));
     }
+
+    return 0;
 
 }
