@@ -9,7 +9,7 @@ import com.mydocanizer.llm.engine.EngineConfig
  * settings differ. No parameter matrix or tuning sweep is performed.
  */
 internal object InferenceConfigSmokePlan {
-    const val MEASURED_TOKENS = 20
+    const val MEASURED_TOKENS = 32
     const val COOLDOWN_MS = 0L
 
     internal data class Profile(

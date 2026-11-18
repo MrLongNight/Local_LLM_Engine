@@ -54,6 +54,7 @@ class InferenceConfigSmokePlanTest {
         assertEquals(cpu.config.temperature, vulkan.config.temperature, 0f)
         assertEquals(1f, cpu.config.topP, 0f)
         assertEquals(cpu.config.topP, vulkan.config.topP, 0f)
+        assertEquals(32, InferenceConfigSmokePlan.MEASURED_TOKENS)
         assertEquals(InferenceConfigSmokePlan.MEASURED_TOKENS, cpu.config.maxPredictTokens)
         assertEquals(cpu.config.maxPredictTokens, vulkan.config.maxPredictTokens)
     }
