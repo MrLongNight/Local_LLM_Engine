@@ -533,7 +533,7 @@ class EngineDiagnosticsTest {
     fun compactExportKeepsAllChunksForRecentAssistantOutputsAndReportsSmokeGateFailure() {
         val outputChunks = (1..48).map { part ->
             val suffix = if (part == 1) "FIRST_OUTPUT_CHUNK" else if (part == 48) "LAST_OUTPUT_CHUNK" else "chunk-$part"
-            "2026-11-18 12:00:%02d.000 [INFO] [inference] INFERENCE_OUTPUT_PART_%d_OF_48 - ".format(part % 60, part) +
+            "2026-11-18 12:00:00.000 [INFO] [inference] INFERENCE_OUTPUT_PART_%d_OF_48 - ".format(part) +
                 "runId=latest-run,finishReason=MAX_TOKENS,tokensGenerated=48,part=$part/48,text=$suffix"
         }
         val smokeResult =
@@ -543,6 +543,7 @@ class EngineDiagnosticsTest {
 
         assertTrue(report.contains("FIRST_OUTPUT_CHUNK"))
         assertTrue(report.contains("LAST_OUTPUT_CHUNK"))
+        assertTrue(report.indexOf("FIRST_OUTPUT_CHUNK") < report.indexOf("LAST_OUTPUT_CHUNK"))
         assertTrue(report.contains("CONFIG_SMOKE_FAIL=1"))
         assertFalse(report.contains("Keine Korrektheits-Gate-Ergebnisse vorhanden."))
     }

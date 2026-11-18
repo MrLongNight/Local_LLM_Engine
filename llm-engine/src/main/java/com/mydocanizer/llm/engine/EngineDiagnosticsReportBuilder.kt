@@ -5,8 +5,9 @@ import java.util.Locale
 
 /**
  * Builds a compact, human-readable diagnostics overview from bounded process logs.
- * Generated assistant responses and explicit test input/output are retained; ordinary
- * chat prompts and verbose token-piece traces remain excluded.
+ * Generated assistant responses and explicit test input/output are retained. Debug
+ * diagnostic builds also export bounded raw prompt/template/token evidence; Release
+ * builds keep raw text diagnostics disabled.
  */
 internal object EngineDiagnosticsReportBuilder {
     private val timestampPrefix = Regex("""^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}""")
@@ -290,7 +291,9 @@ internal object EngineDiagnosticsReportBuilder {
     }
 
     internal fun buildCompactReport(lines: List<String>): String {
-        val ordered = lines.sorted()
+        // Stable timestamp sorting preserves the original order of multi-part text
+        // events that share the same millisecond timestamp.
+        val ordered = lines.sortedBy { timestampPrefix.find(it)?.value ?: "" }
         val kotlinLines = ordered.filterNot { it.contains("[NATIVE]") }
         val nativeLines = ordered.filter { it.contains("[NATIVE]") }
         val samples = kotlinLines.mapNotNull(::resourceSample)
@@ -390,9 +393,11 @@ internal object EngineDiagnosticsReportBuilder {
         val tokenSelectionEvidence = kotlinLines
             .filter { eventName(it) == "TOKEN_SELECTION_TRACE" }
             .takeLast(32)
-        val textEvidence = (inferenceOutputEvidence + explicitTestTextEvidence + tokenSelectionEvidence)
-            .distinct()
-            .sorted()
+        val selectedTextEvents = (inferenceOutputEvidence + explicitTestTextEvidence + tokenSelectionEvidence).toHashSet()
+        // Filter the already timestamp-ordered source rather than sorting complete
+        // log lines lexically: PART_10 must never move ahead of PART_2.
+        val textEvidence = kotlinLines
+            .filter { it in selectedTextEvents }
             .map { compactLine(it, 3_000) }
 
         val nativeTextTraceEvents = nativeLines.filter {
