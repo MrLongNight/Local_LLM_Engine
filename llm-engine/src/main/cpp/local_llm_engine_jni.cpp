@@ -32,6 +32,7 @@
 #include "prompt_cache_utils.h"
 #include "chat_template_inputs.h"
 #include "utf8_conversion_utils.h"
+#include "output_token_validation_utils.h"
 #include "gdn_fusion_policy.h"
 #include "model_architecture_policy.h"
 
@@ -819,8 +820,14 @@ static jstring new_java_string_from_utf8(JNIEnv* env, const std::string& utf8) {
 }
 
 static jstring flush_incomplete_utf8(JNIEnv* env, EngineInstance* engine) {
+    bool had_incomplete_sequence = false;
     const std::string replacement =
-        local_llm::finalize_utf8_incremental(engine->cached_token_chars);
+        local_llm::finalize_utf8_incremental(engine->cached_token_chars, &had_incomplete_sequence);
+    if (had_incomplete_sequence && engine->last_finish_reason != 2) {
+        engine->last_finish_reason = 3;
+        LOGE("Incomplete UTF-8 sequence at generation finish; runId=%s",
+             engine->inference_run_id.c_str());
+    }
     if (replacement.empty()) return nullptr;
     engine->assistant_ss << replacement;
     return new_java_string_from_utf8(env, replacement);
@@ -2221,6 +2228,23 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return finish_native_generation(env, engine);
     }
 
+    const uint32_t token_attributes =
+        static_cast<uint32_t>(llama_vocab_get_attr(vocab, new_token_id));
+    const uint32_t renderable_attributes =
+        static_cast<uint32_t>(LLAMA_TOKEN_ATTR_NORMAL | LLAMA_TOKEN_ATTR_BYTE);
+    const uint32_t forbidden_attributes =
+        static_cast<uint32_t>(LLAMA_TOKEN_ATTR_CONTROL |
+                              LLAMA_TOKEN_ATTR_UNKNOWN |
+                              LLAMA_TOKEN_ATTR_UNUSED);
+    if (!local_llm::is_renderable_output_token(
+            token_attributes, renderable_attributes, forbidden_attributes)) {
+        LOGE("Sampler produced a non-renderable control/special token: token=%d,attr=0x%x,runId=%s",
+             new_token_id, token_attributes, engine->inference_run_id.c_str());
+        engine->last_finish_reason = 3;
+        engine->generation_finished = true;
+        return finish_native_generation(env, engine);
+    }
+
     const int64_t sample_duration_us = llama_time_us() - sample_start_us;
     const int sample_metric_index = engine->tokens_generated + 1;
     if (engine->active_backend.find("Vulkan") != std::string::npos &&
@@ -2311,8 +2335,23 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
 
     const int64_t piece_start_us = llama_time_us();
     auto token_piece = common_token_to_piece(engine->context, new_token_id);
+    bool malformed_utf8 = false;
     const std::string valid_output =
-        local_llm::normalize_utf8_incremental(token_piece, engine->cached_token_chars);
+        local_llm::normalize_utf8_incremental(
+            token_piece, engine->cached_token_chars, &malformed_utf8);
+    if (malformed_utf8) {
+        bool incomplete_suffix = false;
+        std::string terminal_output = valid_output;
+        terminal_output += local_llm::finalize_utf8_incremental(
+            engine->cached_token_chars, &incomplete_suffix);
+        engine->last_finish_reason = 3;
+        engine->generation_finished = true;
+        engine->assistant_ss << terminal_output;
+        LOGE("Malformed UTF-8 emitted by tokenizer; runId=%s,incompleteSuffix=%d",
+             engine->inference_run_id.c_str(), incomplete_suffix ? 1 : 0);
+        finish_native_generation(env, engine);
+        return new_java_string_from_utf8(env, terminal_output);
+    }
     const int64_t piece_duration_us = llama_time_us() - piece_start_us;
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     if (engine->tokens_generated <= 8 || engine->tokens_generated % 64 == 0) {

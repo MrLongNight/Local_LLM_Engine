@@ -686,6 +686,16 @@ internal class LocalLlmEngineImpl(
                     )
                 }
                 if (tokenPiece.isNotEmpty()) {
+                    val pieceFailure = InferenceOutputGate.visibleTextFailure(tokenPiece)
+                    if (pieceFailure != null) {
+                        EngineDiagnostics.info(
+                            "inference",
+                            "OUTPUT_GATE_RESULT",
+                            "runId=$inferenceRunId,stage=STREAM,status=FAIL,reason=$pieceFailure," +
+                                "tokenIndex=$nativeTokenSteps"
+                        )
+                        throw IllegalStateException("Generated token piece failed output gate ($pieceFailure)")
+                    }
                     if (!firstVisibleTokenRecorded) {
                         firstVisibleTokenRecorded = true
                         val latencyAfterPrefillMs =
@@ -745,27 +755,31 @@ internal class LocalLlmEngineImpl(
                 tokensGenerated = actualTokens
             )
 
+            val outputGate = InferenceOutputGate.evaluate(fullText, actualTokens, finishReason)
+            val outputGateStatus = when {
+                finishReason == FinishReason.CANCELLED -> "NOT_APPLICABLE"
+                !outputGate.accepted -> "FAIL"
+                outputGate.truncated -> "TRUNCATED"
+                else -> "PASS"
+            }
+            EngineDiagnostics.info(
+                "inference",
+                "OUTPUT_GATE_RESULT",
+                "runId=$inferenceRunId,stage=FINAL,status=$outputGateStatus," +
+                    "reason=${outputGate.reason ?: "NONE"},finishReason=$finishReason," +
+                    "tokens=$actualTokens,chars=${fullText.length}"
+            )
+
             when (finishReason) {
                 FinishReason.CANCELLED -> trySend(InferenceEvent.Cancelled(fullText, actualTokens))
-                FinishReason.ERROR -> {
-                    val error = IllegalStateException(
-                        "Native token generation failed (llama.cpp finish reason=$rawReason)"
-                    )
-                    EngineDiagnostics.error("native", "TOKEN_GENERATION_FAILED", error)
-                    trySend(InferenceEvent.Error(error, fullText))
-                }
                 else -> {
-                    if (fullText.isBlank()) {
-                        // An immediate EOG / invisible-only token sequence must never look
-                        // like a successful empty assistant reply in the demo or API.
-                        // Keep response content out of diagnostics; counts and finish reason
-                        // are sufficient to correlate the native prompt/sampler investigation.
+                    if (!outputGate.accepted) {
                         val error = IllegalStateException(
-                            "Model finished without visible output " +
-                                "(tokens=$actualTokens, finishReason=$finishReason)"
+                            "Generated output failed correctness gate " +
+                                "(reason=${outputGate.reason},tokens=$actualTokens,finishReason=$finishReason)"
                         )
-                        EngineDiagnostics.error("inference", "EMPTY_MODEL_OUTPUT", error)
-                        trySend(InferenceEvent.Error(error))
+                        EngineDiagnostics.error("inference", "OUTPUT_GATE_FAILED", error)
+                        trySend(InferenceEvent.Error(error, fullText))
                     } else {
                         val result = InferenceResult(
                             text = fullText,

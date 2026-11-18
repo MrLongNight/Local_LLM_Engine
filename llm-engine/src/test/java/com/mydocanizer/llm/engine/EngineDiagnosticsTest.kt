@@ -667,4 +667,15 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("• Status: PASS"))
     }
 
+    @Test
+    fun compactExportIncludesOutputGateOutcome() {
+        val line = "2026-11-18 14:00:00.000 [INFO] [inference] OUTPUT_GATE_RESULT - " +
+            "runId=output-gate-run,stage=FINAL,status=TRUNCATED,reason=MAX_TOKENS," +
+            "finishReason=MAX_TOKENS,tokens=12,chars=120"
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(line))
+        assertTrue(report.contains("OUTPUT_GATE_TRUNCATED=1"))
+        assertTrue(report.contains("Ausgabekorrektheits-Gate [OUTPUT_GATE_RESULT]"))
+        assertTrue(report.contains("reason=MAX_TOKENS"))
+    }
+
 }

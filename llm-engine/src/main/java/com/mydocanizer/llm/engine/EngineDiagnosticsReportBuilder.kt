@@ -151,7 +151,8 @@ internal object EngineDiagnosticsReportBuilder {
             "CONFIG_SMOKE_RESTORE_FAILED",
             "CONFIG_SMOKE_CANCEL_REQUESTED",
             "CONFIG_SMOKE_INFERENCE_CANCELLED",
-            "CONFIG_SMOKE_OUTPUT_CHECK_FAILED"
+            "CONFIG_SMOKE_OUTPUT_CHECK_FAILED",
+            "OUTPUT_GATE_RESULT"
         )
         return event in exactEvents ||
             event.startsWith("MODEL_LOAD_") ||
@@ -177,6 +178,7 @@ internal object EngineDiagnosticsReportBuilder {
     private fun readableEventTitle(event: String): String = when (event) {
         "CONFIG_SMOKE_STARTED" -> "Vulkan-Kurztest gestartet"
         "CONFIG_SMOKE_RESULT" -> "Vulkan-Kurztest abgeschlossen"
+        "OUTPUT_GATE_RESULT" -> "Ausgabekorrektheits-Gate"
         "CONFIG_SMOKE_FAILED" -> "Vulkan-Kurztest fehlgeschlagen"
         "CONFIG_SMOKE_SAFETY_STOP" -> "Vulkan-Kurztest aus Sicherheitsgrund gestoppt"
         "CONFIG_SMOKE_CANCELLED" -> "Vulkan-Kurztest abgebrochen"
@@ -792,6 +794,10 @@ internal object EngineDiagnosticsReportBuilder {
                 add("CONFIG_SMOKE_PASS=$smokePasses")
                 add("CONFIG_SMOKE_FAIL=$smokeFailures")
             }
+            val outputGateResults = kotlinLines.filter { eventName(it) == "OUTPUT_GATE_RESULT" }
+            outputGateResults.groupingBy { field(it, "status") ?: "UNKNOWN" }
+                .eachCount().toSortedMap()
+                .forEach { (status, count) -> add("OUTPUT_GATE_$status=$count") }
         }
 
         return buildString {
@@ -881,7 +887,7 @@ internal object EngineDiagnosticsReportBuilder {
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
             nativeSelected.map(::readableNativeLine).forEach(::appendLine)
             appendLine()
-            appendLine("Hinweis: Generierte Modellausgaben sind runId-korreliert enthalten. Normale Chat-Eingaben, gerenderte Templates und einzelne Token-Pieces werden nicht exportiert.")
+            appendLine("Hinweis: Im Debug-Diagnosemodus sind runId-korrelierte Eingaben, gerenderte Templates, Token-Piece-Stichproben und generierte Modellausgaben begrenzt enthalten. Release-Builds exportieren keine Rohtextdiagnostik.")
         }
         .let { limitUtf8(it, MAX_EXPORT_BYTES) }
     }

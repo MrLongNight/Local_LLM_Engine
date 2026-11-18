@@ -1,4 +1,5 @@
 #include "utf8_conversion_utils.h"
+#include "output_token_validation_utils.h"
 
 #include <cassert>
 #include <string>
@@ -81,7 +82,9 @@ int main() {
         assert(pending == first);
         const std::string second("\x98\x80", 2);
         const std::string expected("\xF0\x9F\x98\x80", 4);
-        assert(local_llm::normalize_utf8_incremental(second, pending) == expected);
+        bool malformed = false;
+        assert(local_llm::normalize_utf8_incremental(second, pending, &malformed) == expected);
+        assert(!malformed);
         assert(pending.empty());
     }
     {
@@ -123,8 +126,10 @@ int main() {
         // A lone invalid lead byte is replaced instead of leaking malformed UTF-8.
         std::string pending;
         const std::string invalid("\xC0", 1);
-        assert(local_llm::normalize_utf8_incremental(invalid, pending) ==
+        bool malformed = false;
+        assert(local_llm::normalize_utf8_incremental(invalid, pending, &malformed) ==
                std::string("\xEF\xBF\xBD", 3));
+        assert(malformed);
         assert(pending.empty());
     }
     {
@@ -141,12 +146,36 @@ int main() {
         };
         for (const auto& sequence : incomplete_sequences) {
             std::string pending = sequence;
-            assert(local_llm::finalize_utf8_incremental(pending) == replacement);
+            bool incomplete = false;
+            assert(local_llm::finalize_utf8_incremental(pending, &incomplete) == replacement);
+            assert(incomplete);
             assert(pending.empty());
         }
         std::string empty_pending;
-        assert(local_llm::finalize_utf8_incremental(empty_pending).empty());
+        bool incomplete = true;
+        assert(local_llm::finalize_utf8_incremental(empty_pending, &incomplete).empty());
+        assert(!incomplete);
         assert(empty_pending.empty());
     }
     return 0;
+    {
+        constexpr uint32_t normal = 1u << 2;
+        constexpr uint32_t unknown = 1u << 0;
+        constexpr uint32_t unused = 1u << 1;
+        constexpr uint32_t control = 1u << 3;
+        constexpr uint32_t byte = 1u << 5;
+        constexpr uint32_t normalized = 1u << 6;
+        constexpr uint32_t renderable = normal | byte;
+        constexpr uint32_t forbidden = unknown | unused | control;
+        assert(local_llm::is_renderable_output_token(normal, renderable, forbidden));
+        assert(local_llm::is_renderable_output_token(byte, renderable, forbidden));
+        assert(local_llm::is_renderable_output_token(normal | normalized, renderable, forbidden));
+        assert(!local_llm::is_renderable_output_token(0, renderable, forbidden));
+        assert(!local_llm::is_renderable_output_token(control, renderable, forbidden));
+        assert(!local_llm::is_renderable_output_token(normal | control, renderable, forbidden));
+        assert(!local_llm::is_renderable_output_token(unknown, renderable, forbidden));
+        assert(!local_llm::is_renderable_output_token(unused, renderable, forbidden));
+        assert(!local_llm::is_renderable_output_token(1u << 4, renderable, forbidden));
+    }
+
 }

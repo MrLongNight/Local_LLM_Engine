@@ -111,7 +111,8 @@ sequenceDiagram
   Client->>Service: AIDL inference request
   Service->>Impl: Stream inference
   Impl->>JNI: Prompt evaluation and token generation
-  JNI-->>Impl: Progress and token pieces
+  JNI-->>Impl: Progress and token pieces (control/special IDs and malformed UTF-8 rejected natively)
+  Note over JNI,Impl: Kotlin output gate rejects empty/invalid/control text; MAX_TOKENS is explicitly marked TRUNCATED
   Impl-->>Service: Inference events
   Service-->>Client: AIDL callback events
   Client-->>API: Flow of InferenceEvent

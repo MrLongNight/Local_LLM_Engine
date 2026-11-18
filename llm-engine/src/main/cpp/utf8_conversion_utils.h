@@ -133,7 +133,9 @@ inline std::u16string utf8_to_utf16(const std::string& input) {
 // being replaced prematurely, and rejects overlong/surrogate/out-of-range sequences.
 inline std::string normalize_utf8_incremental(
         const std::string& incoming,
-        std::string& pending) {
+        std::string& pending,
+        bool* had_invalid_sequence = nullptr) {
+    if (had_invalid_sequence != nullptr) *had_invalid_sequence = false;
     static constexpr char replacement[] = "\xEF\xBF\xBD";
     std::string input = pending;
     input.append(incoming);
@@ -159,6 +161,7 @@ inline std::string normalize_utf8_incremental(
         } else if (lead >= 0xF0 && lead <= 0xF4) {
             sequence_length = 4;
         } else {
+            if (had_invalid_sequence != nullptr) *had_invalid_sequence = true;
             output.append(replacement, sizeof(replacement) - 1);
             ++offset;
             continue;
@@ -186,6 +189,7 @@ inline std::string normalize_utf8_incremental(
         }
 
         if (malformed) {
+            if (had_invalid_sequence != nullptr) *had_invalid_sequence = true;
             output.append(replacement, sizeof(replacement) - 1);
             ++offset;
             continue;
@@ -204,8 +208,12 @@ inline std::string normalize_utf8_incremental(
 
 // Finish a stream that cannot receive more token bytes. A retained suffix is a
 // valid but incomplete UTF-8 prefix, so represent it with one U+FFFD and clear it.
-inline std::string finalize_utf8_incremental(std::string& pending) {
-    if (pending.empty()) return {};
+inline std::string finalize_utf8_incremental(
+        std::string& pending,
+        bool* had_incomplete_sequence = nullptr) {
+    const bool incomplete = !pending.empty();
+    if (had_incomplete_sequence != nullptr) *had_incomplete_sequence = incomplete;
+    if (!incomplete) return {};
     pending.clear();
     return std::string("\xEF\xBF\xBD", 3);
 }
