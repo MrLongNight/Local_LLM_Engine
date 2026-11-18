@@ -77,6 +77,8 @@ internal class LocalLlmEngineImpl(
 
     private val engineHandle = AtomicLong(0L)
     private val isCancelled = AtomicBoolean(false)
+    @Volatile
+    private var loadedConfig: EngineConfig? = null
 
     override suspend fun initialize(): Result<Unit> = initializationMutex.withLock {
         withContext(llamaDispatcher) {
@@ -298,7 +300,7 @@ internal class LocalLlmEngineImpl(
                 EngineDiagnostics.info(
                     "engine",
                     "MODEL_SHA256_COMPLETED",
-                    "durationMs=${(System.nanoTime() - shaStartNano) / 1_000_000L}, fileBytes=${file.length()}"
+                    "sha256=$sha256,durationMs=${(System.nanoTime() - shaStartNano) / 1_000_000L},fileBytes=${file.length()}"
                 )
             }
 
@@ -314,6 +316,15 @@ internal class LocalLlmEngineImpl(
                 sha256 = sha256
             )
 
+            EngineDiagnostics.info(
+                "engine",
+                "MODEL_IDENTITY",
+                "model=${info.name},sizeBytes=${info.sizeBytes},architecture=${info.architecture}," +
+                    "parameterCount=${info.parameterCount},trainedContext=${info.contextLengthTrain}," +
+                    "sha256=${info.sha256 ?: "unavailable"}," +
+                    "sha256Status=${if (info.sha256 != null) "VERIFIED_OR_TRUSTED_IMPORT" else "SKIPPED_DIRECT_DESCRIPTOR"}"
+            )
+            loadedConfig = config
             updateModelLoadProgress(100)
             _currentModel.value = info
             _state.value = EngineState.ModelLoaded(info)
@@ -352,6 +363,7 @@ internal class LocalLlmEngineImpl(
                     NativeEngineHandle.nativeUnloadModel(handle)
                 }
                 _currentModel.value = null
+                loadedConfig = null
                 _modelLoadProgress.value = null
                 _state.value = EngineState.Ready
                 Log.i(TAG, "Model unloaded successfully")
@@ -442,6 +454,32 @@ internal class LocalLlmEngineImpl(
                 phase = InferenceEvent.ProgressPhase.PROMPT_PREPARATION
             )
         )
+        val activeConfig = loadedConfig
+        val effectiveTimeout = request.timeoutConfig ?: activeConfig?.timeoutConfig
+        EngineDiagnostics.info(
+            "inference",
+            "INFERENCE_RUN_CONTEXT",
+            "runId=$inferenceRunId,pid=${android.os.Process.myPid()}," +
+                "model=${modelInfo.name},modelBytes=${modelInfo.sizeBytes}," +
+                "modelSha256=${modelInfo.sha256 ?: "unavailable"},architecture=${modelInfo.architecture}," +
+                "activeBackend=${modelInfo.activeBackend}," +
+                "backendPreference=${activeConfig?.backendPreference ?: "unknown"}," +
+                "contextSize=${activeConfig?.contextSize ?: -1},batchSize=${activeConfig?.batchSize ?: -1}," +
+                "microBatchRequested=${activeConfig?.microBatchSize ?: -1}," +
+                "microBatchEffective=${activeConfig?.effectiveMicroBatchSize ?: -1}," +
+                "threads=${activeConfig?.threads ?: -1},batchThreads=${activeConfig?.effectiveBatchThreads ?: -1}," +
+                "gpuLayersRequested=${activeConfig?.gpuLayers ?: -1}," +
+                "flashAttention=${activeConfig?.flashAttentionMode ?: "unknown"}," +
+                "vulkanMatvecWorkgroup=${activeConfig?.vulkanMatvecWorkgroup ?: "unknown"}," +
+                "gdnPolicy=${activeConfig?.gdnPolicy ?: "unknown"}," +
+                "temperatureDefault=${activeConfig?.temperature ?: "unknown"}," +
+                "temperatureOverride=${request.temperature ?: "default"}," +
+                "topPDefault=${activeConfig?.topP ?: "unknown"},topPOverride=${request.topP ?: "default"}," +
+                "topK=${activeConfig?.topK ?: -1},minP=${activeConfig?.minP ?: "unknown"}," +
+                "maxPredictTokens=${request.maxPredictTokens},enableThinking=${request.enableThinking}," +
+                "messageCount=${request.messages.size},inputChars=${request.messages.sumOf { it.content.length }}," +
+                "timeout=${effectiveTimeout ?: "unknown"}"
+        )
         EngineDiagnostics.info(
             "inference",
             "PROMPT_EVALUATION_STARTED",
@@ -505,9 +543,20 @@ internal class LocalLlmEngineImpl(
             }
         } catch (cancelled: CancellationException) {
             nativeWorkActive.set(false)
+            EngineDiagnostics.info(
+                "inference", "INFERENCE_TERMINAL_FAILURE",
+                "runId=$inferenceRunId,phase=NATIVE_PROMPT,finishReason=CANCELLED"
+            )
+            EngineDiagnostics.recordInferenceOutput(inferenceRunId, "", "CANCELLED_BEFORE_DECODE", 0)
             throw cancelled
         } catch (error: Throwable) {
             nativeWorkActive.set(false)
+            EngineDiagnostics.info(
+                "inference", "INFERENCE_TERMINAL_FAILURE",
+                "runId=$inferenceRunId,phase=NATIVE_PROMPT,errorType=${error.javaClass.simpleName}"
+            )
+            EngineDiagnostics.recordInferenceOutput(inferenceRunId, "", "NATIVE_PROMPT_EXCEPTION", 0)
+            EngineDiagnostics.error("inference", "NATIVE_PROMPT_CALL_FAILED", error)
             throw error
         }
 
@@ -539,6 +588,11 @@ internal class LocalLlmEngineImpl(
                 else -> "Native prompt evaluation failed with code $processRes"
             }
             val err = IllegalStateException(message)
+            EngineDiagnostics.info(
+                "inference", "INFERENCE_TERMINAL_FAILURE",
+                "runId=$inferenceRunId,phase=PROMPT,backend=${modelInfo.activeBackend},nativeResult=$processRes"
+            )
+            EngineDiagnostics.recordInferenceOutput(inferenceRunId, "", "PROMPT_ERROR_$processRes", 0)
             EngineDiagnostics.error("native", "PROMPT_EVALUATION_FAILED", err)
             trySend(InferenceEvent.Error(err))
             _state.value = EngineState.ModelLoaded(modelInfo)
@@ -678,6 +732,12 @@ internal class LocalLlmEngineImpl(
                     "generationMs=$durationMs,tokensPerSecond=$tokensPerSec,finishReason=$finishReason, " +
                     "backend=${modelInfo.activeBackend}"
             )
+            EngineDiagnostics.recordInferenceOutput(
+                runId = inferenceRunId,
+                text = fullText,
+                finishReason = finishReason.name,
+                tokensGenerated = actualTokens
+            )
 
             when (finishReason) {
                 FinishReason.CANCELLED -> trySend(InferenceEvent.Cancelled(fullText, actualTokens))
@@ -719,10 +779,24 @@ internal class LocalLlmEngineImpl(
             Log.i(TAG, "streamChat coroutine cancelled, finalizing pending native UTF-8 output")
             finalizePendingNativeOutput()
             val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
+            EngineDiagnostics.recordInferenceOutput(
+                inferenceRunId, outputBuilder.toString(), "CANCELLED", actualTokens
+            )
+            EngineDiagnostics.info(
+                "inference", "INFERENCE_TERMINAL_FAILURE",
+                "runId=$inferenceRunId,phase=GENERATION,backend=${modelInfo.activeBackend},finishReason=CANCELLED"
+            )
             trySend(InferenceEvent.Cancelled(outputBuilder.toString(), actualTokens))
             throw e
         } catch (t: Throwable) {
             Log.e(TAG, "Error during generation loop", t)
+            EngineDiagnostics.info(
+                "inference", "INFERENCE_TERMINAL_FAILURE",
+                "runId=$inferenceRunId,phase=GENERATION,backend=${modelInfo.activeBackend},outputChars=${outputBuilder.length}"
+            )
+            EngineDiagnostics.recordInferenceOutput(
+                inferenceRunId, outputBuilder.toString(), "ERROR", tokenCount
+            )
             EngineDiagnostics.error("inference", "GENERATION_LOOP_FAILED", t)
             finalizePendingNativeOutput()
             trySend(InferenceEvent.Error(t, outputBuilder.toString()))

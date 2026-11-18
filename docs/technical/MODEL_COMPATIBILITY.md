@@ -58,7 +58,7 @@ Before marking an exact GGUF device-verified:
 3. Confirm actual loaded backend, actual GPU layer count, model-load result, native backend diagnostics and per-run graph distribution.
 4. Exercise the GGUF's own chat template with a deterministic short chat. Confirm roles, stop behavior and output correctness.
 5. Run a longer prompt to exercise prefill and hybrid/recurrent state; test cancellation, a follow-up chat, unload and reload.
-6. Export diagnostics without prompts/responses. Record load time, prompt-token count, prefill time, time-to-first-token, decode tokens/s, peak process PSS, available RAM and thermal status.
+6. Export diagnostics with generated assistant responses correlated to their inference run. Ordinary chat prompts remain excluded; explicit test runs include their test input and expected/actual output. Record load time, prompt-token count, prefill time, time-to-first-token, decode tokens/s, peak process PSS, available RAM and thermal status.
 7. Repeat on the actual target nubia Z2462N / Mali-G57. Emulator results are not a substitute.
 
 ## Qwen3.5 chat-template and GDN policy

@@ -580,22 +580,37 @@ class EngineDiagnosticsTest {
 
 
     @Test
-    fun debugTextDiagnosticsOmitCallerSuppliedContent() {
-        val sentinel = "SYNTHETIC_PRIVATE_RESPONSE_SENTINEL_7f32a9"
+    fun explicitTestTextAndGeneratedAssistantOutputArePersistedAndExported() {
+        val testInput = "Copy exactly this text: 322,324,326"
+        val expected = "322,324,326"
+        val generated = "322,324,326 " + "extra-answer-fragment ".repeat(180)
 
         EngineDiagnostics.testText(
-            tag = "privacy_test",
-            event = "RAW_TEXT_MUST_NOT_BE_PERSISTED",
-            details = sentinel
+            tag = "config_test",
+            event = "CONFIG_SMOKE_TEST_INPUT",
+            details = "prompt=$testInput,expectedOutput=$expected"
+        )
+        EngineDiagnostics.recordInferenceOutput(
+            runId = "diagnostic-output-run",
+            text = generated,
+            finishReason = "STOP",
+            tokensGenerated = 181
+        )
+        EngineDiagnostics.testText(
+            tag = "config_test",
+            event = "CONFIG_SMOKE_TEST_OUTPUT",
+            details = "runId=diagnostic-output-run,expectedOutput=$expected,text=$generated"
         )
 
-        val event = EngineDiagnostics.getLogs().lastOrNull { it.contains("RAW_TEXT_MUST_NOT_BE_PERSISTED") }
-        assertTrue(event?.contains("contentOmitted=true") == true)
-        assertFalse(EngineDiagnostics.getLogs().any { it.contains(sentinel) })
-        assertFalse(
-            EngineDiagnostics.buildCompactReportForTest(EngineDiagnostics.getLogs())
-                .contains(sentinel)
-        )
+        val logs = EngineDiagnostics.getLogs()
+        assertTrue(logs.any { it.contains("CONFIG_SMOKE_TEST_INPUT") && it.contains(testInput) })
+        assertTrue(logs.any { it.contains("INFERENCE_OUTPUT") && it.contains("runId=diagnostic-output-run") })
+        assertTrue(logs.any { it.contains("INFERENCE_OUTPUT") && it.contains("extra-answer-fragment") })
+        val report = EngineDiagnostics.buildCompactReportForTest(logs)
+        assertTrue(report.contains("GENERIERTE LLM-AUSGABEN"))
+        assertTrue(report.contains("diagnostic-output-run"))
+        assertTrue(report.contains("extra-answer-fragment"))
+        assertTrue(report.contains("CONFIG_SMOKE_TEST_INPUT"))
     }
 
     @Test

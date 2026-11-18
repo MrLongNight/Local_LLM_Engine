@@ -248,6 +248,12 @@ abstract class ConfigurationSmokeViewModel(
         var cancelledPartialText: String? = null
         var failedPartialText: String? = null
         val prompt = "Copy exactly this text and output nothing else: 322, 324, 326, 328, 330"
+        val expectedOutput = "322,324,326,328,330"
+        EngineDiagnostics.testText(
+            "config_test",
+            "CONFIG_SMOKE_TEST_INPUT",
+            "stage=$diagnosticLabel,prompt=$prompt,expectedOutput=$expectedOutput"
+        )
 
         try {
             engine.streamChat(
@@ -316,8 +322,9 @@ abstract class ConfigurationSmokeViewModel(
             "config_test",
             "CONFIG_SMOKE_TEST_OUTPUT",
             "stage=" + diagnosticLabel + ",finishReason=" + result.finishReason.name +
-                ",tokens=" + result.tokensGenerated + ",expectedContains322=" +
-                result.text.contains("322") + ",text=" + result.text
+                ",tokens=" + result.tokensGenerated + ",expectedOutput=" + expectedOutput +
+                ",exactOutput=" + (result.text.filterNot { it.isWhitespace() } == expectedOutput) +
+                ",text=" + result.text
         )
         if (!result.text.contains("322")) {
             EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_CHECK_FAILED", "expectedFirstValue=322")

@@ -5,16 +5,19 @@ import android.net.Uri
 import android.util.Log
 
 /**
- * Diagnostic logger for Local LLM Engine lifecycle and inference. Full Debug
- * diagnostic builds intentionally persist prompt and model-output text for P0 analysis.
+ * Diagnostic logger for Local LLM Engine lifecycle and inference. Generated assistant
+ * responses are persisted with their inference run ID; prompts are recorded only when
+ * an explicit test harness calls testText().
  */
 object EngineDiagnostics {
     private const val TAG = "EngineDiagnostics"
 
+    private const val TEXT_EVENT_CHUNK_CHARS = 2_200
+    private const val MAX_TEXT_PAYLOAD_CHARS = 64 * 1024
+
     /**
      * Each process writes a separate file in shared app-private storage. This makes
      * :inference events exportable from the main process even after a service crash.
-     * Full Debug diagnostic builds include prompt and response text.
      */
     fun initialize(context: Context) = EngineDiagnosticsStorage.initialize(context)
 
@@ -22,12 +25,60 @@ object EngineDiagnostics {
         EngineDiagnosticsStorage.info(tag, event, details)
 
     /**
-     * Records only that a text payload was available. Prompt text, partial output,
-     * token pieces and generated responses are never written to persistent diagnostics.
+     * Persists text explicitly supplied by a test harness. Callers use this only for
+     * deterministic test input/expected/actual values, never for ordinary chat prompts.
      */
     fun testText(tag: String, event: String, details: String) {
-        if (!BuildConfig.DEBUG) return
-        info(tag, event, "contentChars=${details.length},contentOmitted=true")
+        recordTextChunks(tag, event, "", details)
+    }
+
+    /**
+     * Persists the complete generated assistant response (or partial response on
+     * cancellation/error), correlated to the native inference run. The global file
+     * and entry ring buffers remain the hard retention limits.
+     */
+    internal fun recordInferenceOutput(
+        runId: String,
+        text: String,
+        finishReason: String,
+        tokensGenerated: Int
+    ) {
+        val metadata = "runId=$runId,finishReason=$finishReason,tokensGenerated=$tokensGenerated"
+        recordTextChunks("inference", "INFERENCE_OUTPUT", metadata, text)
+    }
+
+    private fun recordTextChunks(tag: String, event: String, metadata: String, rawText: String) {
+        val maxChars = MAX_TEXT_PAYLOAD_CHARS
+        val truncated = rawText.length > maxChars
+        var end = minOf(rawText.length, maxChars)
+        if (end > 0 && end < rawText.length &&
+            Character.isHighSurrogate(rawText[end - 1]) && Character.isLowSurrogate(rawText[end])) {
+            end--
+        }
+        val boundedText = rawText.substring(0, end)
+        val text = if (truncated) {
+            boundedText + "\n...[text truncated at $MAX_TEXT_PAYLOAD_CHARS UTF-16 characters]"
+        } else boundedText
+        val chunks = mutableListOf<String>()
+        var offset = 0
+        while (offset < text.length) {
+            var chunkEnd = minOf(offset + TEXT_EVENT_CHUNK_CHARS, text.length)
+            if (chunkEnd < text.length &&
+                Character.isHighSurrogate(text[chunkEnd - 1]) && Character.isLowSurrogate(text[chunkEnd])) {
+                chunkEnd--
+            }
+            chunks += text.substring(offset, chunkEnd)
+            offset = chunkEnd
+        }
+        if (chunks.isEmpty()) chunks += ""
+        chunks.forEachIndexed { index, chunk ->
+            val partEvent = if (chunks.size == 1) event else "${event}_PART_${index + 1}_OF_${chunks.size}"
+            val details = buildString {
+                if (metadata.isNotBlank()) append(metadata).append(',')
+                append("part=${index + 1}/${chunks.size},text=").append(chunk)
+            }
+            info(tag, partEvent, details)
+        }
     }
 
     /**

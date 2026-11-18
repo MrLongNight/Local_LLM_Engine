@@ -5,7 +5,8 @@ import java.util.Locale
 
 /**
  * Builds a compact, human-readable diagnostics overview from bounded process logs.
- * Raw prompt, token-piece and model-response text is never part of the export.
+ * Generated assistant responses and explicit test input/output are retained; ordinary
+ * chat prompts and verbose token-piece traces remain excluded.
  */
 internal object EngineDiagnosticsReportBuilder {
     private val timestampPrefix = Regex("""^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}""")
@@ -369,6 +370,16 @@ internal object EngineDiagnosticsReportBuilder {
             }
             .filterNot { correctnessGateKey(it, "status") in representedGateResults }
             .takeLast(8)
+        val textEvidence = kotlinLines
+            .filter { line ->
+                val event = eventName(line)
+                event.startsWith("INFERENCE_OUTPUT") ||
+                    event.startsWith("CONFIG_SMOKE_TEST_INPUT") ||
+                    event.startsWith("CONFIG_SMOKE_TEST_OUTPUT")
+            }
+            .takeLast(40)
+            .map { compactLine(it, 3_000) }
+
         val performanceEvents = (
             kotlinLines
                 .filterNot { it.contains("RESOURCE_SNAPSHOT") }
@@ -742,7 +753,11 @@ internal object EngineDiagnosticsReportBuilder {
             }
             performanceEvents.forEach(::appendLine)
             appendLine()
-            appendLine("[5] WICHTIGE EREIGNISSE / FEHLER")
+            appendLine("[5] GENERIERTE LLM-AUSGABEN / EXPLIZITE TESTTEXTE")
+            if (textEvidence.isEmpty()) appendLine("Keine gespeicherten Textausgaben/Testtexte vorhanden.")
+            textEvidence.forEach(::appendLine)
+            appendLine()
+            appendLine("[6] WICHTIGE EREIGNISSE / FEHLER")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
             events.forEach(::appendLine)
             appendLine()
@@ -758,14 +773,14 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[8] RAM-ZEITVERLAUF")
             memoryTimeline.forEach(::appendLine)
             appendLine()
-            appendLine("[ROHTEXT – NICHT EXPORTIERT]")
-            appendLine("Prompts, gerenderte Templates, Token-Text und Modellantworten bleiben aus Datenschutz- und Übersichtsgründen ausgeschlossen.")
+            appendLine("[ROHTEXT – NICHT ERFASST]")
+            appendLine("Normale Chat-Eingaben und gerenderte Prompts werden nicht protokolliert. Generierte Antworten sowie ausdrücklich markierte Testeingaben und Sollwerte stehen oben im Textabschnitt.")
             appendLine()
             appendLine("[9] NATIVE / VULKAN – AUSGEWÄHLTE EREIGNISSE")
             if (nativeSelected.isEmpty()) appendLine("Keine passenden nativen Backend-Meldungen gefunden.")
             nativeSelected.map(::readableNativeLine).forEach(::appendLine)
             appendLine()
-            appendLine("Hinweis: Der Bericht enthält ausgewählte Diagnoseereignisse und aggregierte Messwerte. Rohe Prompt-, Token- und Antworttexte werden nicht exportiert.")
+            appendLine("Hinweis: Generierte Modellausgaben sind runId-korreliert enthalten. Normale Chat-Eingaben, gerenderte Templates und einzelne Token-Pieces werden nicht exportiert.")
         }
         .let { limitUtf8(it, MAX_EXPORT_BYTES) }
     }

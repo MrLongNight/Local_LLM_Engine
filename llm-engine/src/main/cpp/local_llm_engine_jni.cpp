@@ -505,9 +505,7 @@ struct EngineInstance {
 };
 
 
-#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
-// Explicit Debug diagnostics retain full model metadata and text traces so
-// template, tokenization and generated-output failures can be reconstructed.
+// Concise model/template/tokenizer metadata is operational diagnostics, not a raw text trace.
 static std::string read_model_metadata_value(const llama_model* model, const char* key) {
     if (model == nullptr || key == nullptr) return "unknown";
     char value[256] = {};
@@ -545,6 +543,7 @@ static void log_prompt_metadata(
              << ",modelHybrid=" << (llama_model_is_hybrid(engine->model) ? 1 : 0)
              << ",modelRecurrent=" << (llama_model_is_recurrent(engine->model) ? 1 : 0)
              << ",thinkingEnabled=" << (thinking_enabled ? 1 : 0)
+             << ",explicitChatTemplate=" << (common_chat_templates_was_explicit(engine->chat_templates.get()) ? 1 : 0)
              << ",templateMode=" << template_mode
              << ",usedChatTemplate=" << (used_chat_template ? 1 : 0)
              << ",messageCount=" << engine->chat_msgs.size()
@@ -557,8 +556,9 @@ static void log_prompt_metadata(
     log_native_info_message(metadata.str());
 }
 
-// Capture numeric token IDs/logits for the correctness gate. The same diagnostic
-// build also records input, rendered prompt and visible token pieces below.
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+// Capture numeric token IDs/logits for the correctness gate. Raw prompt and token-piece
+// traces remain a separate, explicitly enabled debugging feature.
 static void log_token_selection_trace(
         EngineInstance* engine, int32_t step_index, llama_token selected_token) {
     if (engine == nullptr || engine->context == nullptr || engine->model == nullptr) return;
@@ -1623,9 +1623,22 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         engine->last_finish_reason = 3;
         return 7;
     }
-    LOGI("Request sampler configured: temperature=%.3f, top_k=%d, top_p=%.3f, min_p=%.3f, chain=%s",
-         effective_temperature, engine->default_top_k, effective_top_p, engine->default_min_p,
-         effective_temperature <= 0.0f ? "GREEDY" : "TOP_K_TOP_P_MIN_P_TEMPERATURE");
+    {
+        std::ostringstream sampler_summary;
+        sampler_summary << std::fixed << std::setprecision(6)
+                        << "LOCAL_LLM_SAMPLER_PARAMETERS - runId=" << engine->inference_run_id
+                        << ",temperature=" << effective_temperature
+                        << ",topP=" << effective_top_p
+                        << ",topK=" << engine->default_top_k
+                        << ",minP=" << engine->default_min_p
+                        << ",repeatPenalty=" << request_sampling.penalty_repeat
+                        << ",frequencyPenalty=" << request_sampling.penalty_freq
+                        << ",presencePenalty=" << request_sampling.penalty_present
+                        << ",penaltyLastN=" << request_sampling.penalty_last_n
+                        << ",samplerChain=" << (effective_temperature <= 0.0f
+                            ? "GREEDY" : "TOP_K_TOP_P_MIN_P_TEMPERATURE");
+        log_native_info_message(sampler_summary.str());
+    }
 
     // The pinned llama.cpp revision can run supported sampler stages in the same
     // backend graph as decode. Register only for normal Vulkan inference: the
@@ -1926,11 +1939,9 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             engine->system_prompt_position = 0;
         }
     }
-#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     log_prompt_metadata(engine, tokens, used_chat_template, template_mode,
         model_vocab, model_add_bos, model_bos_token, model_add_eos, model_eos_token,
         enable_thinking == JNI_TRUE);
-#endif
     PromptEvalProgressContext progress_context{env, progress_listener, nullptr};
     if (progress_listener != nullptr) {
         jclass listener_class = env->GetObjectClass(progress_listener);
