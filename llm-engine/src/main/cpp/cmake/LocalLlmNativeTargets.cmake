@@ -64,7 +64,9 @@ if(TARGET ggml-vulkan)
             message(FATAL_ERROR "LocalLLM: could not replace ggml-vulkan.cpp with the Android compatibility build copy.")
         endif()
         set_property(TARGET ggml-vulkan PROPERTY SOURCES "${_ggml_vulkan_sources_patched}")
-        target_include_directories(ggml-vulkan PRIVATE\n            "${LLAMA_SRC}/ggml/src/ggml-vulkan"\n            "${CMAKE_CURRENT_LIST_DIR}/..")
+        target_include_directories(ggml-vulkan PRIVATE
+            "${LLAMA_SRC}/ggml/src/ggml-vulkan"
+            "${CMAKE_CURRENT_LIST_DIR}/..")
     endif()
     if(LOCAL_LLM_SPIRV_HEADERS_INCLUDE_DIR)
         # SPIRV-Headers is fetched as a pinned host-side header source. Pass its
