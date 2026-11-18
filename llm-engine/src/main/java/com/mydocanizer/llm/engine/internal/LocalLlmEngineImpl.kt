@@ -109,7 +109,7 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.info(
                 "engine",
                 "NATIVE_LOGGER_READY",
-                "nativeLogFile=${nativeDiagnosticsFile.name}; minimumLevel=INFO; vulkanPerfProfilerEnabled=$profilerEnabled; promptAndResponseContentNotRecorded"
+                "nativeLogFile=${nativeDiagnosticsFile.name}; minimumLevel=INFO; vulkanPerfProfilerEnabled=$profilerEnabled; ordinaryPromptContentNotRecorded; generatedResponseTextRecordedWithRunId"
             )
             val handle = NativeEngineHandle.nativeCreateEngine()
             if (handle == 0L) {

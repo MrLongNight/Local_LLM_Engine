@@ -10,7 +10,7 @@
 - Do not add dependencies, NPU backends, DI frameworks, speculative abstractions or performance-default changes without explicit approval.
 - Correctness and reproducibility take priority over speed. Never claim device performance, GPU execution or production readiness without the corresponding physical-device evidence.
 - Reuse the single `EngineViewModel` instance across demo screens. Do not create parallel engine/ViewModel instances for separate screens.
-- Treat verbose text traces as an explicitly enabled prototype-debugging aid only; keep them out of ordinary operational diagnostics. Do not add an independent release/distribution checklist to this engine repository.
+- Treat raw prompt/rendered-template/token-piece traces as an explicitly enabled prototype-debugging aid only; keep them out of ordinary operational diagnostics. Generated assistant responses are intentionally persisted as bounded, run-correlated diagnostic text; explicit test runs also persist their input and expected output. Do not add an independent release/distribution checklist to this engine repository.
 
 ## Project structure and change discipline
 
