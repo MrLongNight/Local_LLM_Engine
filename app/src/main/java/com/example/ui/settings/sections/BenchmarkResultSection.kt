@@ -27,8 +27,8 @@ internal fun BenchmarkResultSection(
         }
     }
     Text(
-        text = "RAM-Verlauf, tatsächlicher Backend-/Layer-Status und native Vulkan-Meldungen werden " +
-            "automatisch im Diagnoseprotokoll erfasst. Die Modellantwort selbst wird nicht protokolliert.",
+        text = "RAM-Verlauf, tatsächlicher Backend-/Layer-Status und native Laufzeitmeldungen werden " +
+            "automatisch erfasst. Debug-Diagnosebuilds speichern begrenzte Testeingaben und Modellausgaben; Release-Builds nicht.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )

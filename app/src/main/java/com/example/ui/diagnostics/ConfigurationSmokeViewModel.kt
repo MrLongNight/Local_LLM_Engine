@@ -50,10 +50,10 @@ abstract class ConfigurationSmokeViewModel(
     private var configurationSmokeJob: Job? = null
 
     /**
-     * Short on-device screening of independent llama.cpp context parameters.
-     * The same model/backend and fixed prompt are used for every profile. Context
-     * settings require a model reload; original settings are restored in finally.
-     * Prompt and generated response content are never written to diagnostics.
+     * Short, fixed CPU-reference/Vulkan-candidate comparison using the same model
+     * source, prompt and shared effective settings. Backend-specific GPU offload
+     * is the only intentional configuration difference. The original configuration
+     * is restored in finally; bounded test input/output text is Debug-diagnostic only.
      */
     fun runConfigurationSmokeTest() {
         if (_isBenchmarking.value || _isConfigSmokeTesting.value) return
@@ -91,7 +91,7 @@ abstract class ConfigurationSmokeViewModel(
         configurationSmokeJob = viewModelScope.launch {
             val rows = mutableListOf<String>()
             var restoreRequired = false
-            var confirmedBackend: String? = null
+            val confirmedBackends = mutableListOf<String>()
             var stoppedReason: String? = null
             EngineDiagnostics.info(
                 "config_test",
@@ -120,17 +120,20 @@ abstract class ConfigurationSmokeViewModel(
                     val loadMs = (System.nanoTime() - loadStart) / 1_000_000L
                     val backend = backendFamily(loaded.activeBackend)
                     if (backend == "UNKNOWN") throw IllegalStateException("Aktives Backend nicht eindeutig: " + loaded.activeBackend)
-                    if (confirmedBackend == null) confirmedBackend = backend
-                    else if (confirmedBackend != backend) {
-                        throw IllegalStateException("Backendwechsel von " + confirmedBackend + " zu " + backend + "; Vergleich abgebrochen.")
+                    if (backend != profile.expectedBackend) {
+                        throw IllegalStateException(
+                            "Angefordert wurde " + profile.expectedBackend +
+                                ", tatsächlich aktiv ist " + loaded.activeBackend
+                        )
                     }
+                    confirmedBackends += profile.id + "=" + backend
                     if (loaded.sizeBytes != model.sizeBytes ||
                         (!model.sha256.isNullOrBlank() && !loaded.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
                     ) throw IllegalStateException("Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt.")
 
                     val sample = collectConfigurationSmokeSample(
-                        InferenceConfigSmokePlan.WARMUP_TOKENS + InferenceConfigSmokePlan.MEASURED_TOKENS,
-                        profile.id + ":single"
+                        InferenceConfigSmokePlan.MEASURED_TOKENS,
+                        profile.id + ":measured"
                     )
                     val cfg = profile.config
                     val normalizedOutput = sample.result.text.filterNot { it.isWhitespace() }
@@ -139,9 +142,9 @@ abstract class ConfigurationSmokeViewModel(
                     val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
                     val report = String.format(
                         java.util.Locale.US,
-                        "%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s",
-                        profile.label, backend, loadMs, cfg.threads, cfg.batchThreads,
-                        cfg.batchSize, cfg.microBatchSize, sample.promptTokens,
+                        "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s",
+                        profile.label, profile.expectedBackend, backend, loadMs, cfg.threads, cfg.effectiveBatchThreads,
+                        cfg.batchSize, InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend), sample.promptTokens,
                         sample.promptEvaluationMs?.toString() ?: "n/a",
                         sample.firstTokenMs?.toString() ?: "n/a",
                         sample.result.durationMs, sample.result.tokensGenerated,
@@ -152,9 +155,12 @@ abstract class ConfigurationSmokeViewModel(
                     EngineDiagnostics.info(
                         "config_test",
                         "CONFIG_SMOKE_RESULT",
-                        "profile=" + profile.id + ",backend=" + backend + ",loadMs=" + loadMs +
-                            ",nThreads=" + cfg.threads + ",nThreadsBatch=" + cfg.batchThreads +
-                            ",nBatch=" + cfg.batchSize + ",nUbatch=" + cfg.microBatchSize +
+                        "profile=" + profile.id + ",requestedBackend=" + profile.expectedBackend +
+                            ",backend=" + backend + ",gpuLayersRequested=" + cfg.gpuLayers +
+                            ",loadMs=" + loadMs + ",nThreads=" + cfg.threads +
+                            ",nThreadsBatch=" + cfg.effectiveBatchThreads +
+                            ",nBatch=" + cfg.batchSize +
+                            ",nUbatch=" + InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend) +
                             ",promptTokens=" + sample.promptTokens +
                             ",promptElapsedMs=" + (sample.promptEvaluationMs ?: -1L) +
                             ",ttftMs=" + (sample.firstTokenMs ?: -1L) +
@@ -166,7 +172,7 @@ abstract class ConfigurationSmokeViewModel(
                             ",normalStop=" + completedNormally
                     )
                     if (sample.result.tokensGenerated < 4) {
-                        throw IllegalStateException("Zu wenige Ausgabetokens im Vulkan-Diagnoselauf.")
+                        throw IllegalStateException("Zu wenige Ausgabetokens im " + profile.expectedBackend + "-Diagnoselauf.")
                     }
                     if (!outputMatches || !completedNormally) {
                         throw IllegalStateException(
@@ -206,9 +212,11 @@ abstract class ConfigurationSmokeViewModel(
                 _configSmokeReport.value = buildString {
                     appendLine("Automatischer In-App-Konfigurationstest")
                     appendLine("Modell: " + model.name + " (" + model.sizeMb.toInt() + " MB)")
-                    appendLine("Backend: " + (confirmedBackend ?: "nicht bestätigt"))
-                    appendLine("Kontext: " + originalConfig.contextSize + "; GPU-Layer: " + originalConfig.gpuLayers)
-                    appendLine("Ein Vulkan-Lauf mit 4 Warmup-Tokens + 16 Mess-Tokens; Temperatur 0; Top-P 1; vollständiger GPU-Offload angefordert.")
+                    appendLine("Backend-Ergebnisse: " + confirmedBackends.joinToString(", ").ifBlank { "keines bestätigt" })
+                    appendLine("Kontext: " + originalConfig.contextSize + "; Batch: " + originalConfig.batchSize +
+                        "; Threads: " + originalConfig.threads)
+                    appendLine("CPU-Referenz und Vulkan-Kandidat mit identischer Testeingabe und deterministischem Sampling; " +
+                        InferenceConfigSmokePlan.MEASURED_TOKENS + " Token-Limit pro Lauf. GPU-Layer: CPU=0, Vulkan=99 angefordert.")
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: " + stoppedReason)
                     append("Restore-Status steht im Diagnoseexport.")

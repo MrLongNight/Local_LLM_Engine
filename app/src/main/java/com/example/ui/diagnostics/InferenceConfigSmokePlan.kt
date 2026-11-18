@@ -4,18 +4,18 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 
 /**
- * One short, model-agnostic Vulkan diagnostic run. No parameter matrix or
- * repeated model reloads: preserve the user's context and sampling settings,
- * request full GPU offload, and make output deterministic.
+ * Fixed, short CPU/Vulkan comparison. Both profiles share model, context,
+ * batch, threads and deterministic sampling; only backend-specific offload
+ * settings differ. No parameter matrix or tuning sweep is performed.
  */
 internal object InferenceConfigSmokePlan {
-    const val WARMUP_TOKENS = 4
-    const val MEASURED_TOKENS = 16
+    const val MEASURED_TOKENS = 20
     const val COOLDOWN_MS = 0L
 
     internal data class Profile(
         val id: String,
         val label: String,
+        val expectedBackend: String,
         val config: EngineConfig
     )
 
@@ -24,14 +24,31 @@ internal object InferenceConfigSmokePlan {
         availableProcessors: Int,
         activeBackend: String? = null
     ): List<Profile> {
-        val config = base.copy(
-            backendPreference = BackendPreference.VULKAN,
-            gpuLayers = 99,
+        val common = base.copy(
             temperature = 0f,
             topP = 1f,
-            maxPredictTokens = WARMUP_TOKENS + MEASURED_TOKENS
+            maxPredictTokens = MEASURED_TOKENS
         )
-        return listOf(Profile("vulkan-single-run", "Vulkan · vollständiger GPU-Offload", config))
+        return listOf(
+            Profile(
+                id = "cpu-reference",
+                label = "CPU · Referenz",
+                expectedBackend = "CPU",
+                config = common.copy(
+                    backendPreference = BackendPreference.CPU,
+                    gpuLayers = 0
+                )
+            ),
+            Profile(
+                id = "vulkan-candidate",
+                label = "Vulkan · Kandidat",
+                expectedBackend = "VULKAN",
+                config = common.copy(
+                    backendPreference = BackendPreference.VULKAN,
+                    gpuLayers = 99
+                )
+            )
+        )
     }
 
     internal fun resolvedUbatchForTest(config: EngineConfig, activeBackend: String? = null): Int =
