@@ -27,18 +27,17 @@ done
 adb logcat -b all -d -v threadtime \
   > "$diagnostics_dir/logcat-all.txt" \
   2> "$diagnostics_dir/logcat-pull.stderr" || true
-adb shell pm list instrumentation \
-  > "$diagnostics_dir/installed-instrumentation.txt" \
-  2> "$diagnostics_dir/instrumentation-list.stderr" || true
-target_app_id="$(sed -n 's/.*(target=\([^)]*\)).*/\1/p' "$diagnostics_dir/installed-instrumentation.txt" | head -n 1 | tr -d '\r')"
-printf '%s\n' "$target_app_id" > "$diagnostics_dir/diagnostics-target-package.txt"
+# The instrumentation APK's aapt badging verified this exact package ID.
+# The emulator's package-manager instrumentation listing was empty.
+test_app_id="com.mydocanizer.llm.engine.test"
+printf '%s\n' "$test_app_id" > "$diagnostics_dir/diagnostics-target-package.txt"
 : > "$diagnostics_dir/app-process-diagnostics.txt"
 : > "$diagnostics_dir/app-diagnostics-pull.stderr"
 : > "$diagnostics_dir/activity-exit-info.txt"
 : > "$diagnostics_dir/exit-info-pull.stderr"
-if [[ -n "$target_app_id" ]] && adb shell run-as "$target_app_id" sh -c 'test -d files/diagnostics' \
+if adb shell run-as "$test_app_id" sh -c 'test -d files/diagnostics' \
     >/dev/null 2> "$diagnostics_dir/run-as-target.stderr"; then
-  adb exec-out run-as "$target_app_id" sh -c '
+  adb exec-out run-as "$test_app_id" sh -c '
     for file in files/diagnostics/engine-*.log; do
       [ -f "$file" ] || continue
       printf "\n===== %s =====\n" "$file"
@@ -46,11 +45,11 @@ if [[ -n "$target_app_id" ]] && adb shell run-as "$target_app_id" sh -c 'test -d
     done
   ' > "$diagnostics_dir/app-process-diagnostics.txt" \
     2> "$diagnostics_dir/app-diagnostics-pull.stderr" || true
-  adb shell dumpsys activity exit-info "$target_app_id" \
+  adb shell dumpsys activity exit-info "$test_app_id" \
     > "$diagnostics_dir/activity-exit-info.txt" \
     2> "$diagnostics_dir/exit-info-pull.stderr" || true
 else
-  printf 'No readable diagnostics directory for instrumentation target package: %s\n' "${target_app_id:-unavailable}" \
+  printf 'No readable app-private diagnostics directory for verified instrumentation package: %s\n' "$test_app_id" \
     > "$diagnostics_dir/app-diagnostics-pull.stderr"
 fi
 adb shell ps -A \
