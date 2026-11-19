@@ -65,6 +65,16 @@ class InferenceConfigSmokePlanTest {
         assertFalse(
             InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(parameterCount = 1_700_000_000L)).isReferenceModel
         )
+        assertTrue(
+            InferenceConfigSmokePlan.assessD0ReferenceModel(
+                base.copy(description = "Q4_K - Medium")
+            ).isReferenceModel
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.assessD0ReferenceModel(
+                base.copy(description = "Q5_K - Medium")
+            ).isReferenceModel
+        )
         assertFalse(
             InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(description = "Q5_K_M")).isReferenceModel
         )

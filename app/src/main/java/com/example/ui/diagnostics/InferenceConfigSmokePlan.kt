@@ -27,14 +27,21 @@ internal object InferenceConfigSmokePlan {
      */
     internal fun assessD0ReferenceModel(model: ModelInfo): D0ReferenceAssessment {
         val fileIdentity = (model.name + " " + model.path).lowercase()
-        val quantizationMarkers = Regex("""\bq\d+_k_[a-z0-9]+\b""")
-            .findAll(
-                listOf(model.name, model.path.substringAfterLast('/'), model.description)
-                    .joinToString(" ")
-                    .lowercase()
-            )
+        val quantizationText = listOf(model.name, model.path.substringAfterLast('/'), model.description)
+            .joinToString(" ")
+            .lowercase()
+        val compactQuantizationMarkers = Regex("""\bq\d+_k_[a-z0-9]+\b""")
+            .findAll(quantizationText)
             .map { it.value }
             .toList()
+        val ggmlQuantizationMarkers = Regex("""\b(q\d+_k)\s*-\s*(medium|small)\b""")
+            .findAll(quantizationText)
+            .map { match ->
+                val suffix = if (match.groupValues[2] == "medium") "m" else "s"
+                "${match.groupValues[1]}_$suffix"
+            }
+            .toList()
+        val quantizationMarkers = compactQuantizationMarkers + ggmlQuantizationMarkers
         val checks = listOf(
             "architecture_qwen3" to model.architecture.equals("qwen3", ignoreCase = true),
             "parameter_count_3_5b_to_4_5b" to
