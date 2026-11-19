@@ -18,6 +18,7 @@ import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.TimeoutConfig
 import java.io.File
 import java.util.Collections
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
@@ -43,6 +44,12 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
         assertInferenceServiceManifest(context)
         val appPid = Process.myPid()
         val appDiagnosticsFile = resetAppProcessDiagnostics(context, appPid)
+        val testStartedAtMs = SystemClock.elapsedRealtime()
+        EngineDiagnostics.info(
+            "ipc_test",
+            "COOPERATIVE_CANCEL_TEST_STARTED",
+            "appPid=$appPid,diagnosticsFile=${appDiagnosticsFile.name}"
+        )
         val modelFile = File(context.cacheDir, "tiny1m-cooperative-cancel.gguf")
         InstrumentationRegistry.getInstrumentation().context.assets
             .open("tiny1m.Q4_K_M.gguf").use { input ->
@@ -99,6 +106,13 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                     .getOrDefault("DISCONNECTED")
             }
             assertEquals("Real GGUF must remain loaded before cooperative cancellation", "MODEL_LOADED", serviceStatus)
+            EngineDiagnostics.info(
+                "ipc_test",
+                "COOPERATIVE_CANCEL_SERVICE_READY",
+                "appPid=$appPid,remotePid=$originalPid,directPid=${directBinding.pid}," +
+                    "backend=${loaded.getOrThrow().activeBackend},modelFileBytes=${modelFile.length()}," +
+                    "prefillTimeoutMs=${timeoutConfig.prefillMs}"
+            )
 
             // A long prompt with small native micro-batches leaves enough real CPU prefill
             // work after the first progress callback for Binder cancellation to reach llama.cpp.
@@ -121,9 +135,41 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                 }
             }
 
-            withTimeout(timeoutConfig.prefillMs) { promptProgressSeen.await() }
+            awaitCancellationPhase(
+                context = context,
+                phase = "WAIT_FOR_PROMPT_PROGRESS",
+                timeoutMs = timeoutConfig.prefillMs,
+                testStartedAtMs = testStartedAtMs,
+                observed = observed,
+                client = client,
+                directBinding = directBinding,
+                appDiagnosticsFile = appDiagnosticsFile
+            ) {
+                promptProgressSeen.await()
+            }
+            EngineDiagnostics.info(
+                "ipc_test",
+                "COOPERATIVE_CANCEL_REQUESTED",
+                "appPid=$appPid,remotePid=$originalPid,eventCount=${synchronized(observed) { observed.size }}"
+            )
             client.cancelInference()
-            withTimeout(timeoutConfig.prefillMs) { streamJob.join() }
+            EngineDiagnostics.info(
+                "ipc_test",
+                "COOPERATIVE_CANCEL_CALL_RETURNED",
+                "appPid=$appPid,remotePid=$originalPid,clientState=${client.state.value}"
+            )
+            awaitCancellationPhase(
+                context = context,
+                phase = "WAIT_FOR_STREAM_JOIN_AFTER_CANCEL",
+                timeoutMs = timeoutConfig.prefillMs,
+                testStartedAtMs = testStartedAtMs,
+                observed = observed,
+                client = client,
+                directBinding = directBinding,
+                appDiagnosticsFile = appDiagnosticsFile
+            ) {
+                streamJob.join()
+            }
 
             assertTrue(
                 "CPU prefill cancellation must complete cooperatively; events=${observed.joinToString()}",
@@ -321,5 +367,103 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                 runCatching { context.unbindService(binding.connection) }
             }
         }
+    }
+
+    private suspend fun awaitCancellationPhase(
+        context: Context,
+        phase: String,
+        timeoutMs: Long,
+        testStartedAtMs: Long,
+        observed: MutableList<InferenceEvent>,
+        client: InferenceClient,
+        directBinding: BoundInferenceService?,
+        appDiagnosticsFile: File,
+        action: suspend () -> Unit
+    ) {
+        val phaseStartedAtMs = SystemClock.elapsedRealtime()
+        EngineDiagnostics.info(
+            "ipc_test",
+            "COOPERATIVE_CANCEL_PHASE_STARTED",
+            "phase=$phase,timeoutMs=$timeoutMs,testElapsedMs=${phaseStartedAtMs - testStartedAtMs}"
+        )
+        try {
+            withTimeout(timeoutMs) { action() }
+            val elapsedMs = SystemClock.elapsedRealtime() - phaseStartedAtMs
+            EngineDiagnostics.info(
+                "ipc_test",
+                "COOPERATIVE_CANCEL_PHASE_COMPLETED",
+                "phase=$phase,elapsedMs=$elapsedMs,testElapsedMs=${SystemClock.elapsedRealtime() - testStartedAtMs}"
+            )
+        } catch (failure: Throwable) {
+            val phaseElapsedMs = SystemClock.elapsedRealtime() - phaseStartedAtMs
+            val binderStatus = directBinding?.let { binding ->
+                val query = CompletableFuture.supplyAsync {
+                    runCatching { binding.service.status }.fold(
+                        onSuccess = { status -> "OK:$status" },
+                        onFailure = { error ->
+                            "ERROR:${error.javaClass.simpleName}:${error.message ?: "no_message"}"
+                        }
+                    )
+                }
+                runCatching { query.get(1_000L, TimeUnit.MILLISECONDS) }
+                    .getOrElse { error ->
+                        "QUERY_FAILED:${error.javaClass.simpleName}:${error.message ?: "no_message"}"
+                    }
+            } ?: "NOT_BOUND"
+            val eventSequence = synchronized(observed) {
+                observed.mapIndexed { index, event -> "$index:${summarizeEvent(event)}" }.takeLast(80)
+            }
+            val diagnosticsDirectory = File(context.filesDir, "diagnostics")
+            val processLogTail = diagnosticsDirectory.listFiles { file ->
+                file.isFile && file.name.startsWith("engine-") && file.name.endsWith(".log")
+            }?.sortedByDescending { it.lastModified() }?.take(4)?.joinToString("\n") { file ->
+                val tail = runCatching {
+                    file.readLines(Charsets.UTF_8).takeLast(60).joinToString("\n")
+                }.getOrElse { error -> "<read failed: ${error.javaClass.simpleName}>" }
+                "FILE=${file.name},bytes=${file.length()}\n$tail"
+            } ?: "<diagnostics directory unavailable>"
+            val snapshot = """
+                phase=$phase
+                failure=${failure.javaClass.name}:${failure.message}
+                phaseElapsedMs=$phaseElapsedMs
+                testElapsedMs=${SystemClock.elapsedRealtime() - testStartedAtMs}
+                appPid=${Process.myPid()}
+                clientState=${client.state.value.toString().take(240)}
+                remotePid=${client.remotePid.value}
+                currentModelPath=${client.currentModel.value?.path ?: "none"}
+                directServicePid=${directBinding?.pid ?: "none"}
+                directServiceDisconnected=${directBinding?.disconnected?.count == 0L}
+                directBinderStatus=$binderStatus
+                appDiagnosticsFile=${appDiagnosticsFile.name},exists=${appDiagnosticsFile.isFile},bytes=${appDiagnosticsFile.length()}
+                observedEvents=${eventSequence.size}
+                eventSequence:
+                ${eventSequence.joinToString("\n")}
+                processDiagnosticsTail:
+                $processLogTail
+            """.trimIndent().take(20_000)
+            EngineDiagnostics.error("ipc_test", "COOPERATIVE_CANCEL_PHASE_FAILED", failure)
+            EngineDiagnostics.info("ipc_test", "COOPERATIVE_CANCEL_FAILURE_SNAPSHOT", snapshot)
+            val assertion = AssertionError(
+                "Cooperative cancellation phase=$phase failed after ${phaseElapsedMs}ms; " +
+                    "see COOPERATIVE_CANCEL_FAILURE_SNAPSHOT in app diagnostics.\n$snapshot"
+            )
+            assertion.initCause(failure)
+            throw assertion
+        }
+    }
+
+    private fun summarizeEvent(event: InferenceEvent): String = when (event) {
+        is InferenceEvent.Started -> "Started(promptMessages=${event.promptMessageCount})"
+        is InferenceEvent.Token -> "Token(index=${event.tokenIndex},chars=${event.token.length})"
+        is InferenceEvent.Progress ->
+            "Progress(phase=${event.phase},prompt=${event.promptTokensProcessed}/${event.promptTokensTotal}," +
+                "generated=${event.tokensGenerated},elapsedMs=${event.elapsedMs})"
+        is InferenceEvent.Completed ->
+            "Completed(tokens=${event.result.tokensGenerated},finish=${event.result.finishReason},chars=${event.result.text.length})"
+        is InferenceEvent.Cancelled ->
+            "Cancelled(tokens=${event.tokensGenerated},partialChars=${event.partialText.length})"
+        is InferenceEvent.Error ->
+            "Error(type=${event.throwable.javaClass.simpleName},message=${event.throwable.message?.take(160)}," +
+                "partialChars=${event.partialText.length})"
     }
 }
