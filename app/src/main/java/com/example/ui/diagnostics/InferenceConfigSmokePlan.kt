@@ -27,14 +27,24 @@ internal object InferenceConfigSmokePlan {
      */
     internal fun assessD0ReferenceModel(model: ModelInfo): D0ReferenceAssessment {
         val fileIdentity = (model.name + " " + model.path).lowercase()
-        val metadata = (model.name + " " + model.path + " " + model.description).lowercase()
+        val quantizationMarkers = Regex("""\bq\d+_k_[a-z0-9]+\b""")
+            .findAll(
+                listOf(model.name, model.path.substringAfterLast('/'), model.description)
+                    .joinToString(" ")
+                    .lowercase()
+            )
+            .map { it.value }
+            .toList()
         val checks = listOf(
             "architecture_qwen3" to model.architecture.equals("qwen3", ignoreCase = true),
             "parameter_count_3_5b_to_4_5b" to
                 (model.parameterCount in 3_500_000_000L..4_500_000_000L),
             "reference_file_qwen3_4b_instruct_2507" to
                 fileIdentity.contains("qwen3-4b-instruct-2507"),
-            "quantization_q4_k_m" to metadata.contains("q4_k_m")
+            "quantization_q4_k_m" to
+                (fileIdentity.contains("q4_k_m") &&
+                    quantizationMarkers.isNotEmpty() &&
+                    quantizationMarkers.all { it == "q4_k_m" })
         )
         val failed = checks.filterNot { it.second }.map { it.first }
         val sha = model.sha256?.trim()
