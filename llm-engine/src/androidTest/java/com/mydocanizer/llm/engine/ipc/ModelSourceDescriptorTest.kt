@@ -303,15 +303,26 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             assertTrue(client.initialize().isSuccess)
             binding = bindInferenceService(appContext)
             val originalPid = binding.pid
+            val clientPid = Process.myPid()
+            assertNotEquals(
+                "The Binder inference service must own descriptors in a separate process",
+                clientPid,
+                originalPid
+            )
             val firstBaseline = descriptorCountFor(originalPid, firstFiles)
             val secondBaseline = descriptorCountFor(originalPid, secondFiles)
+            val firstClientBaseline = descriptorCountFor(clientPid, firstFiles)
+            val secondClientBaseline = descriptorCountFor(clientPid, secondFiles)
 
             val firstLoaded = client.loadModel(
                 ModelSource.ContentUri(firstUri.toString(), firstName),
                 config
             )
             assertTrue("First provider model must load: ${firstLoaded.exceptionOrNull()}", firstLoaded.isSuccess)
-            awaitDescriptorCount(originalPid, firstFiles, minimumCount = firstBaseline + 1)
+            // The service must retain both its Binder-delivered PFD and JNI's dup()/FILE*.
+            // The client-side PFD is closed as soon as the synchronous Binder handoff returns.
+            awaitDescriptorCount(originalPid, firstFiles, minimumCount = firstBaseline + 2)
+            awaitDescriptorCount(clientPid, firstFiles, expectedCount = firstClientBaseline)
 
             val secondLoaded = client.loadModel(
                 ModelSource.ContentUri(secondUri.toString(), secondName),
@@ -321,7 +332,8 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
                 secondLoaded.isSuccess)
             assertEquals(secondUri.toString(), client.currentModel.value?.path)
             awaitDescriptorCount(originalPid, firstFiles, expectedCount = firstBaseline)
-            awaitDescriptorCount(originalPid, secondFiles, minimumCount = secondBaseline + 1)
+            awaitDescriptorCount(originalPid, secondFiles, minimumCount = secondBaseline + 2)
+            awaitDescriptorCount(clientPid, secondFiles, expectedCount = secondClientBaseline)
 
             val replacementInference = client.generateChat(
                 InferenceRequest.single("Reply with one short word.").copy(timeoutConfig = timeoutConfig)
@@ -361,9 +373,13 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             val recoveredPid = client.remotePid.value
                 ?: throw AssertionError("Inference service PID missing after descriptor recovery")
             assertTrue("Service death must create a replacement process", recoveredPid != killedPid)
-            awaitDescriptorCount(recoveredPid, secondFiles, minimumCount = 1)
+            // A replacement service must again own exactly the two required layers:
+            // its Binder PFD and the native FILE* created by dup().
+            awaitDescriptorCount(recoveredPid, secondFiles, minimumCount = 2)
+            awaitDescriptorCount(clientPid, secondFiles, expectedCount = secondClientBaseline)
 
-            assertTrue("Unloading the recovered model must release its descriptor", client.unloadModel().isSuccess)
+            assertTrue("Unloading the recovered model must release its service and native descriptors",
+                client.unloadModel().isSuccess)
             awaitDescriptorCount(recoveredPid, secondFiles, expectedCount = 0)
         } finally {
             client.close()
