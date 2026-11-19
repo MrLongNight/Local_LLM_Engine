@@ -12,6 +12,7 @@ import com.mydocanizer.llm.engine.ChatRole
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.LocalLlmEngine
@@ -30,8 +31,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Configuration smoke-test state, cancellation and inference sampling.
@@ -90,6 +93,8 @@ abstract class ConfigurationSmokeViewModel(
         configurationSmokeJob = viewModelScope.launch {
             val rows = mutableListOf<String>()
             val profileSamples = mutableMapOf<String, ConfigurationSmokeSample>()
+            val profileStatuses = mutableMapOf<String, String>()
+            var stopRemainingProfilesReason: String? = null
             var restoreRequired = false
             val confirmedBackends = mutableListOf<String>()
             var stoppedReason: String? = null
@@ -104,137 +109,278 @@ abstract class ConfigurationSmokeViewModel(
             try {
                 for ((index, profile) in profiles.withIndex()) {
                     currentCoroutineContext().ensureActive()
-                    val stop = configurationTestSafetyBlock()
-                    if (stop != null) {
-                        stoppedReason = stop
-                        rows += "ABBRUCH vor " + profile.id + ": " + stop
-                        EngineDiagnostics.info("config_test", "CONFIG_SMOKE_SAFETY_STOP", stop)
-                        break
+                    val previousStopReason = stopRemainingProfilesReason
+                    if (previousStopReason != null) {
+                        profileStatuses[profile.id] = "NOT_RUN"
+                        recordConfigurationSmokeProfileResult(
+                            profile.id,
+                            "NOT_RUN",
+                            previousStopReason
+                        )
+                        rows += profile.id + ": NOT_RUN (" + previousStopReason + ")"
+                        continue
                     }
 
-                    _configSmokeReport.value =
-                        "Profil " + (index + 1) + "/" + profiles.size + ": " + profile.label + " – Modell wird neu geladen…"
-                    restoreRequired = true
-                    val loadStart = System.nanoTime()
-                    val loadResult = engine.loadModel(source, profile.config)
-                    val loadMs = (System.nanoTime() - loadStart) / 1_000_000L
-                    if (loadResult.isFailure) {
-                        val loadError = loadResult.exceptionOrNull() ?: IllegalStateException("Unbekannter Modellladefehler")
-                        if (profile.expectedBackend == "VULKAN" && isVulkanBackendUnavailable(loadError)) {
-                            val reason = "VULKAN_DEVICE_UNAVAILABLE_OR_INITIALIZATION_FAILED"
-                            rows += "Vulkan nicht verfügbar (nicht als Pass gewertet): " +
-                                (loadError.message ?: loadError.javaClass.simpleName)
-                            stoppedReason = "Vulkan-Backend nicht verfügbar; CPU-Referenz bleibt separat dokumentiert."
-                            EngineDiagnostics.info(
-                                "config_test",
-                                "CONFIG_SMOKE_RESULT",
-                                "profile=" + profile.id + ",requestedBackend=VULKAN,backend=UNAVAILABLE," +
-                                    "status=UNAVAILABLE,reason=" + reason + ",loadMs=" + loadMs
-                            )
-                            break
-                        }
-                        throw loadError
-                    }
-                    val loaded = loadResult.getOrThrow()
-                    val backend = backendFamily(loaded.activeBackend)
-                    if (backend == "UNKNOWN") throw IllegalStateException("Aktives Backend nicht eindeutig: " + loaded.activeBackend)
-                    if (backend != profile.expectedBackend) {
-                        throw IllegalStateException(
-                            "Angefordert wurde " + profile.expectedBackend +
-                                ", tatsächlich aktiv ist " + loaded.activeBackend
-                        )
-                    }
-                    confirmedBackends += profile.id + "=" + backend
-                    if (loaded.sizeBytes != model.sizeBytes ||
-                        (!model.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
-                    ) throw IllegalStateException("Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt (Größe/SHA-256).")
-                    val shaStatus = if (!model.sha256.isNullOrBlank() && model.sha256 == loaded.sha256) {
-                        "VERIFIED"
-                    } else {
-                        "UNAVAILABLE"
-                    }
-
-                    val sample = collectConfigurationSmokeSample(
-                        InferenceConfigSmokePlan.MEASURED_TOKENS,
-                        profile.id + ":measured"
-                    )
-                    val cfg = profile.config
-                    val normalizedOutput = InferenceConfigSmokePlan.normalizeOutput(sample.result.text)
-                    val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
-                    val outputMatches = normalizedOutput == expectedOutput
-                    val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
-                    val q4kFallbackValidation = if (profile.expectedBackend == "VULKAN") {
-                        Q4kPipelineFallbackPolicy.validateNativeEvidence(
-                            EngineDiagnostics.vulkanQ4kDecodePathLines(
-                                getApplication<Application>(),
-                                sample.result.nativeRunId
-                            )
-                        )
-                    } else {
-                        Q4kPipelineFallbackPolicy.Validation(
-                            Q4kPipelineFallbackPolicy.Status.NOT_APPLICABLE,
-                            "CPU_REFERENCE"
-                        )
-                    }
-                    val expectsQ4kDecodeTrace = Regex("Q4[_-]?K", RegexOption.IGNORE_CASE).containsMatchIn(
-                        model.name + " " + model.description + " " + model.path
-                    )
-                    val q4kPathGatePassed = !expectsQ4kDecodeTrace ||
-                        q4kFallbackValidation.status == Q4kPipelineFallbackPolicy.Status.VALID
-                    val outputGatePassed = outputMatches && completedNormally &&
-                        sample.result.tokensGenerated >= 4 && q4kPathGatePassed
-                    profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
-                    val report = String.format(
-                        java.util.Locale.US,
-                        "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | gate=%s | graphSplits=%d | run=%s",
-                        profile.label, profile.expectedBackend, backend, loadMs, cfg.threads, cfg.effectiveBatchThreads,
-                        cfg.batchSize, InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend), sample.promptTokens,
-                        sample.promptEvaluationMs?.toString() ?: "n/a",
-                        sample.firstTokenMs?.toString() ?: "n/a",
-                        sample.result.durationMs, sample.result.tokensGenerated,
-                        sample.result.tokensPerSecond, sample.result.finishReason.name,
-                        outputMatches, if (outputGatePassed) "PASS" else "FAIL", sample.result.graphSplits,
-                        sample.result.diagnosticRunId.ifBlank { "n/a" }
-                    ) + " | Q4K-Fallback=" + q4kFallbackValidation.status.name +
-                        " (" + q4kFallbackValidation.reason + ")"
-                    rows += report
                     EngineDiagnostics.info(
                         "config_test",
-                        "CONFIG_SMOKE_RESULT",
-                        "profile=" + profile.id + ",requestedBackend=" + profile.expectedBackend +
-                            ",backend=" + backend + ",status=" +
-                            (if (outputGatePassed) "PASS" else "FAIL") +
-                            ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
-                            ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
-                            ",loadMs=" + loadMs + ",nThreads=" + cfg.threads +
-                            ",nThreadsBatch=" + cfg.effectiveBatchThreads +
-                            ",nBatch=" + cfg.batchSize +
-                            ",nUbatch=" + InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend) +
-                            ",diagnosticRunId=" + sample.result.diagnosticRunId +
-                            ",nativeRunId=" + sample.result.nativeRunId +
-                            ",graphSplits=" + sample.result.graphSplits +
-                            ",promptTokens=" + sample.promptTokens +
-                            ",promptElapsedMs=" + (sample.promptEvaluationMs ?: -1L) +
-                            ",ttftMs=" + (sample.firstTokenMs ?: -1L) +
-                            ",decodeMs=" + sample.result.durationMs +
-                            ",outputTokens=" + sample.result.tokensGenerated +
-                            ",tokensPerSecond=" + sample.result.tokensPerSecond +
-                            ",finishReason=" + sample.result.finishReason.name +
-                            ",exactOutput=" + outputMatches +
-                            ",normalStop=" + completedNormally +
-                            ",outputGate=" + (if (outputGatePassed) "PASS" else "FAIL") +
-                            ",q4kFallbackStatus=" + q4kFallbackValidation.status.name +
-                            ",q4kFallbackReason=" + q4kFallbackValidation.reason
+                        "CONFIG_SMOKE_PROFILE_STARTED",
+                        "profile=" + profile.id + ",index=" + (index + 1) +
+                            ",total=" + profiles.size + ",backend=" + profile.expectedBackend
                     )
-                    if (!outputGatePassed) {
-                        val rejection = "profile=" + profile.id +
-                            ",outputTokens=" + sample.result.tokensGenerated +
-                            ",exactOutput=" + outputMatches +
-                            ",finishReason=" + sample.result.finishReason.name
-                        rows += "Korrektheits-Gate fehlgeschlagen: " + rejection
-                        EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_REJECTED", rejection)
+                    profileStatuses[profile.id] = "RUNNING"
+                    var profileLoadMs: Long? = null
+
+                    try {
+                        val stop = configurationTestSafetyBlock()
+                        if (stop != null) {
+                            stoppedReason = stop
+                            stopRemainingProfilesReason = "SAFETY_STOP"
+                            profileStatuses[profile.id] = "NOT_RUN"
+                            recordConfigurationSmokeProfileResult(
+                                profile.id,
+                                "NOT_RUN",
+                                "SAFETY_STOP: " + stop
+                            )
+                            rows += "ABBRUCH vor " + profile.id + ": " + stop
+                            EngineDiagnostics.info("config_test", "CONFIG_SMOKE_SAFETY_STOP", stop)
+                            break
+                        }
+
+                        _configSmokeReport.value =
+                            "Profil " + (index + 1) + "/" + profiles.size + ": " + profile.label + " – Modell wird neu geladen…"
+                        restoreRequired = true
+                        val loadStart = System.nanoTime()
+                        val loadResult = engine.loadModel(source, profile.config)
+                        profileLoadMs = (System.nanoTime() - loadStart) / 1_000_000L
+                        if (loadResult.isFailure) {
+                            val loadError = loadResult.exceptionOrNull()
+                                ?: IllegalStateException("Unbekannter Modellladefehler")
+                            if (profile.expectedBackend == "VULKAN" && isVulkanBackendUnavailable(loadError)) {
+                                val reason = "VULKAN_DEVICE_UNAVAILABLE_OR_INITIALIZATION_FAILED"
+                                rows += "Vulkan nicht verfügbar (nicht als Pass gewertet): " +
+                                    (loadError.message ?: loadError.javaClass.simpleName)
+                                stoppedReason = "Vulkan-Backend nicht verfügbar; CPU-Referenz bleibt separat dokumentiert."
+                                profileStatuses[profile.id] = "UNAVAILABLE"
+                                recordConfigurationSmokeProfileResult(
+                                    profile.id,
+                                    "UNAVAILABLE",
+                                    reason,
+                                    profileLoadMs
+                                )
+                                EngineDiagnostics.info(
+                                    "config_test",
+                                    "CONFIG_SMOKE_RESULT",
+                                    "profile=" + profile.id + ",requestedBackend=VULKAN,backend=UNAVAILABLE," +
+                                        "status=UNAVAILABLE,reason=" + reason + ",loadMs=" + profileLoadMs
+                                )
+                                stopRemainingProfilesReason = "VULKAN_UNAVAILABLE"
+                                break
+                            }
+                            throw loadError
+                        }
+
+                        val loaded = loadResult.getOrThrow()
+                        val backend = backendFamily(loaded.activeBackend)
+                        if (backend == "UNKNOWN") {
+                            throw IllegalStateException("Aktives Backend nicht eindeutig: " + loaded.activeBackend)
+                        }
+                        if (backend != profile.expectedBackend) {
+                            throw IllegalStateException(
+                                "Angefordert wurde " + profile.expectedBackend +
+                                    ", tatsächlich aktiv ist " + loaded.activeBackend
+                            )
+                        }
+                        confirmedBackends += profile.id + "=" + backend
+                        if (loaded.sizeBytes != model.sizeBytes ||
+                            (!model.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
+                        ) {
+                            throw ConfigurationSmokeModelIdentityException(
+                                "Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt (Größe/SHA-256)."
+                            )
+                        }
+                        val shaStatus = if (!model.sha256.isNullOrBlank() && model.sha256 == loaded.sha256) {
+                            "VERIFIED"
+                        } else {
+                            "UNAVAILABLE"
+                        }
+
+                        val sample = collectConfigurationSmokeSample(
+                            InferenceConfigSmokePlan.MEASURED_TOKENS,
+                            profile.id + ":measured"
+                        )
+                        val cfg = profile.config
+                        val normalizedOutput = InferenceConfigSmokePlan.normalizeOutput(sample.result.text)
+                        val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
+                        val outputMatches = normalizedOutput == expectedOutput
+                        val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
+                        val q4kFallbackValidation = if (profile.expectedBackend == "VULKAN") {
+                            Q4kPipelineFallbackPolicy.validateNativeEvidence(
+                                EngineDiagnostics.vulkanQ4kDecodePathLines(
+                                    getApplication<Application>(),
+                                    sample.result.nativeRunId
+                                )
+                            )
+                        } else {
+                            Q4kPipelineFallbackPolicy.Validation(
+                                Q4kPipelineFallbackPolicy.Status.NOT_APPLICABLE,
+                                "CPU_REFERENCE"
+                            )
+                        }
+                        val expectsQ4kDecodeTrace = Regex("Q4[_-]?K", RegexOption.IGNORE_CASE).containsMatchIn(
+                            model.name + " " + model.description + " " + model.path
+                        )
+                        val q4kPathGatePassed = !expectsQ4kDecodeTrace ||
+                            q4kFallbackValidation.status == Q4kPipelineFallbackPolicy.Status.VALID
+                        val outputGatePassed = outputMatches && completedNormally &&
+                            sample.result.tokensGenerated >= 4 && q4kPathGatePassed
+                        profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
+                        val report = String.format(
+                            java.util.Locale.US,
+                            "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | gate=%s | graphSplits=%d | run=%s",
+                            profile.label, profile.expectedBackend, backend, profileLoadMs, cfg.threads, cfg.effectiveBatchThreads,
+                            cfg.batchSize, InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend), sample.promptTokens,
+                            sample.promptEvaluationMs?.toString() ?: "n/a",
+                            sample.firstTokenMs?.toString() ?: "n/a",
+                            sample.result.durationMs, sample.result.tokensGenerated,
+                            sample.result.tokensPerSecond, sample.result.finishReason.name,
+                            outputMatches, if (outputGatePassed) "PASS" else "FAIL", sample.result.graphSplits,
+                            sample.result.diagnosticRunId.ifBlank { "n/a" }
+                        ) + " | Q4K-Fallback=" + q4kFallbackValidation.status.name +
+                            " (" + q4kFallbackValidation.reason + ")"
+                        rows += report
+                        EngineDiagnostics.info(
+                            "config_test",
+                            "CONFIG_SMOKE_RESULT",
+                            "profile=" + profile.id + ",requestedBackend=" + profile.expectedBackend +
+                                ",backend=" + backend + ",status=" +
+                                (if (outputGatePassed) "PASS" else "FAIL") +
+                                ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
+                                ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
+                                ",loadMs=" + profileLoadMs + ",nThreads=" + cfg.threads +
+                                ",nThreadsBatch=" + cfg.effectiveBatchThreads +
+                                ",nBatch=" + cfg.batchSize +
+                                ",nUbatch=" + InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend) +
+                                ",diagnosticRunId=" + sample.result.diagnosticRunId +
+                                ",nativeRunId=" + sample.result.nativeRunId +
+                                ",graphSplits=" + sample.result.graphSplits +
+                                ",promptTokens=" + sample.promptTokens +
+                                ",promptElapsedMs=" + (sample.promptEvaluationMs ?: -1L) +
+                                ",ttftMs=" + (sample.firstTokenMs ?: -1L) +
+                                ",decodeMs=" + sample.result.durationMs +
+                                ",outputTokens=" + sample.result.tokensGenerated +
+                                ",tokensPerSecond=" + sample.result.tokensPerSecond +
+                                ",finishReason=" + sample.result.finishReason.name +
+                                ",exactOutput=" + outputMatches +
+                                ",normalStop=" + completedNormally +
+                                ",outputGate=" + (if (outputGatePassed) "PASS" else "FAIL") +
+                                ",q4kFallbackStatus=" + q4kFallbackValidation.status.name +
+                                ",q4kFallbackReason=" + q4kFallbackValidation.reason
+                        )
+                        val profileStatus = if (outputGatePassed) "PASS" else "FAIL"
+                        profileStatuses[profile.id] = profileStatus
+                        recordConfigurationSmokeProfileResult(
+                            profile.id,
+                            profileStatus,
+                            if (outputGatePassed) "OUTPUT_AND_FINISH_GATE_PASSED" else "OUTPUT_OR_FINISH_GATE_FAILED",
+                            profileLoadMs,
+                            sample.result.nativeRunId
+                        )
+                        if (!outputGatePassed) {
+                            val rejection = "profile=" + profile.id +
+                                ",outputTokens=" + sample.result.tokensGenerated +
+                                ",exactOutput=" + outputMatches +
+                                ",finishReason=" + sample.result.finishReason.name
+                            rows += "Korrektheits-Gate fehlgeschlagen: " + rejection
+                            EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_REJECTED", rejection)
+                        }
+                        if (index < profiles.lastIndex) delay(InferenceConfigSmokePlan.COOLDOWN_MS)
+                    } catch (cancelled: CancellationException) {
+                        profileStatuses[profile.id] = "CANCELLED"
+                        recordConfigurationSmokeProfileResult(
+                            profile.id,
+                            "CANCELLED",
+                            "USER_CANCELLED",
+                            profileLoadMs
+                        )
+                        stopRemainingProfilesReason = "USER_CANCELLED"
+                        throw cancelled
+                    } catch (identityMismatch: ConfigurationSmokeModelIdentityException) {
+                        profileStatuses[profile.id] = "FAIL"
+                        recordConfigurationSmokeProfileResult(
+                            profile.id,
+                            "FAIL",
+                            "MODEL_IDENTITY_MISMATCH: " + (identityMismatch.message ?: "unknown"),
+                            profileLoadMs
+                        )
+                        rows += profile.id + ": FAIL (MODEL_IDENTITY_MISMATCH)"
+                        stopRemainingProfilesReason = "MODEL_IDENTITY_MISMATCH"
+                        stoppedReason = "Modellidentität änderte sich zwischen den Profilen; weitere Läufe wurden gestoppt."
+                    } catch (error: Exception) {
+                        val vulkanUnavailable =
+                            profile.expectedBackend == "VULKAN" && isVulkanBackendUnavailable(error)
+                        val status = if (vulkanUnavailable) "UNAVAILABLE" else "FAIL"
+                        val reason = if (vulkanUnavailable) {
+                            "VULKAN_DEVICE_UNAVAILABLE_OR_INITIALIZATION_FAILED"
+                        } else {
+                            error.message ?: error.javaClass.simpleName
+                        }
+                        profileStatuses[profile.id] = status
+                        recordConfigurationSmokeProfileResult(profile.id, status, reason, profileLoadMs)
+                        EngineDiagnostics.info(
+                            "config_test",
+                            "CONFIG_SMOKE_RESULT",
+                            "profile=" + profile.id + ",requestedBackend=" + profile.expectedBackend +
+                                ",status=" + status + ",reason=" + reason +
+                                ",loadMs=" + (profileLoadMs ?: -1L)
+                        )
+                        rows += profile.id + ": " + status + " (" + reason + ")"
+                        stoppedReason = "Profil " + profile.id + " fehlgeschlagen: " + reason
+
+                        val nextProfile = profiles.getOrNull(index + 1)
+                        if (nextProfile != null && !vulkanUnavailable) {
+                            var recoveryConfirmed = false
+                            try {
+                                EngineDiagnostics.info(
+                                    "config_test",
+                                    "CONFIG_SMOKE_PROFILE_RECOVERY_STARTED",
+                                    "failedProfile=" + profile.id + ",nextProfile=" + nextProfile.id +
+                                        ",waitMs=" + (profile.config.timeoutConfig.reconnectMs +
+                                        profile.config.timeoutConfig.serviceBindMs)
+                                )
+                                val stableState = awaitHealthyConfigurationService(
+                                    profile.id,
+                                    profile.config.timeoutConfig
+                                )
+                                recoveryConfirmed = true
+                                EngineDiagnostics.info(
+                                    "config_test",
+                                    "CONFIG_SMOKE_PROFILE_RECOVERED",
+                                    "failedProfile=" + profile.id + ",nextProfile=" + nextProfile.id +
+                                        ",stableState=" + stableState
+                                )
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (recoveryError: Exception) {
+                                val recoveryReason = recoveryError.message ?: recoveryError.javaClass.simpleName
+                                EngineDiagnostics.error(
+                                    "config_test",
+                                    "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                                    recoveryError
+                                )
+                                rows += "Folgeprofil " + nextProfile.id + " nicht gestartet: Service-Recovery nicht bestätigt (" +
+                                    recoveryReason + ")"
+                                stopRemainingProfilesReason = "SERVICE_RECOVERY_UNAVAILABLE: " + recoveryReason
+                                stoppedReason = "Service-Recovery nach " + profile.id + " fehlgeschlagen: " + recoveryReason
+                            }
+                            if (!InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
+                                    recoveryConfirmed = recoveryConfirmed
+                                )
+                            ) {
+                                stopRemainingProfilesReason = stopRemainingProfilesReason
+                                    ?: "SERVICE_RECOVERY_UNAVAILABLE"
+                            }
+                        }
                     }
-                    if (index < profiles.lastIndex) delay(InferenceConfigSmokePlan.COOLDOWN_MS)
                 }
                 val cpuSample = profileSamples["cpu-reference"]
                 val vulkanSample = profileSamples["vulkan-candidate"]
@@ -301,6 +447,20 @@ abstract class ConfigurationSmokeViewModel(
                 rows += "FEHLER: " + stoppedReason
                 EngineDiagnostics.error("config_test", "CONFIG_SMOKE_FAILED", error)
             } finally {
+                profiles.forEach { profile ->
+                    when (profileStatuses[profile.id]) {
+                        null -> {
+                            val reason = stopRemainingProfilesReason ?: stoppedReason ?: "PRIOR_PROFILE_NOT_COMPLETED"
+                            profileStatuses[profile.id] = "NOT_RUN"
+                            recordConfigurationSmokeProfileResult(profile.id, "NOT_RUN", reason)
+                        }
+                        "RUNNING" -> {
+                            val reason = stoppedReason ?: "UNHANDLED_PROFILE_FAILURE"
+                            profileStatuses[profile.id] = "FAIL"
+                            recordConfigurationSmokeProfileResult(profile.id, "FAIL", reason)
+                        }
+                    }
+                }
                 if (restoreRequired) {
                     _configSmokeReport.value = "Stelle die ursprüngliche Modellkonfiguration wieder her…"
                     withContext(NonCancellable) {
@@ -344,6 +504,76 @@ abstract class ConfigurationSmokeViewModel(
         engine.cancelInference()
         configurationSmokeJob?.cancel(CancellationException("Configuration smoke test cancelled"))
         _configSmokeReport.value = "Abbruch angefordert – sichere Wiederherstellung wird ausgeführt…"
+    }
+
+    private class ConfigurationSmokeModelIdentityException(message: String) : IllegalStateException(message)
+
+    private fun recordConfigurationSmokeProfileResult(
+        profileId: String,
+        status: String,
+        reason: String,
+        loadMs: Long? = null,
+        nativeRunId: String? = null
+    ) {
+        val safeReason = reason.replace(',', ';').replace('\\n', ' ').take(320)
+        EngineDiagnostics.info(
+            "config_test",
+            "CONFIG_SMOKE_PROFILE_RESULT",
+            "profile=" + profileId + ",status=" + status +
+                ",reason=" + safeReason +
+                ",loadMs=" + (loadMs ?: -1L) +
+                ",nativeRunId=" + (nativeRunId ?: "unavailable")
+        )
+    }
+
+    /**
+     * Wait for a stable IPC state after a profile failure. Reconnect publishes Ready
+     * only after a replacement service is bound; a failed reconnect gets one explicit
+     * initialize attempt. The next profile still performs its own model load/backend check.
+     */
+    private suspend fun awaitHealthyConfigurationService(
+        failedProfileId: String,
+        timeoutConfig: com.mydocanizer.llm.engine.TimeoutConfig
+    ): String {
+        val waitMs = timeoutConfig.reconnectMs + timeoutConfig.serviceBindMs
+        val stableState = withTimeoutOrNull(waitMs) {
+            engine.state.first { state ->
+                state == EngineState.Ready ||
+                    state is EngineState.ModelLoaded ||
+                    state is EngineState.Error ||
+                    state == EngineState.Closed
+            }
+        } ?: throw IllegalStateException(
+            "Kein stabiler Inference-Service nach Profil " + failedProfileId +
+                " innerhalb von " + waitMs + " ms"
+        )
+
+        return when (stableState) {
+            EngineState.Ready -> "READY"
+            is EngineState.ModelLoaded -> "MODEL_LOADED"
+            is EngineState.Error -> {
+                val initialized = engine.initialize()
+                val initializeError = initialized.exceptionOrNull()
+                if (initializeError != null) {
+                    throw IllegalStateException(
+                        "Service-Reinitialisierung fehlgeschlagen: " +
+                            (initializeError.message ?: initializeError.javaClass.simpleName),
+                        initializeError
+                    )
+                }
+                when (val afterInitialize = engine.state.value) {
+                    EngineState.Ready -> "REINITIALIZED_READY"
+                    is EngineState.ModelLoaded -> "REINITIALIZED_MODEL_LOADED"
+                    else -> throw IllegalStateException(
+                        "Service blieb nach initialize() in Zustand " + afterInitialize.javaClass.simpleName
+                    )
+                }
+            }
+            EngineState.Closed -> throw IllegalStateException("Inference-Service/Engine ist geschlossen.")
+            else -> throw IllegalStateException(
+                "Unerwarteter Zustand nach Reconnect: " + stableState.javaClass.simpleName
+            )
+        }
     }
 
     private fun isVulkanBackendUnavailable(error: Throwable): Boolean {

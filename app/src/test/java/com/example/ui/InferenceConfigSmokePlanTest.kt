@@ -157,6 +157,34 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
+    fun continuesAfterProfileFailureOnlyWhenServiceRecoveryIsConfirmed() {
+        assertTrue(InferenceConfigSmokePlan.mayContinueAfterProfileFailure(recoveryConfirmed = true))
+        assertFalse(InferenceConfigSmokePlan.mayContinueAfterProfileFailure(recoveryConfirmed = false))
+    }
+
+    @Test
+    fun cancellationSafetyStopAndModelIdentityMismatchAlwaysStopFollowingProfiles() {
+        assertFalse(
+            InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
+                recoveryConfirmed = true,
+                cancelled = true
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
+                recoveryConfirmed = true,
+                safetyStop = true
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
+                recoveryConfirmed = true,
+                modelIdentityMismatch = true
+            )
+        )
+    }
+
+    @Test
     fun resolvesAutoMicroBatchByActualBackendWithoutChangingProfile() {
         val config = EngineConfig(batchSize = 128, backendPreference = BackendPreference.VULKAN)
         assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(config, "Vulkan selected"))

@@ -62,6 +62,13 @@ internal object InferenceConfigSmokePlan {
         return PairedGateSummary(outputGateStatus, backendParityStatus, combinedStatus)
     }
 
+    internal fun mayContinueAfterProfileFailure(
+        recoveryConfirmed: Boolean,
+        cancelled: Boolean = false,
+        safetyStop: Boolean = false,
+        modelIdentityMismatch: Boolean = false
+    ): Boolean = recoveryConfirmed && !cancelled && !safetyStop && !modelIdentityMismatch
+
     internal data class Profile(
         val id: String,
         val label: String,
