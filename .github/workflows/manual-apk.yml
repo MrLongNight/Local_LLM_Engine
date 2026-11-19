@@ -617,6 +617,12 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Validate emulator diagnostics script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n .github/scripts/run-emulator-instrumentation.sh
+
       - name: Run process-isolation instrumentation tests on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
