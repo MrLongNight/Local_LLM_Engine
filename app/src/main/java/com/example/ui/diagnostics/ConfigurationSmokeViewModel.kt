@@ -135,6 +135,17 @@ abstract class ConfigurationSmokeViewModel(
                     try {
                         val stop = configurationTestSafetyBlock()
                         if (stop != null) {
+                            pendingRecoveryFromProfile?.let { failedProfile ->
+                                EngineDiagnostics.error(
+                                    "config_test",
+                                    "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                                    IllegalStateException(
+                                        "Safety stop prevented the follow-up model load after profile $failedProfile"
+                                    )
+                                )
+                                pendingRecoveryFromProfile = null
+                                pendingRecoveryObservedState = null
+                            }
                             stoppedReason = stop
                             stopRemainingProfilesReason = "SAFETY_STOP"
                             profileStatuses[profile.id] = "NOT_RUN"
@@ -507,6 +518,17 @@ abstract class ConfigurationSmokeViewModel(
                 rows += "FEHLER: " + stoppedReason
                 EngineDiagnostics.error("config_test", "CONFIG_SMOKE_FAILED", error)
             } finally {
+                pendingRecoveryFromProfile?.let { failedProfile ->
+                    EngineDiagnostics.error(
+                        "config_test",
+                        "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                        IllegalStateException(
+                            "No following profile model-load callback confirmed recovery after $failedProfile"
+                        )
+                    )
+                    pendingRecoveryFromProfile = null
+                    pendingRecoveryObservedState = null
+                }
                 profiles.forEach { profile ->
                     when (profileStatuses[profile.id]) {
                         null -> {
@@ -575,7 +597,7 @@ abstract class ConfigurationSmokeViewModel(
         loadMs: Long? = null,
         nativeRunId: String? = null
     ) {
-        val safeReason = reason.replace(',', ';').replace("\\r", " ").replace("\\n", " ").take(320)
+        val safeReason = reason.replace(',', ';').lines().joinToString(" ").take(320)
         EngineDiagnostics.info(
             "config_test",
             "CONFIG_SMOKE_PROFILE_RESULT",
