@@ -27,23 +27,30 @@ done
 adb logcat -b all -d -v threadtime \
   > "$diagnostics_dir/logcat-all.txt" \
   2> "$diagnostics_dir/logcat-pull.stderr" || true
-# run-as must target the application that owns ApplicationProvider's filesDir,
-# not the instrumentation APK package. app/build.gradle.kts resolves Debug to
-# applicationId "com.aistudio.localllm.mdoanx" + applicationIdSuffix ".dmmv".
-app_id="com.aistudio.localllm.mdoanx.dmmv"
-instrumentation_package="com.mydocanizer.llm.engine.test"
-printf '%s\n' "$app_id" > "$diagnostics_dir/diagnostics-target-package.txt"
+# :llm-engine is an Android library test target. Its generated androidTest APK
+# declares both package and instrumentation targetPackage as
+# "com.mydocanizer.llm.engine.test". ApplicationProvider's filesDir belongs to
+# that package (the test log records /data/user/0/.../cache). The root :app
+# module's .dmmv applicationId is not installed by connectedDebugAndroidTest.
+target_package="com.mydocanizer.llm.engine.test"
+instrumentation_package="$target_package"
+printf '%s\n' "$target_package" > "$diagnostics_dir/diagnostics-target-package.txt"
 printf '%s\n' "$instrumentation_package" > "$diagnostics_dir/instrumentation-package.txt"
-adb shell pm path "$app_id" \
+adb shell pm path "$target_package" \
   > "$diagnostics_dir/target-app-package-path.txt" \
   2> "$diagnostics_dir/target-app-package-path.stderr" || true
 : > "$diagnostics_dir/app-process-diagnostics.txt"
 : > "$diagnostics_dir/app-diagnostics-pull.stderr"
 : > "$diagnostics_dir/activity-exit-info.txt"
 : > "$diagnostics_dir/exit-info-pull.stderr"
-if adb shell run-as "$app_id" sh -c 'test -d files/diagnostics' \
+# Exit information is independent of run-as access; collect it even if the
+# app-private diagnostics directory cannot be read.
+adb shell dumpsys activity exit-info "$target_package" \
+  > "$diagnostics_dir/activity-exit-info.txt" \
+  2> "$diagnostics_dir/exit-info-pull.stderr" || true
+if adb shell run-as "$target_package" sh -c 'test -d files/diagnostics' \
     >/dev/null 2> "$diagnostics_dir/run-as-target.stderr"; then
-  adb exec-out run-as "$app_id" sh -c '
+  adb exec-out run-as "$target_package" sh -c '
     for file in files/diagnostics/engine-*.log; do
       [ -f "$file" ] || continue
       printf "\n===== %s =====\n" "$file"
@@ -51,11 +58,8 @@ if adb shell run-as "$app_id" sh -c 'test -d files/diagnostics' \
     done
   ' > "$diagnostics_dir/app-process-diagnostics.txt" \
     2> "$diagnostics_dir/app-diagnostics-pull.stderr" || true
-  adb shell dumpsys activity exit-info "$app_id" \
-    > "$diagnostics_dir/activity-exit-info.txt" \
-    2> "$diagnostics_dir/exit-info-pull.stderr" || true
 else
-  printf 'No readable app-private diagnostics directory for target application package: %s\n' "$app_id" \
+  printf 'No readable app-private diagnostics directory for target package: %s\n' "$target_package" \
     > "$diagnostics_dir/app-diagnostics-pull.stderr"
 fi
 adb shell ps -A \
