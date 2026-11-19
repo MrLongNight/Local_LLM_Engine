@@ -304,10 +304,9 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             binding = bindInferenceService(appContext)
             val originalPid = binding.pid
             val clientPid = Process.myPid()
-            assertNotEquals(
+            assertTrue(
                 "The Binder inference service must own descriptors in a separate process",
-                clientPid,
-                originalPid
+                clientPid != originalPid
             )
             val firstBaseline = descriptorCountFor(originalPid, firstFiles)
             val secondBaseline = descriptorCountFor(originalPid, secondFiles)
