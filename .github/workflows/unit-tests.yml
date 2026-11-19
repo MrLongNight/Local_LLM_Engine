@@ -17,6 +17,7 @@ on:
       - ".gitmodules"
       - ".github/workflows/unit-tests.yml"
       - ".github/workflows/manual-apk.yml"
+      - ".github/scripts/**"
   pull_request:
 
 permissions:
