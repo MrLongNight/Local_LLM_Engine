@@ -34,6 +34,23 @@ class NativeModelMetadataParserTest {
     }
 
     @Test
+    fun preservesGgufGeneralNameAndQuantizationInsideExistingDescriptionField() {
+        val parsed = NativeModelMetadataParser.parse(
+            rawMetadata = "Qwen3 4B Instruct 2507 | qwen3 4B Q4_K - Medium;" +
+                "4022468096;262144;2491323904;ARCH=qwen3;Vulkan;device=Mali-G57",
+            fallbackBackend = "CPU",
+            fallbackSizeBytes = 1L
+        )
+
+        assertEquals(
+            "Qwen3 4B Instruct 2507 | qwen3 4B Q4_K - Medium",
+            parsed.description
+        )
+        assertEquals(4_022_468_096L, parsed.parameterCount)
+        assertEquals("qwen3", parsed.architecture)
+    }
+
+    @Test
     fun architectureValuesRemainOpaqueForSupportedModelFamilies() {
         val architectures = listOf("QWEN3", "QWEN35", "QWEN35MOE", "GEMMA4", "LLAMA")
         architectures.forEach { architecture ->

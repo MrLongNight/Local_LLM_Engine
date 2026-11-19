@@ -1579,6 +1579,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelMetada
 
     char desc[256];
     llama_model_desc(engine->model, desc, sizeof(desc));
+    char model_name[256] = {};
+    const int32_t model_name_size = llama_model_meta_val_str(
+        engine->model, "general.name", model_name, sizeof(model_name));
+    const std::string description =
+        model_name_size >= 0 && model_name[0] != '\0'
+            ? std::string(model_name) + " | " + desc
+            : std::string(desc);
     char architecture[128] = {};
     const int32_t architecture_size = llama_model_meta_val_str(
         engine->model, "general.architecture", architecture, sizeof(architecture));
@@ -1589,7 +1596,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetModelMetada
     uint64_t size_bytes = llama_model_size(engine->model);
 
     std::ostringstream ss;
-    ss << desc << ";" << n_params << ";" << n_ctx_train << ";" << size_bytes
+    ss << description << ";" << n_params << ";" << n_ctx_train << ";" << size_bytes
        << ";ARCH=" << architecture_value << ";" << engine->active_backend;
     return env->NewStringUTF(ss.str().c_str());
 } catch (const std::exception& error) {
