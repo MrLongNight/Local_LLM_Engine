@@ -117,6 +117,8 @@ sequenceDiagram
   Service-->>Client: AIDL callback events
   Client-->>API: Flow of InferenceEvent
   API-->>VM: Started, Progress, Token and terminal event
+  Note over Client,Service: Request-ID-scoped callback gates serialize delivery; the first terminal event wins and later token/progress/completion callbacks are discarded.
+  Note over Client,Service: Each bind has a generation-scoped ServiceConnection; callbacks from an invalidated binding cannot publish an old service PID.
   VM-->>Screen: UI state and generated text
 ```
 

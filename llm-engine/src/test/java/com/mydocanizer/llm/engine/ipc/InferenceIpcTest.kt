@@ -203,6 +203,10 @@ class InferenceIpcTest {
             if (emitDuplicateTerminalCallbacks.get()) {
                 // Simulate Binder callbacks arriving after a terminal callback has already
                 // closed the stream. They must not create a second terminal event.
+                callback?.onToken(requestId, "late token", 2)
+                callback?.onPromptProgress(requestId, 99, 100, 999L)
+                callback?.onProgress(requestId, 99, 999L)
+                callback?.onStarted(requestId, 99)
                 callback?.onError(requestId, "late error after completion", "late partial")
                 callback?.onCancelled(requestId, "late cancellation", 99)
                 callback?.onCompleted(requestId, result)
@@ -1109,7 +1113,84 @@ class InferenceIpcTest {
             assertEquals("Exactly one terminal event must be emitted", 1, terminalEvents.size)
             assertTrue("The first terminal callback is the successful completion", terminalEvents.single() is InferenceEvent.Completed)
             assertEquals("Hallo Welt", (terminalEvents.single() as InferenceEvent.Completed).result.text)
+            assertEquals(
+                "Late tokens after completion must not enter the stream",
+                listOf("Hallo", " Welt"),
+                events.filterIsInstance<InferenceEvent.Token>().map { it.token }
+            )
+            assertFalse(
+                "Late progress after completion must not be forwarded",
+                events.filterIsInstance<InferenceEvent.Progress>().any { it.tokensGenerated == 99 }
+            )
             assertTrue("The stream must finish without leaving inference active", client.state.value !is com.mydocanizer.llm.engine.EngineState.Inferring)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun callbacksFromPreviousRequestCannotMutateNextRequestOrReuseItsServicePid() = runBlocking {
+        val fakeService = FakeInferenceService()
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = TimeoutConfig.fast()
+        )
+
+        try {
+            val firstEvents = withTimeout(1_000L) {
+                client.streamChat(InferenceRequest.single("first request")).toList()
+            }
+            assertTrue(firstEvents.any { it is InferenceEvent.Completed })
+            val firstRequestId = fakeService.lastRequestId.get()
+                ?: throw AssertionError("First request ID was not captured")
+            val staleCallback = fakeService.activeCallback.get()
+                ?: throw AssertionError("First request callback was not captured")
+
+            // The replacement connection reports a new service PID. The next request must
+            // capture that PID rather than reusing the PID from the completed request.
+            fakeService.currentProcessId.set(22222)
+            fakeService.hangBeforeStarted.set(true)
+            fakeService.acknowledgeCooperativeCancel.set(true)
+            val secondStream = async {
+                client.streamChat(InferenceRequest.single("second request")).toList()
+            }
+            withTimeout(1_000L) {
+                while (fakeService.lastRequestId.get() == firstRequestId) delay(5L)
+            }
+            val secondRequestId = fakeService.lastRequestId.get()
+                ?: throw AssertionError("Second request ID was not captured")
+
+            // Simulate Binder transactions from the old request arriving after the new
+            // request has become active. They must not inject tokens, progress or success.
+            staleCallback.onToken(firstRequestId, "stale token", 99)
+            staleCallback.onPromptProgress(firstRequestId, 99, 100, 999L)
+            staleCallback.onProgress(firstRequestId, 99, 999L)
+            staleCallback.onCompleted(
+                firstRequestId,
+                InferenceResult(
+                    text = "stale success",
+                    tokensGenerated = 1,
+                    durationMs = 1L,
+                    tokensPerSecond = 1.0,
+                    finishReason = FinishReason.STOP
+                )
+            )
+            delay(25L)
+            assertFalse("A stale completion must not finish the new request", secondStream.isCompleted)
+
+            // Acknowledge cancellation through the current request callback. If the old
+            // PID had been retained, the client would skip this replacement-service IPC.
+            client.cancelInference()
+            val secondEvents = withTimeout(1_000L) { secondStream.await() }
+            assertTrue(secondEvents.any { it is InferenceEvent.Cancelled })
+            assertTrue(secondEvents.none { it is InferenceEvent.Completed })
+            assertFalse(
+                "The previous request must not inject its token into the new stream",
+                secondEvents.filterIsInstance<InferenceEvent.Token>().any { it.token == "stale token" }
+            )
+            assertEquals("Cancellation must target the current request ID", secondRequestId, fakeService.cancelledRequestId.get())
+            assertFalse("A cooperative acknowledgement must not kill the replacement process", fakeService.isKilled.get())
         } finally {
             client.close()
         }

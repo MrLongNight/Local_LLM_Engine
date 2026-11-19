@@ -87,6 +87,11 @@ internal class InferenceClient(
         val deferred: CompletableDeferred<Result<ModelInfo>>
     )
 
+    private data class DisconnectedServiceConnection(
+        val processId: Int?,
+        val wasBound: Boolean
+    )
+
     private data class ActiveStreamControl(
         val requestId: String,
         val timeoutConfig: TimeoutConfig,
@@ -122,7 +127,10 @@ internal class InferenceClient(
 
     @Volatile private var remoteService: IInferenceService? = mockService
     @Volatile private var isBound = false
+    @Volatile private var serviceConnection: ServiceConnection? = null
     @Volatile private var serviceConnectionDeferred = CompletableDeferred<IInferenceService>()
+    private val serviceConnectionEpoch = IpcServiceConnectionEpoch()
+    private val serviceConnectionLock = Any()
 
     private val activeRequestId = AtomicReference<String?>(null)
     // PID captured from the service that actually received this request. _remotePid
@@ -137,68 +145,120 @@ internal class InferenceClient(
     @Volatile private var lastLoadedConfig: EngineConfig? = null
     private val isClosed = AtomicBoolean(false)
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            if (binder == null) {
-                Log.w(TAG, "onServiceConnected received null binder")
-                return
-            }
-            val service = IInferenceService.Stub.asInterface(binder) ?: return
-            remoteService = service
-            if (!serviceConnectionDeferred.isCompleted) {
-                serviceConnectionDeferred.complete(service)
-            }
-            try {
-                val pid = service.processId
-                _remotePid.value = pid
-                _backendInfo.value = service.backendInfo ?: BackendInfo()
-                _state.value = if (_currentModel.value != null) {
-                    EngineState.ModelLoaded(_currentModel.value!!)
-                } else {
-                    EngineState.Ready
+    private fun createServiceConnection(generation: Long): ServiceConnection =
+        object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                if (binder == null) {
+                    Log.w(TAG, "onServiceConnected received null binder")
+                    return
                 }
-                EngineDiagnostics.info("ipc_client", "SERVICE_CONNECTED", "Remote service PID=$pid connected")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to query connected service properties", e)
+                val service = IInferenceService.Stub.asInterface(binder) ?: return
+                var connectedPid: Int? = null
+                val accepted = synchronized(serviceConnectionLock) {
+                    if (!serviceConnectionEpoch.isCurrent(generation) ||
+                        serviceConnection !== this ||
+                        isClosed.get()
+                    ) {
+                        false
+                    } else {
+                        remoteService = service
+                        if (!serviceConnectionDeferred.isCompleted) {
+                            serviceConnectionDeferred.complete(service)
+                        }
+                        try {
+                            val pid = service.processId
+                            connectedPid = pid
+                            _remotePid.value = pid
+                            _backendInfo.value = service.backendInfo ?: BackendInfo()
+                            _state.value = if (_currentModel.value != null) {
+                                EngineState.ModelLoaded(_currentModel.value!!)
+                            } else {
+                                EngineState.Ready
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to query connected service properties", e)
+                        }
+                        true
+                    }
+                }
+                if (accepted && connectedPid != null) {
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "SERVICE_CONNECTED",
+                        "Remote service PID=$connectedPid connected; bindingGeneration=$generation"
+                    )
+                } else if (!accepted) {
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "STALE_SERVICE_CONNECTION_CALLBACK_IGNORED",
+                        "callback=connected,bindingGeneration=$generation,currentGeneration=${serviceConnectionEpoch.current()}"
+                    )
+                }
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                handleServiceDisconnected(generation, this, "SERVICE_DISCONNECTED", bindingDied = false)
+            }
+
+            override fun onBindingDied(name: ComponentName?) {
+                handleServiceDisconnected(generation, this, "BINDING_DIED", bindingDied = true)
             }
         }
 
-        override fun onServiceDisconnected(name: ComponentName?) {
-            val disconnectedPid = _remotePid.value
-            failPendingModelLoad(disconnectedPid, "SERVICE_DISCONNECTED")
-            recordRemoteProcessExit(disconnectedPid, "SERVICE_DISCONNECTED")
-            // Publish the new waiter before clearing the old proxy. A concurrent getService()
-            // must never observe remoteService=null together with an already-completed old waiter.
+    private fun handleServiceDisconnected(
+        generation: Long,
+        connection: ServiceConnection,
+        event: String,
+        bindingDied: Boolean
+    ) {
+        val disconnected = synchronized(serviceConnectionLock) {
+            if (!serviceConnectionEpoch.isCurrent(generation) || serviceConnection !== connection) {
+                return@synchronized null
+            }
+            if (!serviceConnectionEpoch.invalidate(generation)) {
+                return@synchronized null
+            }
+            val snapshot = DisconnectedServiceConnection(
+                processId = _remotePid.value,
+                wasBound = isBound
+            )
+            // Invalidate the old callback source before unbinding or starting recovery.
+            // A late onServiceConnected from this binding can no longer publish its PID.
+            isBound = false
+            serviceConnection = null
+            // Publish a fresh waiter before clearing the old proxy so getService() cannot
+            // observe remoteService=null together with an already-completed old waiter.
             serviceConnectionDeferred = CompletableDeferred()
             remoteService = null
             _remotePid.value = null
             _currentModel.value = null
             _state.value = EngineState.Reconnecting
-            activeStreamControl.get()
-                ?.takeIf { it.requestId == activeRequestId.get() }
-                ?.failAfterDisconnect(IllegalStateException("Inference service disconnected (PID=$disconnectedPid)"))
-            EngineDiagnostics.info("ipc_client", "SERVICE_DISCONNECTED", "Service disconnected, reconnecting")
-            if (!isClosed.get()) {
-                triggerReconnect()
-            }
-        }
+            snapshot
+        } ?: return
 
-        override fun onBindingDied(name: ComponentName?) {
-            val disconnectedPid = _remotePid.value
-            failPendingModelLoad(disconnectedPid, "BINDING_DIED")
-            recordRemoteProcessExit(disconnectedPid, "BINDING_DIED")
-            serviceConnectionDeferred = CompletableDeferred()
-            remoteService = null
-            _remotePid.value = null
-            _currentModel.value = null
-            _state.value = EngineState.Reconnecting
-            activeStreamControl.get()
-                ?.takeIf { it.requestId == activeRequestId.get() }
-                ?.failAfterDisconnect(IllegalStateException("Inference service binding died (PID=$disconnectedPid)"))
+        if (disconnected.wasBound) {
+            runCatching { context.unbindService(connection) }
+        }
+        failPendingModelLoad(disconnected.processId, event)
+        recordRemoteProcessExit(disconnected.processId, event)
+        activeStreamControl.get()
+            ?.takeIf { it.requestId == activeRequestId.get() }
+            ?.failAfterDisconnect(
+                IllegalStateException(
+                    if (bindingDied) {
+                        "Inference service binding died (PID=${disconnected.processId})"
+                    } else {
+                        "Inference service disconnected (PID=${disconnected.processId})"
+                    }
+                )
+            )
+        if (bindingDied) {
             EngineDiagnostics.error("ipc_client", "BINDING_DIED", IllegalStateException("Inference process died"))
-            if (!isClosed.get()) {
-                triggerReconnect()
-            }
+        } else {
+            EngineDiagnostics.info("ipc_client", "SERVICE_DISCONNECTED", "Service disconnected, reconnecting")
+        }
+        if (!isClosed.get()) {
+            triggerReconnect(disconnected.processId)
         }
     }
 
@@ -323,17 +383,47 @@ internal class InferenceClient(
     }
 
     private fun bindToService() {
+        if (isClosed.get()) return
+        val generation = serviceConnectionEpoch.begin()
+        val connection = createServiceConnection(generation)
+        val installed = synchronized(serviceConnectionLock) {
+            if (isClosed.get() || !serviceConnectionEpoch.isCurrent(generation)) {
+                false
+            } else {
+                serviceConnection = connection
+                isBound = false
+                true
+            }
+        }
+        if (!installed) return
         val intent = Intent(context, InferenceService::class.java).apply {
             action = InferenceService.ACTION_BIND_INFERENCE
         }
-        isBound = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        if (!isBound) {
+        val accepted = context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        var staleBinding = false
+        var bindFailed = false
+        synchronized(serviceConnectionLock) {
+            if (serviceConnectionEpoch.isCurrent(generation) && serviceConnection === connection) {
+                isBound = accepted
+                if (!accepted) {
+                    serviceConnection = null
+                    serviceConnectionEpoch.invalidate(generation)
+                    bindFailed = true
+                }
+            } else {
+                staleBinding = accepted
+            }
+        }
+        if (staleBinding) {
+            runCatching { context.unbindService(connection) }
+        }
+        if (bindFailed) {
             _state.value = EngineState.Error("Failed to bind to InferenceService (:inference)")
             EngineDiagnostics.error("ipc_client", "BIND_FAILED")
         }
     }
 
-    private fun triggerReconnect() {
+    private fun triggerReconnect(disconnectedPid: Int?) {
         if (isClosed.get() || !reconnectInProgress.compareAndSet(false, true)) return
 
         // Snapshot the recovery target at disconnect time. If an explicit backend
@@ -350,18 +440,25 @@ internal class InferenceClient(
                 EngineDiagnostics.info(
                     "ipc_client",
                     "SERVICE_RECONNECT_STARTED",
-                    "Starting recovery; previous remote PID=${_remotePid.value}, bound=$isBound"
+                    "Starting recovery; disconnected PID=$disconnectedPid, bound=$isBound"
                 )
 
-                if (isBound) {
-                    try {
-                        context.unbindService(serviceConnection)
-                    } catch (ignored: Exception) {}
+                val obsoleteConnection = synchronized(serviceConnectionLock) {
+                    val connection = serviceConnection
+                    val wasBound = isBound
+                    if (connection != null) {
+                        serviceConnectionEpoch.invalidateCurrent()
+                        serviceConnection = null
+                    }
                     isBound = false
+                    if (wasBound) connection else null
+                }
+                obsoleteConnection?.let { connection ->
+                    runCatching { context.unbindService(connection) }
                 }
 
-                // Invalidate old Binder-derived state before binding the replacement service.
-                // This prevents getService() from returning a stale proxy during reconnect.
+                // The disconnected binding was invalidated before recovery was scheduled.
+                // Keep the fresh waiter created by handleServiceDisconnected().
                 remoteService = null
                 _remotePid.value = null
                 _currentModel.value = null
@@ -887,7 +984,7 @@ internal class InferenceClient(
         val promptDecodeStartNano = AtomicLong(0L)
         val lastUiProgressNano = AtomicLong(startNano)
         val streamBuilder = StringBuilder()
-        val terminalSent = AtomicBoolean(false)
+        val callbackState = IpcRequestTerminalState(requestId)
         var watchdogJob: Job? = null
         var streamControl: ActiveStreamControl? = null
 
@@ -922,30 +1019,30 @@ internal class InferenceClient(
         }
 
         fun finishStream(event: InferenceEvent): Boolean {
-            if (!terminalSent.compareAndSet(false, true)) return false
-            watchdogJob?.cancel()
-            if (activeRequestId.compareAndSet(requestId, null)) {
-                activeRequestPid.set(null)
-            }
-            streamControl?.let { activeStreamControl.compareAndSet(it, null) }
-            // Keep the lifecycle state aligned with the terminal callback. In particular,
-            // collector cancellation leaves this as Inferring until cooperative unwind
-            // or process-abort escalation actually completes.
-            if (_state.value is EngineState.Inferring) {
-                _state.value = currentModelInfo?.let { EngineState.ModelLoaded(it) } ?: EngineState.Ready
-            }
+            return callbackState.terminate {
+                watchdogJob?.cancel()
+                if (activeRequestId.compareAndSet(requestId, null)) {
+                    activeRequestPid.set(null)
+                }
+                streamControl?.let { activeStreamControl.compareAndSet(it, null) }
+                // Keep the lifecycle state aligned with the terminal callback. In particular,
+                // collector cancellation leaves this as Inferring until cooperative unwind
+                // or process-abort escalation actually completes.
+                if (_state.value is EngineState.Inferring) {
+                    _state.value = currentModelInfo?.let { EngineState.ModelLoaded(it) } ?: EngineState.Ready
+                }
 
-            // Close the progress channel and let its forwarder drain every queued
-            // phase/update before publishing the terminal event. Without this barrier,
-            // an immediate Completed/Cancelled callback could close the callbackFlow
-            // while the last real progress update was still queued.
-            progressEvents.close()
-            launch(Dispatchers.Default) {
-                progressForwarder.join()
-                trySend(event)
-                channel.close()
+                // Close the progress channel and let its forwarder drain every queued
+                // phase/update before publishing the terminal event. The request gate
+                // serializes this transition with every Binder callback, so no late token
+                // or progress callback can enter the channel after the terminal barrier.
+                progressEvents.close()
+                launch(Dispatchers.Default) {
+                    progressForwarder.join()
+                    trySend(event)
+                    channel.close()
+                }
             }
-            return true
         }
 
         fun reportTimeout(): Boolean {
@@ -967,9 +1064,15 @@ internal class InferenceClient(
         }
 
         fun triggerTimeout(reason: FinishReason, elapsedMs: Long) {
-            if (activeRequestId.get() != requestId ||
-                !pendingTimeout.compareAndSet(null, TimeoutSnapshot(reason, elapsedMs))
-            ) return
+            var timeoutAccepted = false
+            callbackState.dispatch(requestId) {
+                if (activeRequestId.get() == requestId &&
+                    pendingTimeout.compareAndSet(null, TimeoutSnapshot(reason, elapsedMs))
+                ) {
+                    timeoutAccepted = true
+                }
+            }
+            if (!timeoutAccepted) return
 
             EngineDiagnostics.error("ipc_client", "INFERENCE_TIMEOUT", InferenceTimeoutException(reason, elapsedMs))
             val targetPid = activeRequestPid.get()
@@ -1143,70 +1246,76 @@ internal class InferenceClient(
 
         val callback = object : IInferenceCallback.Stub() {
             override fun onStarted(reqId: String?, promptMessageCount: Int) {
-                if (reqId == activeRequestId.get() && receivedStarted.compareAndSet(false, true)) {
-                    val completedAt = System.nanoTime()
-                    prefillCompletedNano.set(completedAt)
-                    val elapsedMs = (completedAt - startNano) / 1_000_000L
-                    EngineDiagnostics.info(
-                        "ipc_client",
-                        "PREFILL_COMPLETED",
-                        "request=$reqId, messages=$promptMessageCount, elapsedMs=$elapsedMs"
-                    )
-                    trySend(InferenceEvent.Started(promptMessageCount))
-                    progressEvents.trySend(
-                        InferenceEvent.Progress(
-                            tokensGenerated = 0,
-                            elapsedMs = 0L,
-                            phase = ProgressPhase.WAITING_FOR_FIRST_TOKEN,
-                            promptTokensProcessed = promptTokensProcessed.get(),
-                            promptTokensTotal = promptTokensTotal.get()
+                callbackState.dispatch(reqId) {
+                    if (activeRequestId.get() == requestId &&
+                        receivedStarted.compareAndSet(false, true)
+                    ) {
+                        val completedAt = System.nanoTime()
+                        prefillCompletedNano.set(completedAt)
+                        val elapsedMs = (completedAt - startNano) / 1_000_000L
+                        EngineDiagnostics.info(
+                            "ipc_client",
+                            "PREFILL_COMPLETED",
+                            "request=$reqId, messages=$promptMessageCount, elapsedMs=$elapsedMs"
                         )
-                    )
-                    lastUiProgressNano.set(completedAt)
+                        trySend(InferenceEvent.Started(promptMessageCount))
+                        progressEvents.trySend(
+                            InferenceEvent.Progress(
+                                tokensGenerated = 0,
+                                elapsedMs = 0L,
+                                phase = ProgressPhase.WAITING_FOR_FIRST_TOKEN,
+                                promptTokensProcessed = promptTokensProcessed.get(),
+                                promptTokensTotal = promptTokensTotal.get()
+                            )
+                        )
+                        lastUiProgressNano.set(completedAt)
+                    }
                 }
             }
 
             override fun onToken(reqId: String?, token: String?, tokenIndex: Int) {
-                if (reqId == activeRequestId.get() && !token.isNullOrEmpty()) {
-                    val receivedAt = System.nanoTime()
-                    lastTokenNano.set(receivedAt)
-                    val isFirstToken = receivedFirstToken.compareAndSet(false, true)
-                    val generated = tokenCount.incrementAndGet()
-                    synchronized(streamBuilder) { streamBuilder.append(token) }
-                    if (isFirstToken) {
-                        val elapsedMs = (receivedAt - prefillCompletedNano.get()) / 1_000_000L
-                        EngineDiagnostics.info(
-                            "ipc_client",
-                            "FIRST_TOKEN_RECEIVED",
-                            "request=$reqId, latencyAfterPrefillMs=$elapsedMs"
-                        )
-                    }
-                    val tokenSend = trySend(InferenceEvent.Token(token, tokenIndex))
-                    if (tokenSend.isFailure && tokenDeliveryFailureHandled.compareAndSet(false, true)) {
-                        EngineDiagnostics.info(
-                            "ipc_client", "TOKEN_EVENT_DELIVERY_FAILED",
-                            "request=$requestId,tokenIndex=$tokenIndex; requesting native cancellation"
-                        )
-                        val service = remoteService
-                        clientScope.launch(Dispatchers.IO) {
-                            runCatching { service?.cancelInference(requestId) }
+                callbackState.dispatch(reqId) {
+                    if (activeRequestId.get() == requestId && !token.isNullOrEmpty()) {
+                        val receivedAt = System.nanoTime()
+                        lastTokenNano.set(receivedAt)
+                        val isFirstToken = receivedFirstToken.compareAndSet(false, true)
+                        val generated = tokenCount.incrementAndGet()
+                        synchronized(streamBuilder) { streamBuilder.append(token) }
+                        if (isFirstToken) {
+                            val elapsedMs = (receivedAt - prefillCompletedNano.get()) / 1_000_000L
+                            EngineDiagnostics.info(
+                                "ipc_client",
+                                "FIRST_TOKEN_RECEIVED",
+                                "request=$reqId, latencyAfterPrefillMs=$elapsedMs"
+                            )
                         }
-                    }
-                    val elapsedMs = ((receivedAt - prefillCompletedNano.get()) / 1_000_000L).coerceAtLeast(0L)
-                    val speed = if (elapsedMs > 0L) generated * 1000.0 / elapsedMs else 0.0
-                    val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
-                        (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
-                    } else null
-                    progressEvents.trySend(
-                        InferenceEvent.Progress(
-                            tokensGenerated = generated,
-                            elapsedMs = elapsedMs,
-                            phase = ProgressPhase.GENERATING,
-                            tokensPerSecond = speed,
-                            estimatedRemainingMs = eta
+                        val tokenSend = trySend(InferenceEvent.Token(token, tokenIndex))
+                        if (tokenSend.isFailure && tokenDeliveryFailureHandled.compareAndSet(false, true)) {
+                            EngineDiagnostics.info(
+                                "ipc_client", "TOKEN_EVENT_DELIVERY_FAILED",
+                                "request=$requestId,tokenIndex=$tokenIndex; requesting native cancellation"
+                            )
+                            val service = remoteService
+                            clientScope.launch(Dispatchers.IO) {
+                                runCatching { service?.cancelInference(requestId) }
+                            }
+                        }
+                        val elapsedMs = ((receivedAt - prefillCompletedNano.get()) / 1_000_000L).coerceAtLeast(0L)
+                        val speed = if (elapsedMs > 0L) generated * 1000.0 / elapsedMs else 0.0
+                        val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
+                            (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
+                        } else null
+                        progressEvents.trySend(
+                            InferenceEvent.Progress(
+                                tokensGenerated = generated,
+                                elapsedMs = elapsedMs,
+                                phase = ProgressPhase.GENERATING,
+                                tokensPerSecond = speed,
+                                estimatedRemainingMs = eta
+                            )
                         )
-                    )
-                    lastUiProgressNano.set(receivedAt)
+                        lastUiProgressNano.set(receivedAt)
+                    }
                 }
             }
 
@@ -1216,99 +1325,109 @@ internal class InferenceClient(
                 totalPromptTokens: Int,
                 elapsedMs: Long
             ) {
-                if (reqId == activeRequestId.get()) {
-                    val processed = tokensProcessed.coerceAtLeast(0)
-                    val total = totalPromptTokens.coerceAtLeast(0)
-                    if (processed == 0) promptDecodeStartNano.set(System.nanoTime())
-                    promptTokensProcessed.set(processed)
-                    promptTokensTotal.set(total)
-                    lastPromptProgressNano.set(System.nanoTime())
-                    val decodeStart = promptDecodeStartNano.get()
-                    val measuredElapsedMs = if (decodeStart > 0L) {
-                        ((System.nanoTime() - decodeStart) / 1_000_000L).coerceAtLeast(1L)
-                    } else elapsedMs.coerceAtLeast(1L)
-                    val speed = processed * 1000.0 / measuredElapsedMs
-                    val eta = if (speed > 0.0 && total > processed) {
-                        (((total - processed) * 1000.0) / speed).toLong()
-                    } else null
-                    progressEvents.trySend(
-                        InferenceEvent.Progress(
-                            tokensGenerated = 0,
-                            elapsedMs = measuredElapsedMs,
-                            phase = ProgressPhase.PROMPT_EVALUATION,
-                            promptTokensProcessed = processed,
-                            promptTokensTotal = total,
-                            tokensPerSecond = speed,
-                            estimatedRemainingMs = eta
+                callbackState.dispatch(reqId) {
+                    if (activeRequestId.get() == requestId) {
+                        val processed = tokensProcessed.coerceAtLeast(0)
+                        val total = totalPromptTokens.coerceAtLeast(0)
+                        if (processed == 0) promptDecodeStartNano.set(System.nanoTime())
+                        promptTokensProcessed.set(processed)
+                        promptTokensTotal.set(total)
+                        lastPromptProgressNano.set(System.nanoTime())
+                        val decodeStart = promptDecodeStartNano.get()
+                        val measuredElapsedMs = if (decodeStart > 0L) {
+                            ((System.nanoTime() - decodeStart) / 1_000_000L).coerceAtLeast(1L)
+                        } else elapsedMs.coerceAtLeast(1L)
+                        val speed = processed * 1000.0 / measuredElapsedMs
+                        val eta = if (speed > 0.0 && total > processed) {
+                            (((total - processed) * 1000.0) / speed).toLong()
+                        } else null
+                        progressEvents.trySend(
+                            InferenceEvent.Progress(
+                                tokensGenerated = 0,
+                                elapsedMs = measuredElapsedMs,
+                                phase = ProgressPhase.PROMPT_EVALUATION,
+                                promptTokensProcessed = processed,
+                                promptTokensTotal = total,
+                                tokensPerSecond = speed,
+                                estimatedRemainingMs = eta
+                            )
                         )
-                    )
-                    lastUiProgressNano.set(System.nanoTime())
+                        lastUiProgressNano.set(System.nanoTime())
+                    }
                 }
             }
 
             override fun onProgress(reqId: String?, tokensGenerated: Int, elapsedMs: Long) {
-                if (reqId == activeRequestId.get()) {
-                    val generated = tokensGenerated.coerceAtLeast(0)
-                    val elapsed = elapsedMs.coerceAtLeast(0L)
-                    val speed = if (elapsed > 0L) generated * 1000.0 / elapsed else 0.0
-                    val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
-                        (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
-                    } else null
-                    progressEvents.trySend(
-                        InferenceEvent.Progress(
-                            tokensGenerated = generated,
-                            elapsedMs = elapsed,
-                            phase = ProgressPhase.GENERATING,
-                            tokensPerSecond = speed,
-                            estimatedRemainingMs = eta
+                callbackState.dispatch(reqId) {
+                    if (activeRequestId.get() == requestId) {
+                        val generated = tokensGenerated.coerceAtLeast(0)
+                        val elapsed = elapsedMs.coerceAtLeast(0L)
+                        val speed = if (elapsed > 0L) generated * 1000.0 / elapsed else 0.0
+                        val eta = if (speed > 0.0 && request.maxPredictTokens > generated) {
+                            (((request.maxPredictTokens - generated) * 1000.0) / speed).toLong()
+                        } else null
+                        progressEvents.trySend(
+                            InferenceEvent.Progress(
+                                tokensGenerated = generated,
+                                elapsedMs = elapsed,
+                                phase = ProgressPhase.GENERATING,
+                                tokensPerSecond = speed,
+                                estimatedRemainingMs = eta
+                            )
                         )
-                    )
-                    lastUiProgressNano.set(System.nanoTime())
+                        lastUiProgressNano.set(System.nanoTime())
+                    }
                 }
             }
 
             override fun onCompleted(reqId: String?, result: InferenceResult?) {
-                if (reqId == activeRequestId.get()) {
-                    if (completeTimeoutIfPending()) return
-                    if (result == null) {
-                        finishStream(InferenceEvent.Error(
-                            IllegalStateException("Inference service completed request $reqId without a result"),
-                            synchronized(streamBuilder) { streamBuilder.toString() }
-                        ))
-                    } else {
-                        finishStream(InferenceEvent.Completed(result))
+                callbackState.dispatch(reqId) {
+                    if (activeRequestId.get() == requestId) {
+                        if (completeTimeoutIfPending()) return@dispatch
+                        if (result == null) {
+                            finishStream(InferenceEvent.Error(
+                                IllegalStateException("Inference service completed request $reqId without a result"),
+                                synchronized(streamBuilder) { streamBuilder.toString() }
+                            ))
+                        } else {
+                            finishStream(InferenceEvent.Completed(result))
+                        }
                     }
                 }
             }
 
             override fun onCancelled(reqId: String?, partialText: String?, tokensGenerated: Int) {
-                if (reqId == activeRequestId.get()) {
-                    val cooperativeCount = cooperativeCancelCount.incrementAndGet()
-                    EngineDiagnostics.info(
-                        "ipc_client", "CANCEL_STRATEGY_COUNTS",
-                        "cooperativeCancels=$cooperativeCount,processKillRequests=${processKillCount.get()}"
-                    )
-                    if (completeTimeoutIfPending()) return
-                    val localPartial = synchronized(streamBuilder) { streamBuilder.toString() }
-                    finishStream(
-                        InferenceEvent.Cancelled(
-                            partialText?.takeIf { it.isNotEmpty() } ?: localPartial,
-                            maxOf(tokensGenerated, tokenCount.get())
+                callbackState.dispatch(reqId) {
+                    if (activeRequestId.get() == requestId) {
+                        val cooperativeCount = cooperativeCancelCount.incrementAndGet()
+                        EngineDiagnostics.info(
+                            "ipc_client", "CANCEL_STRATEGY_COUNTS",
+                            "cooperativeCancels=$cooperativeCount,processKillRequests=${processKillCount.get()}"
                         )
-                    )
+                        if (completeTimeoutIfPending()) return@dispatch
+                        val localPartial = synchronized(streamBuilder) { streamBuilder.toString() }
+                        finishStream(
+                            InferenceEvent.Cancelled(
+                                partialText?.takeIf { it.isNotEmpty() } ?: localPartial,
+                                maxOf(tokensGenerated, tokenCount.get())
+                            )
+                        )
+                    }
                 }
             }
 
             override fun onError(reqId: String?, errorMessage: String?, partialText: String?) {
-                if (reqId == activeRequestId.get()) {
-                    if (completeTimeoutIfPending()) return
-                    val error = IllegalStateException(errorMessage ?: "Unknown inference error")
-                    EngineDiagnostics.error("ipc_client", "REMOTE_INFERENCE_ERROR", error)
-                    val localPartial = synchronized(streamBuilder) { streamBuilder.toString() }
-                    finishStream(InferenceEvent.Error(
-                        error,
-                        partialText?.takeIf { it.isNotEmpty() } ?: localPartial
-                    ))
+                callbackState.dispatch(reqId) {
+                    if (activeRequestId.get() == requestId) {
+                        if (completeTimeoutIfPending()) return@dispatch
+                        val error = IllegalStateException(errorMessage ?: "Unknown inference error")
+                        EngineDiagnostics.error("ipc_client", "REMOTE_INFERENCE_ERROR", error)
+                        val localPartial = synchronized(streamBuilder) { streamBuilder.toString() }
+                        finishStream(InferenceEvent.Error(
+                            error,
+                            partialText?.takeIf { it.isNotEmpty() } ?: localPartial
+                        ))
+                    }
                 }
             }
 
@@ -1608,13 +1727,18 @@ internal class InferenceClient(
         isClosed.set(true)
         activeRequestId.set(null)
         activeRequestPid.set(null)
-        try {
-            remoteService?.shutdown()
-            if (isBound) {
-                context.unbindService(serviceConnection)
-                isBound = false
-            }
-        } catch (ignored: Exception) {}
+        runCatching { remoteService?.shutdown() }
+        val connectionToUnbind = synchronized(serviceConnectionLock) {
+            serviceConnectionEpoch.invalidateCurrent()
+            val connection = serviceConnection
+            val wasBound = isBound
+            serviceConnection = null
+            isBound = false
+            if (wasBound) connection else null
+        }
+        connectionToUnbind?.let { connection ->
+            runCatching { context.unbindService(connection) }
+        }
         clientScope.cancel()
         _state.value = EngineState.Closed
     }

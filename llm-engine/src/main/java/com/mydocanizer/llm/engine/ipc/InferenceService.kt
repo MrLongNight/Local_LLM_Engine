@@ -402,25 +402,30 @@ class InferenceService : Service() {
                         resourceMonitor?.inferenceStarted(currentReqId)
                         var terminalCallback: (() -> Unit)? = null
                         var requestReleased = false
+                        val terminalState = IpcRequestTerminalState(currentReqId)
                         try {
                             val e = initEngine()
                             var tokenCount = 0
                             val streamBuilder = StringBuilder()
 
                             e.streamChat(request).collect { event ->
-                                // Discard events if request ID has been superseded or cancelled
-                                if (activeRequestId.get() != currentReqId) return@collect
+                                // Enforce the Flow contract at the IPC boundary: the first terminal
+                                // event wins. Later tokens/progress/terminals from a faulty or racing
+                                // producer must never replace the request's terminal result.
+                                if (activeRequestId.get() != currentReqId || terminalState.isTerminal()) {
+                                    return@collect
+                                }
 
                                 when (event) {
-                                    is InferenceEvent.Started -> {
+                                    is InferenceEvent.Started -> terminalState.dispatch(currentReqId) {
                                         callback?.onStarted(currentReqId, event.promptMessageCount)
                                     }
-                                    is InferenceEvent.Token -> {
+                                    is InferenceEvent.Token -> terminalState.dispatch(currentReqId) {
                                         streamBuilder.append(event.token)
                                         tokenCount++
                                         callback?.onToken(currentReqId, event.token, event.tokenIndex)
                                     }
-                                    is InferenceEvent.Progress -> {
+                                    is InferenceEvent.Progress -> terminalState.dispatch(currentReqId) {
                                         when (event.phase) {
                                             ProgressPhase.PROMPT_PREPARATION,
                                             ProgressPhase.PROMPT_EVALUATION -> callback?.onPromptProgress(
@@ -448,31 +453,41 @@ class InferenceService : Service() {
                                             diagnosticRunId = currentReqId,
                                             nativeRunId = nativeRunId
                                         )
-                                        terminalCallback = { callback?.onCompleted(currentReqId, result) }
+                                        terminalState.terminate(currentReqId) {
+                                            terminalCallback = { callback?.onCompleted(currentReqId, result) }
+                                        }
                                     }
                                     is InferenceEvent.Cancelled -> {
                                         val partialText = event.partialText
                                         val generatedTokens = event.tokensGenerated
-                                        terminalCallback = {
-                                            callback?.onCancelled(currentReqId, partialText, generatedTokens)
+                                        terminalState.terminate(currentReqId) {
+                                            terminalCallback = {
+                                                callback?.onCancelled(currentReqId, partialText, generatedTokens)
+                                            }
                                         }
                                     }
                                     is InferenceEvent.Error -> {
                                         val message = event.throwable.message ?: event.throwable.javaClass.simpleName
                                         val partialText = event.partialText
-                                        terminalCallback = {
-                                            callback?.onError(currentReqId, message, partialText)
+                                        terminalState.terminate(currentReqId) {
+                                            terminalCallback = {
+                                                callback?.onError(currentReqId, message, partialText)
+                                            }
                                         }
                                     }
                                 }
                             }
                         } catch (cancelled: CancellationException) {
                             Log.i(TAG, "Inference coroutine cancelled for request $currentReqId")
-                            terminalCallback = { callback?.onCancelled(currentReqId, "", 0) }
+                            terminalState.terminate(currentReqId) {
+                                terminalCallback = { callback?.onCancelled(currentReqId, "", 0) }
+                            }
                         } catch (t: Throwable) {
                             Log.e(TAG, "Error in streamChat IPC", t)
                             val message = t.message ?: t.javaClass.simpleName
-                            terminalCallback = { callback?.onError(currentReqId, message, "") }
+                            terminalState.terminate(currentReqId) {
+                                terminalCallback = { callback?.onError(currentReqId, message, "") }
+                            }
                         } finally {
                             resourceMonitor?.inferenceFinished(currentReqId)
                             requestReleased = activeRequestId.compareAndSet(currentReqId, null)
@@ -514,11 +529,17 @@ class InferenceService : Service() {
 
         override fun cancelInference(requestId: String?) {
             val current = activeRequestId.get()
-            if (requestId.isNullOrBlank() || requestId == current) {
+            if (!requestId.isNullOrBlank() && requestId == current) {
                 EngineDiagnostics.info("ipc", "CANCEL_INFERENCE", "Cancelling inference request: $requestId")
                 // The engine's native cancellation signal is cooperative. Keep the
                 // request ID and collector alive until it emits Cancelled(partialText).
                 engine?.cancelInference()
+            } else {
+                EngineDiagnostics.info(
+                    "ipc",
+                    "CANCEL_INFERENCE_IGNORED",
+                    "requestId=$requestId does not match active request=$current"
+                )
             }
         }
 
