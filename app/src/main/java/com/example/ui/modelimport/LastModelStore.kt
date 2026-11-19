@@ -7,12 +7,13 @@ import com.mydocanizer.llm.engine.FlashAttentionMode
 import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.ReloadAfterAbort
-import com.mydocanizer.llm.engine.TimeoutConfig
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import java.io.File
 
 /**
- * Persists only the last successfully loaded model source and its load-time settings.
+ * Persists only the last successfully loaded model source and its model-load settings.
+ * IPC timeout policy remains engine-owned and is deliberately not persisted with a model,
+ * so an old remembered model cannot restore a stale cancellation grace period.
  * Data stays in app-private SharedPreferences; the GGUF itself is never copied here.
  */
 internal class LastModelStore(context: Context) {
@@ -63,18 +64,14 @@ internal class LastModelStore(context: Context) {
             .putString(KEY_GDN_POLICY, config.gdnPolicy.name)
             .putInt(KEY_TOP_K, config.topK)
             .putFloat(KEY_MIN_P, config.minP)
-            .putLong(KEY_TIMEOUT_BIND, config.timeoutConfig.serviceBindMs)
-            .putLong(KEY_TIMEOUT_MODEL_LOAD, config.timeoutConfig.modelLoadMs)
-            .putLong(KEY_TIMEOUT_PREFILL, config.timeoutConfig.prefillMs)
-            .putLong(KEY_TIMEOUT_FIRST_TOKEN, config.timeoutConfig.firstTokenMs)
-            .putLong(KEY_TIMEOUT_INTER_TOKEN, config.timeoutConfig.interTokenMs)
-            .putLong(KEY_TIMEOUT_TOTAL, config.timeoutConfig.totalInferenceMs)
-            .putLong(KEY_TIMEOUT_ABORT_GRACE, config.timeoutConfig.abortGracePeriodMs)
-            .putLong(KEY_TIMEOUT_RECONNECT, config.timeoutConfig.reconnectMs)
             .apply()
+        clearLegacyTimeoutOverrides()
     }
 
     fun load(): RememberedModel? {
+        // Remove keys written by older builds. They are ignored below and must never
+        // override the current engine-owned timeout policy on model restoration.
+        clearLegacyTimeoutOverrides()
         if (!preferences.contains(KEY_SOURCE_TYPE)) return null
         val version = preferences.getInt(KEY_VERSION, VERSION)
         require(version == VERSION) { "Unsupported remembered-model version: $version" }
@@ -89,17 +86,6 @@ internal class LastModelStore(context: Context) {
             else -> throw IllegalStateException("Unknown remembered model source type")
         }
 
-        val timeoutDefaults = TimeoutConfig()
-        val timeout = TimeoutConfig(
-            serviceBindMs = preferences.getLong(KEY_TIMEOUT_BIND, timeoutDefaults.serviceBindMs),
-            modelLoadMs = preferences.getLong(KEY_TIMEOUT_MODEL_LOAD, timeoutDefaults.modelLoadMs),
-            prefillMs = preferences.getLong(KEY_TIMEOUT_PREFILL, timeoutDefaults.prefillMs),
-            firstTokenMs = preferences.getLong(KEY_TIMEOUT_FIRST_TOKEN, timeoutDefaults.firstTokenMs),
-            interTokenMs = preferences.getLong(KEY_TIMEOUT_INTER_TOKEN, timeoutDefaults.interTokenMs),
-            totalInferenceMs = preferences.getLong(KEY_TIMEOUT_TOTAL, timeoutDefaults.totalInferenceMs),
-            abortGracePeriodMs = preferences.getLong(KEY_TIMEOUT_ABORT_GRACE, timeoutDefaults.abortGracePeriodMs),
-            reconnectMs = preferences.getLong(KEY_TIMEOUT_RECONNECT, timeoutDefaults.reconnectMs)
-        )
         val config = EngineConfig(
             contextSize = preferences.getInt(KEY_CONTEXT_SIZE, 2048),
             batchSize = preferences.getInt(KEY_BATCH_SIZE, 128),
@@ -114,7 +100,6 @@ internal class LastModelStore(context: Context) {
                 )
             }.getOrDefault(BackendPreference.VULKAN),
             gpuLayers = preferences.getInt(KEY_GPU_LAYERS, 99),
-            timeoutConfig = timeout,
             batchThreads = preferences.getInt(KEY_BATCH_THREADS, 0),
             microBatchSize = preferences.getInt(KEY_MICRO_BATCH_SIZE, 0),
             vulkanMatvecWorkgroup = runCatching {
@@ -151,6 +136,12 @@ internal class LastModelStore(context: Context) {
         preferences.edit().clear().apply()
     }
 
+    private fun clearLegacyTimeoutOverrides() {
+        preferences.edit().also { editor ->
+            LEGACY_TIMEOUT_KEYS.forEach { key -> editor.remove(key) }
+        }.apply()
+    }
+
     data class RememberedModel(
         val source: ModelSource,
         val config: EngineConfig
@@ -183,13 +174,15 @@ internal class LastModelStore(context: Context) {
         const val KEY_TOP_K = "sampler_top_k"
         const val KEY_MIN_P = "sampler_min_p"
         const val KEY_FLASH_ATTENTION_MODE = "flash_attention_mode"
-        const val KEY_TIMEOUT_BIND = "timeout_bind_ms"
-        const val KEY_TIMEOUT_MODEL_LOAD = "timeout_model_load_ms"
-        const val KEY_TIMEOUT_PREFILL = "timeout_prefill_ms"
-        const val KEY_TIMEOUT_FIRST_TOKEN = "timeout_first_token_ms"
-        const val KEY_TIMEOUT_INTER_TOKEN = "timeout_inter_token_ms"
-        const val KEY_TIMEOUT_TOTAL = "timeout_total_ms"
-        const val KEY_TIMEOUT_ABORT_GRACE = "timeout_abort_grace_ms"
-        const val KEY_TIMEOUT_RECONNECT = "timeout_reconnect_ms"
+        val LEGACY_TIMEOUT_KEYS = arrayOf(
+            "timeout_bind_ms",
+            "timeout_model_load_ms",
+            "timeout_prefill_ms",
+            "timeout_first_token_ms",
+            "timeout_inter_token_ms",
+            "timeout_total_ms",
+            "timeout_abort_grace_ms",
+            "timeout_reconnect_ms"
+        )
     }
 }

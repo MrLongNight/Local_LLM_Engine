@@ -13,6 +13,7 @@ import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
@@ -61,18 +62,46 @@ class LastModelStoreTest {
 
         assertNotNull(restored)
         assertEquals(source.copy(displayName = "qwen.gguf"), restored?.source)
-        assertEquals(config, restored?.config)
+        assertEquals(config.copy(timeoutConfig = TimeoutConfig()), restored?.config)
     }
 
     @Test
-    fun defaultAbortGraceIsThreeSecondsAndRememberedOverridesAreRestoredExactly() {
+    fun modelTimeoutOverridesAreNotPersistedWithTheRememberedModel() {
         assertEquals(3_000L, TimeoutConfig().abortGracePeriodMs)
         val source = ModelSource.FilePath("/private/models/timeout-test.gguf")
-        val config = EngineConfig(timeoutConfig = TimeoutConfig(abortGracePeriodMs = 300L))
+        val config = EngineConfig(
+            timeoutConfig = TimeoutConfig(
+                prefillMs = 2_000L,
+                abortGracePeriodMs = 300L
+            )
+        )
 
         store.save(source, config)
 
-        assertEquals(300L, store.load()?.config?.timeoutConfig?.abortGracePeriodMs)
+        val preferences = context.getSharedPreferences("last_model_restore", Context.MODE_PRIVATE)
+        assertFalse(preferences.contains("timeout_abort_grace_ms"))
+        assertFalse(preferences.contains("timeout_prefill_ms"))
+        assertEquals(3_000L, store.load()?.config?.timeoutConfig?.abortGracePeriodMs)
+        assertEquals(120_000L, store.load()?.config?.timeoutConfig?.prefillMs)
+    }
+
+    @Test
+    fun legacyRememberedTimeoutOverridesAreIgnoredAndRemoved() {
+        val preferences = context.getSharedPreferences("last_model_restore", Context.MODE_PRIVATE)
+        preferences.edit()
+            .putInt("version", 1)
+            .putString("source_type", "file")
+            .putString("source_value", "/private/models/legacy-timeout.gguf")
+            .putLong("timeout_abort_grace_ms", 300L)
+            .putLong("timeout_prefill_ms", 2_000L)
+            .commit()
+
+        val restored = store.load()
+
+        assertEquals(ModelSource.FilePath("/private/models/legacy-timeout.gguf"), restored?.source)
+        assertEquals(TimeoutConfig(), restored?.config?.timeoutConfig)
+        assertFalse(preferences.contains("timeout_abort_grace_ms"))
+        assertFalse(preferences.contains("timeout_prefill_ms"))
     }
 
     @Test

@@ -460,6 +460,11 @@ internal class LocalLlmEngineImpl(
         )
         val activeConfig = loadedConfig
         val effectiveTimeout = request.timeoutConfig ?: activeConfig?.timeoutConfig
+        val effectiveTimeoutSource = when {
+            request.timeoutConfig != null -> "request_override"
+            activeConfig?.timeoutConfig != null -> "loaded_model_config"
+            else -> "unavailable"
+        }
         EngineDiagnostics.info(
             "inference",
             "INFERENCE_RUN_CONTEXT",
@@ -482,6 +487,15 @@ internal class LocalLlmEngineImpl(
                 "topK=${activeConfig?.topK ?: -1},minP=${activeConfig?.minP ?: "unknown"}," +
                 "maxPredictTokens=${request.maxPredictTokens},enableThinking=${request.enableThinking}," +
                 "messageCount=${request.messages.size},inputChars=${request.messages.sumOf { it.content.length }}," +
+                "timeoutSource=$effectiveTimeoutSource," +
+                "timeoutServiceBindMs=${effectiveTimeout?.serviceBindMs ?: "unknown"}," +
+                "timeoutModelLoadMs=${effectiveTimeout?.modelLoadMs ?: "unknown"}," +
+                "timeoutPrefillMs=${effectiveTimeout?.prefillMs ?: "unknown"}," +
+                "timeoutFirstTokenMs=${effectiveTimeout?.firstTokenMs ?: "unknown"}," +
+                "timeoutInterTokenMs=${effectiveTimeout?.interTokenMs ?: "unknown"}," +
+                "timeoutTotalInferenceMs=${effectiveTimeout?.totalInferenceMs ?: "unknown"}," +
+                "timeoutAbortGracePeriodMs=${effectiveTimeout?.abortGracePeriodMs ?: "unknown"}," +
+                "timeoutReconnectMs=${effectiveTimeout?.reconnectMs ?: "unknown"}," +
                 "timeout=${effectiveTimeout ?: "unknown"}"
         )
         EngineDiagnostics.info(

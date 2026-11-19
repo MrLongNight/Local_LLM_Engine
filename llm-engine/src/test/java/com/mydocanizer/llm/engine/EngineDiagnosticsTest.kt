@@ -530,6 +530,24 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun compactReportRetainsRunCorrelatedNativeTimeoutSnapshot() {
+        val line =
+            "2026-11-18 12:00:00.000 [INFO] [inference] INFERENCE_RUN_CONTEXT - " +
+                "runId=native-timeout-run,pid=1234,model=qwen3,timeoutSource=loaded_model_config," +
+                "timeoutPrefillMs=120000,timeoutFirstTokenMs=120000," +
+                "timeoutInterTokenMs=30000,timeoutTotalInferenceMs=600000," +
+                "timeoutAbortGracePeriodMs=3000,timeoutReconnectMs=15000"
+
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(line))
+
+        assertTrue(report.contains("INFERENCE_RUN_CONTEXT"))
+        assertTrue(report.contains("runId=native-timeout-run"))
+        assertTrue(report.contains("timeoutSource=loaded_model_config"))
+        assertTrue(report.contains("timeoutAbortGracePeriodMs=3000"))
+        assertTrue(report.contains("timeoutReconnectMs=15000"))
+    }
+
+    @Test
     fun compactExportKeepsAllChunksForRecentAssistantOutputsAndReportsSmokeGateFailure() {
         val outputChunks = (1..48).map { part ->
             val suffix = if (part == 1) "FIRST_OUTPUT_CHUNK" else if (part == 48) "LAST_OUTPUT_CHUNK" else "chunk-$part"
