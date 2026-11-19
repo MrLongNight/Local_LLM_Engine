@@ -443,6 +443,7 @@ class InferenceService : Service() {
                                         // INFERENCE_<requestId> RAM/thermal samples use diagnosticRunId.
                                         val nativeRunId = event.result.nativeRunId
                                             .ifBlank { event.result.diagnosticRunId }
+                                        resourceMonitor?.linkNativeRunId(currentReqId, nativeRunId)
                                         val result = event.result.copy(
                                             diagnosticRunId = currentReqId,
                                             nativeRunId = nativeRunId

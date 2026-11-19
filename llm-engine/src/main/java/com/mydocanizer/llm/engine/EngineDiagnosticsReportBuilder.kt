@@ -348,6 +348,15 @@ internal object EngineDiagnosticsReportBuilder {
         val kotlinLines = ordered.filterNot { it.contains("[NATIVE]") }
         val nativeLines = ordered.filter { it.contains("[NATIVE]") }
         val samples = kotlinLines.mapNotNull(::resourceSample)
+        val nativeRunIdByDiagnosticRunId = kotlinLines
+            .filter { eventName(it) == "RESOURCE_RUN_ID_LINK" }
+            .mapNotNull { line ->
+                val diagnosticRunId = field(line, "diagnosticRunId")?.takeIf { it.isNotBlank() }
+                val nativeRunId = field(line, "nativeRunId")?.takeIf { it.isNotBlank() }
+                if (diagnosticRunId == null || nativeRunId == null) null
+                else diagnosticRunId to nativeRunId
+            }
+            .toMap()
         val events = kotlinLines
             .filterNot { it.contains("RESOURCE_SNAPSHOT") || isPerformanceEvent(it) }
             .filter(::isImportantEvent)
@@ -755,12 +764,19 @@ internal object EngineDiagnosticsReportBuilder {
                 val thermalStates = entries.mapNotNull { it.thermalStatus }.distinct()
                 val thermalPeak = thermalStates.maxByOrNull(::thermalRank) ?: "n/a"
                 val last = entries.lastOrNull()
+                val diagnosticRunId = last?.phase
+                    ?.takeIf { it.startsWith("INFERENCE_") }
+                    ?.removePrefix("INFERENCE_")
+                val nativeRunId = diagnosticRunId?.let { nativeRunIdByDiagnosticRunId[it] }
+                val runIdentity = if (diagnosticRunId != null && nativeRunId != null) {
+                    " diagnosticRunId=$diagnosticRunId nativeRunId=$nativeRunId"
+                } else ""
                 val model = last?.let { field(it.line, "model") }
                 val context = last?.let { field(it.line, "contextTokens") }
                 val batch = last?.let { field(it.line, "batchSize") }
                 val microBatch = last?.let { field(it.line, "microBatchSize") }
                 val layers = last?.let { field(it.line, "gpuLayersRequested") }
-                "$group n=${entries.size} PSS_peak=${peak { it.pssMb }}MB " +
+                "$group$runIdentity n=${entries.size} PSS_peak=${peak { it.pssMb }}MB " +
                     "nativePSS_peak=${peak { it.nativePssMb }}MB nativeHeap_peak=${peak { it.nativeHeapMb }}MB " +
                     "javaHeap_peak=${peak { it.javaHeapMb }}MB availableRAM_min=${minimumAvailable}MB " +
                     "thermal_peak=$thermalPeak thermal_states=${thermalStates.joinToString("/")}" +
@@ -799,10 +815,17 @@ internal object EngineDiagnosticsReportBuilder {
                     field(sample.line, "gpuLayersRequested")?.let { "gpuLayers=$it" },
                     field(sample.line, "backendActive")?.let { "backend=$it" }
                 ).filterNotNull().joinToString(" ")
+                val diagnosticRunId = sample.phase
+                    .takeIf { it.startsWith("INFERENCE_") }
+                    ?.removePrefix("INFERENCE_")
+                val nativeRunId = diagnosticRunId?.let { nativeRunIdByDiagnosticRunId[it] }
+                val runIdentity = if (diagnosticRunId != null && nativeRunId != null) {
+                    " diagnosticRunId=$diagnosticRunId nativeRunId=$nativeRunId"
+                } else ""
                 val backend = if (sample.line.contains("backendMemory=")) {
                     " " + sample.line.substringAfter("backendMemory=").take(200)
                 } else ""
-                "${sample.timestamp} pid=${sample.pid} ${sample.phase} $values$backend"
+                "${sample.timestamp} pid=${sample.pid} ${sample.phase}$runIdentity $values$backend"
             }
 
         val timestampedRows = ordered.mapNotNull { line ->

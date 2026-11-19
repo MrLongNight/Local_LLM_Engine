@@ -148,6 +148,22 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         sample()
     }
 
+    /**
+     * Links the request-scoped resource samples to llama.cpp's native run identity.
+     * The samples keep their diagnostic phase so snapshots taken before completion
+     * can still be joined to the native run after its ID becomes available.
+     */
+    fun linkNativeRunId(diagnosticRunId: String, nativeRunId: String) {
+        val diagnosticId = diagnosticRunId.take(48)
+        val nativeId = nativeRunId.take(48)
+        if (diagnosticId.isBlank() || nativeId.isBlank()) return
+        EngineDiagnostics.info(
+            "memory",
+            "RESOURCE_RUN_ID_LINK",
+            "pid=${Process.myPid()},diagnosticRunId=$diagnosticId,nativeRunId=$nativeId"
+        )
+    }
+
     private fun logRunEnvironment(event: String) {
         val memory = ActivityManager.MemoryInfo()
         activityManager?.getMemoryInfo(memory)

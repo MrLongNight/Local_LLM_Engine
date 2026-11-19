@@ -409,6 +409,49 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun resourceMemoryPeaksAreCorrelatedToTheirNativeInferenceRunIds() {
+        val lines = listOf(
+            "2026-11-19 15:00:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=701,phase=INFERENCE_cpu-request,processPssMb=100.0,nativePssMb=50.0," +
+                "nativeHeapAllocatedMb=40.0,javaHeapUsedMb=10.0,systemAvailableRamMb=1200.0," +
+                "thermalStatus=LIGHT",
+            "2026-11-19 15:00:01.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=701,phase=INFERENCE_cpu-request,processPssMb=120.0,nativePssMb=60.0," +
+                "nativeHeapAllocatedMb=45.0,javaHeapUsedMb=12.0,systemAvailableRamMb=1100.0," +
+                "thermalStatus=LIGHT",
+            "2026-11-19 15:00:02.000 [INFO] [memory] RESOURCE_RUN_ID_LINK - " +
+                "pid=701,diagnosticRunId=cpu-request,nativeRunId=cpu-native",
+            "2026-11-19 15:01:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=701,phase=INFERENCE_vulkan-request,processPssMb=200.0,nativePssMb=90.0," +
+                "nativeHeapAllocatedMb=80.0,javaHeapUsedMb=20.0,systemAvailableRamMb=900.0," +
+                "thermalStatus=MODERATE",
+            "2026-11-19 15:01:01.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=701,phase=INFERENCE_vulkan-request,processPssMb=230.0,nativePssMb=100.0," +
+                "nativeHeapAllocatedMb=95.0,javaHeapUsedMb=24.0,systemAvailableRamMb=850.0," +
+                "thermalStatus=MODERATE",
+            "2026-11-19 15:01:02.000 [INFO] [memory] RESOURCE_RUN_ID_LINK - " +
+                "pid=701,diagnosticRunId=vulkan-request,nativeRunId=vulkan-native"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+
+        assertTrue(
+            report.contains(
+                "701/INFERENCE_cpu-request diagnosticRunId=cpu-request nativeRunId=cpu-native " +
+                    "n=2 PSS_peak=120.0MB"
+            )
+        )
+        assertTrue(
+            report.contains(
+                "701/INFERENCE_vulkan-request diagnosticRunId=vulkan-request nativeRunId=vulkan-native " +
+                    "n=2 PSS_peak=230.0MB"
+            )
+        )
+        assertTrue(report.contains("diagnosticRunId=cpu-request nativeRunId=cpu-native"))
+        assertTrue(report.contains("diagnosticRunId=vulkan-request nativeRunId=vulkan-native"))
+    }
+
+    @Test
     fun nativeDecodeMetricsArePlacedBeforeVerboseRamAggregatesWhenExportMustBeTruncated() {
         val ramSample =
             "2026-11-10 16:00:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
