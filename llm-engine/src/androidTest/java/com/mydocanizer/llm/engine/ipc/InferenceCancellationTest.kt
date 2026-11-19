@@ -71,7 +71,9 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
             reconnectMs = 15_000L
         )
         val config = EngineConfig(
-            contextSize = 256,
+            // The tiny fixture uses a byte-oriented tokenizer; leave enough headroom for
+            // the long prompt while still forcing multiple 16-token native decode chunks.
+            contextSize = 1024,
             batchSize = 64,
             threads = 2,
             temperature = 0.0f,
@@ -129,14 +131,30 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                         .copy(timeoutConfig = timeoutConfig)
                 ).collect { event ->
                     observed.add(event)
-                    if (event is InferenceEvent.Progress &&
-                        event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION &&
-                        event.promptTokensProcessed > 0 &&
-                        event.promptTokensProcessed < event.promptTokensTotal
-                    ) {
-                        promptProgressSeen.complete(
-                            event.promptTokensProcessed to event.promptTokensTotal
+                    when (event) {
+                        is InferenceEvent.Progress -> {
+                            if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION &&
+                                event.promptTokensProcessed > 0 &&
+                                event.promptTokensProcessed < event.promptTokensTotal
+                            ) {
+                                promptProgressSeen.complete(
+                                    event.promptTokensProcessed to event.promptTokensTotal
+                                )
+                            }
+                        }
+                        is InferenceEvent.Error -> promptProgressSeen.completeExceptionally(
+                            IllegalStateException(
+                                "Native prompt failed before in-flight progress: ${event.throwable.message}",
+                                event.throwable
+                            )
                         )
+                        is InferenceEvent.Cancelled -> promptProgressSeen.completeExceptionally(
+                            IllegalStateException("Inference was cancelled before in-flight prompt progress")
+                        )
+                        is InferenceEvent.Completed -> promptProgressSeen.completeExceptionally(
+                            IllegalStateException("Inference completed before in-flight prompt progress")
+                        )
+                        else -> Unit
                     }
                 }
             }
