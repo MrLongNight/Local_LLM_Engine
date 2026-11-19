@@ -95,6 +95,8 @@ abstract class ConfigurationSmokeViewModel(
             val profileSamples = mutableMapOf<String, ConfigurationSmokeSample>()
             val profileStatuses = mutableMapOf<String, String>()
             var stopRemainingProfilesReason: String? = null
+            var pendingRecoveryFromProfile: String? = null
+            var pendingRecoveryObservedState: String? = null
             var restoreRequired = false
             val confirmedBackends = mutableListOf<String>()
             var stoppedReason: String? = null
@@ -180,6 +182,24 @@ abstract class ConfigurationSmokeViewModel(
                         }
 
                         val loaded = loadResult.getOrThrow()
+                        if (loaded.sizeBytes != model.sizeBytes ||
+                            (!model.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
+                        ) {
+                            throw ConfigurationSmokeModelIdentityException(
+                                "Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt (Größe/SHA-256)."
+                            )
+                        }
+                        pendingRecoveryFromProfile?.let { failedProfile ->
+                            EngineDiagnostics.info(
+                                "config_test",
+                                "CONFIG_SMOKE_PROFILE_RECOVERED",
+                                "failedProfile=" + failedProfile + ",nextProfile=" + profile.id +
+                                    ",stableState=" + (pendingRecoveryObservedState ?: "unknown") +
+                                    ",modelLoadConfirmed=true,activeBackend=" + loaded.activeBackend
+                            )
+                            pendingRecoveryFromProfile = null
+                            pendingRecoveryObservedState = null
+                        }
                         val backend = backendFamily(loaded.activeBackend)
                         if (backend == "UNKNOWN") {
                             throw IllegalStateException("Aktives Backend nicht eindeutig: " + loaded.activeBackend)
@@ -191,13 +211,6 @@ abstract class ConfigurationSmokeViewModel(
                             )
                         }
                         confirmedBackends += profile.id + "=" + backend
-                        if (loaded.sizeBytes != model.sizeBytes ||
-                            (!model.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
-                        ) {
-                            throw ConfigurationSmokeModelIdentityException(
-                                "Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt (Größe/SHA-256)."
-                            )
-                        }
                         val shaStatus = if (!model.sha256.isNullOrBlank() && model.sha256 == loaded.sha256) {
                             "VERIFIED"
                         } else {
@@ -237,7 +250,7 @@ abstract class ConfigurationSmokeViewModel(
                         val report = String.format(
                             java.util.Locale.US,
                             "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | gate=%s | graphSplits=%d | run=%s",
-                            profile.label, profile.expectedBackend, backend, profileLoadMs, cfg.threads, cfg.effectiveBatchThreads,
+                            profile.label, profile.expectedBackend, backend, profileLoadMs ?: -1L, cfg.threads, cfg.effectiveBatchThreads,
                             cfg.batchSize, InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend), sample.promptTokens,
                             sample.promptEvaluationMs?.toString() ?: "n/a",
                             sample.firstTokenMs?.toString() ?: "n/a",
@@ -256,7 +269,7 @@ abstract class ConfigurationSmokeViewModel(
                                 (if (outputGatePassed) "PASS" else "FAIL") +
                                 ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
                                 ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
-                                ",loadMs=" + profileLoadMs + ",nThreads=" + cfg.threads +
+                                ",loadMs=" + (profileLoadMs ?: -1L) + ",nThreads=" + cfg.threads +
                                 ",nThreadsBatch=" + cfg.effectiveBatchThreads +
                                 ",nBatch=" + cfg.batchSize +
                                 ",nUbatch=" + InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend) +
@@ -293,7 +306,9 @@ abstract class ConfigurationSmokeViewModel(
                             rows += "Korrektheits-Gate fehlgeschlagen: " + rejection
                             EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_REJECTED", rejection)
                         }
-                        if (index < profiles.lastIndex) delay(InferenceConfigSmokePlan.COOLDOWN_MS)
+                        if (index < profiles.lastIndex && InferenceConfigSmokePlan.COOLDOWN_MS > 0L) {
+                            delay(InferenceConfigSmokePlan.COOLDOWN_MS)
+                        }
                     } catch (cancelled: CancellationException) {
                         profileStatuses[profile.id] = "CANCELLED"
                         recordConfigurationSmokeProfileResult(
@@ -305,6 +320,17 @@ abstract class ConfigurationSmokeViewModel(
                         stopRemainingProfilesReason = "USER_CANCELLED"
                         throw cancelled
                     } catch (identityMismatch: ConfigurationSmokeModelIdentityException) {
+                        pendingRecoveryFromProfile?.let { failedProfile ->
+                            EngineDiagnostics.error(
+                                "config_test",
+                                "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                                IllegalStateException(
+                                    "Following model load for $profile failed identity verification after $failedProfile"
+                                )
+                            )
+                            pendingRecoveryFromProfile = null
+                            pendingRecoveryObservedState = null
+                        }
                         profileStatuses[profile.id] = "FAIL"
                         recordConfigurationSmokeProfileResult(
                             profile.id,
@@ -316,6 +342,19 @@ abstract class ConfigurationSmokeViewModel(
                         stopRemainingProfilesReason = "MODEL_IDENTITY_MISMATCH"
                         stoppedReason = "Modellidentität änderte sich zwischen den Profilen; weitere Läufe wurden gestoppt."
                     } catch (error: Exception) {
+                        pendingRecoveryFromProfile?.let { failedProfile ->
+                            EngineDiagnostics.error(
+                                "config_test",
+                                "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                                IllegalStateException(
+                                    "Following model load for $profile failed after profile $failedProfile",
+                                    error
+                                )
+                            )
+                            pendingRecoveryFromProfile = null
+                            pendingRecoveryObservedState = null
+                            stopRemainingProfilesReason = "SERVICE_RECOVERY_UNAVAILABLE"
+                        }
                         val vulkanUnavailable =
                             profile.expectedBackend == "VULKAN" && isVulkanBackendUnavailable(error)
                         val status = if (vulkanUnavailable) "UNAVAILABLE" else "FAIL"
@@ -338,7 +377,7 @@ abstract class ConfigurationSmokeViewModel(
 
                         val nextProfile = profiles.getOrNull(index + 1)
                         if (nextProfile != null && !vulkanUnavailable) {
-                            var recoveryConfirmed = false
+                            var followUpAttemptAllowed = false
                             try {
                                 EngineDiagnostics.info(
                                     "config_test",
@@ -347,16 +386,18 @@ abstract class ConfigurationSmokeViewModel(
                                         ",waitMs=" + (profile.config.timeoutConfig.reconnectMs +
                                         profile.config.timeoutConfig.serviceBindMs)
                                 )
-                                val stableState = awaitHealthyConfigurationService(
+                                val stableState = awaitRecoverableConfigurationService(
                                     profile.id,
                                     profile.config.timeoutConfig
                                 )
-                                recoveryConfirmed = true
+                                followUpAttemptAllowed = true
+                                pendingRecoveryFromProfile = profile.id
+                                pendingRecoveryObservedState = stableState
                                 EngineDiagnostics.info(
                                     "config_test",
-                                    "CONFIG_SMOKE_PROFILE_RECOVERED",
+                                    "CONFIG_SMOKE_PROFILE_SERVICE_STATE",
                                     "failedProfile=" + profile.id + ",nextProfile=" + nextProfile.id +
-                                        ",stableState=" + stableState
+                                        ",state=" + stableState + ",nextAction=load_same_model"
                                 )
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
@@ -373,7 +414,7 @@ abstract class ConfigurationSmokeViewModel(
                                 stoppedReason = "Service-Recovery nach " + profile.id + " fehlgeschlagen: " + recoveryReason
                             }
                             if (!InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
-                                    recoveryConfirmed = recoveryConfirmed
+                                    recoveryConfirmed = followUpAttemptAllowed
                                 )
                             ) {
                                 stopRemainingProfilesReason = stopRemainingProfilesReason
@@ -527,11 +568,11 @@ abstract class ConfigurationSmokeViewModel(
     }
 
     /**
-     * Wait for a stable IPC state after a profile failure. Reconnect publishes Ready
-     * only after a replacement service is bound; a failed reconnect gets one explicit
-     * initialize attempt. The next profile still performs its own model load/backend check.
+     * Wait for a stable IPC state before attempting the next profile. A connected
+     * Binder or an Error state is not itself proof of a recovered native model:
+     * the next profile's own loadModel callback is the definitive rebuild check.
      */
-    private suspend fun awaitHealthyConfigurationService(
+    private suspend fun awaitRecoverableConfigurationService(
         failedProfileId: String,
         timeoutConfig: com.mydocanizer.llm.engine.TimeoutConfig
     ): String {
@@ -549,26 +590,9 @@ abstract class ConfigurationSmokeViewModel(
         )
 
         return when (stableState) {
-            EngineState.Ready -> "READY"
+            EngineState.Ready -> "READY_REQUIRES_PROFILE_MODEL_LOAD"
             is EngineState.ModelLoaded -> "MODEL_LOADED"
-            is EngineState.Error -> {
-                val initialized = engine.initialize()
-                val initializeError = initialized.exceptionOrNull()
-                if (initializeError != null) {
-                    throw IllegalStateException(
-                        "Service-Reinitialisierung fehlgeschlagen: " +
-                            (initializeError.message ?: initializeError.javaClass.simpleName),
-                        initializeError
-                    )
-                }
-                when (val afterInitialize = engine.state.value) {
-                    EngineState.Ready -> "REINITIALIZED_READY"
-                    is EngineState.ModelLoaded -> "REINITIALIZED_MODEL_LOADED"
-                    else -> throw IllegalStateException(
-                        "Service blieb nach initialize() in Zustand " + afterInitialize.javaClass.simpleName
-                    )
-                }
-            }
+            is EngineState.Error -> "ERROR_REQUIRES_PROFILE_MODEL_RELOAD"
             EngineState.Closed -> throw IllegalStateException("Inference-Service/Engine ist geschlossen.")
             else -> throw IllegalStateException(
                 "Unerwarteter Zustand nach Reconnect: " + stableState.javaClass.simpleName

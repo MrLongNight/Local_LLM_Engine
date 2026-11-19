@@ -146,6 +146,7 @@ internal object EngineDiagnosticsReportBuilder {
             "CONFIG_SMOKE_PROFILE_STARTED",
             "CONFIG_SMOKE_PROFILE_RESULT",
             "CONFIG_SMOKE_PROFILE_RECOVERY_STARTED",
+            "CONFIG_SMOKE_PROFILE_SERVICE_STATE",
             "CONFIG_SMOKE_PROFILE_RECOVERED",
             "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
             "CONFIG_SMOKE_RESULT",
@@ -185,7 +186,8 @@ internal object EngineDiagnosticsReportBuilder {
         "CONFIG_SMOKE_PROFILE_STARTED" -> "Backend-Profil gestartet"
         "CONFIG_SMOKE_PROFILE_RESULT" -> "Backend-Profil abgeschlossen"
         "CONFIG_SMOKE_PROFILE_RECOVERY_STARTED" -> "Service-Recovery vor Folgeprofil gestartet"
-        "CONFIG_SMOKE_PROFILE_RECOVERED" -> "Service-Recovery vor Folgeprofil bestätigt"
+        "CONFIG_SMOKE_PROFILE_SERVICE_STATE" -> "Stabiler IPC-Zustand vor Folgeprofil beobachtet"
+        "CONFIG_SMOKE_PROFILE_RECOVERED" -> "Modell-Recovery durch Modellladen bestätigt"
         "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED" -> "Service-Recovery vor Folgeprofil fehlgeschlagen"
         "CONFIG_SMOKE_RESULT" -> "Vulkan-Kurztest abgeschlossen"
         "OUTPUT_GATE_RESULT" -> "Ausgabekorrektheits-Gate"

@@ -62,6 +62,10 @@ internal object InferenceConfigSmokePlan {
         return PairedGateSummary(outputGateStatus, backendParityStatus, combinedStatus)
     }
 
+    /**
+     * A stable service state permits exactly one next-profile model-load attempt.
+     * Successful loadModel completion, not Binder connection alone, confirms recovery.
+     */
     internal fun mayContinueAfterProfileFailure(
         recoveryConfirmed: Boolean,
         cancelled: Boolean = false,
