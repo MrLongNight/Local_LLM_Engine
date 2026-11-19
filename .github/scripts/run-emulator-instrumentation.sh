@@ -27,17 +27,23 @@ done
 adb logcat -b all -d -v threadtime \
   > "$diagnostics_dir/logcat-all.txt" \
   2> "$diagnostics_dir/logcat-pull.stderr" || true
-# The instrumentation APK's aapt badging verified this exact package ID.
-# The emulator's package-manager instrumentation listing was empty.
-test_app_id="com.mydocanizer.llm.engine.test"
-printf '%s\n' "$test_app_id" > "$diagnostics_dir/diagnostics-target-package.txt"
+# run-as must target the application that owns ApplicationProvider's filesDir,
+# not the instrumentation APK package. app/build.gradle.kts resolves Debug to
+# applicationId "com.aistudio.localllm.mdoanx" + applicationIdSuffix ".dmmv".
+app_id="com.aistudio.localllm.mdoanx.dmmv"
+instrumentation_package="com.mydocanizer.llm.engine.test"
+printf '%s\n' "$app_id" > "$diagnostics_dir/diagnostics-target-package.txt"
+printf '%s\n' "$instrumentation_package" > "$diagnostics_dir/instrumentation-package.txt"
+adb shell pm path "$app_id" \
+  > "$diagnostics_dir/target-app-package-path.txt" \
+  2> "$diagnostics_dir/target-app-package-path.stderr" || true
 : > "$diagnostics_dir/app-process-diagnostics.txt"
 : > "$diagnostics_dir/app-diagnostics-pull.stderr"
 : > "$diagnostics_dir/activity-exit-info.txt"
 : > "$diagnostics_dir/exit-info-pull.stderr"
-if adb shell run-as "$test_app_id" sh -c 'test -d files/diagnostics' \
+if adb shell run-as "$app_id" sh -c 'test -d files/diagnostics' \
     >/dev/null 2> "$diagnostics_dir/run-as-target.stderr"; then
-  adb exec-out run-as "$test_app_id" sh -c '
+  adb exec-out run-as "$app_id" sh -c '
     for file in files/diagnostics/engine-*.log; do
       [ -f "$file" ] || continue
       printf "\n===== %s =====\n" "$file"
@@ -45,11 +51,11 @@ if adb shell run-as "$test_app_id" sh -c 'test -d files/diagnostics' \
     done
   ' > "$diagnostics_dir/app-process-diagnostics.txt" \
     2> "$diagnostics_dir/app-diagnostics-pull.stderr" || true
-  adb shell dumpsys activity exit-info "$test_app_id" \
+  adb shell dumpsys activity exit-info "$app_id" \
     > "$diagnostics_dir/activity-exit-info.txt" \
     2> "$diagnostics_dir/exit-info-pull.stderr" || true
 else
-  printf 'No readable app-private diagnostics directory for verified instrumentation package: %s\n' "$test_app_id" \
+  printf 'No readable app-private diagnostics directory for target application package: %s\n' "$app_id" \
     > "$diagnostics_dir/app-diagnostics-pull.stderr"
 fi
 adb shell ps -A \
