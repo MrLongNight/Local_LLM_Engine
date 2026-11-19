@@ -580,6 +580,10 @@ internal class LocalLlmEngineImpl(
 
         if (processRes == 6 || isCancelled.get()) {
             nativeWorkActive.set(false)
+            // This early prefill-cancel return bypasses the generation loop's finally block.
+            // Consume the request-local Kotlin latch now so the next request is not cancelled
+            // once before it reaches nativeResetCancellation().
+            isCancelled.set(false)
             val cancelledTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
             EngineDiagnostics.info(
                 "inference",

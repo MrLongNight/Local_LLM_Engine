@@ -5,21 +5,30 @@ import android.os.Process
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.BackendPreference
+import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.FinishReason
+import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.EngineState
 import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceTimeoutException
 import com.mydocanizer.llm.engine.TimeoutConfig
 import java.io.File
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,6 +36,161 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class InferenceCancellationTest : InferenceServiceProcessTestBase() {
+
+    @Test
+    fun cooperativeCpuPrefillCancellationKeepsSameModelProcessReusable() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertInferenceServiceManifest(context)
+        val appPid = Process.myPid()
+        val appDiagnosticsFile = resetAppProcessDiagnostics(context, appPid)
+        val modelFile = File(context.cacheDir, "tiny1m-cooperative-cancel.gguf")
+        InstrumentationRegistry.getInstrumentation().context.assets
+            .open("tiny1m.Q4_K_M.gguf").use { input ->
+                modelFile.outputStream().use { output -> input.copyTo(output) }
+            }
+        assertTrue("Tiny GGUF fixture must be present and non-empty", modelFile.isFile && modelFile.length() > 0L)
+
+        // CPU uses the pinned llama.cpp abort callback. Vulkan deliberately relies on
+        // process-level escalation and is covered by the separate non-cooperative test below.
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 15_000L,
+            modelLoadMs = 30_000L,
+            prefillMs = 30_000L,
+            firstTokenMs = 30_000L,
+            interTokenMs = 10_000L,
+            totalInferenceMs = 60_000L,
+            abortGracePeriodMs = 3_000L,
+            reconnectMs = 15_000L
+        )
+        val config = EngineConfig(
+            contextSize = 256,
+            batchSize = 64,
+            threads = 2,
+            temperature = 0.0f,
+            topP = 1.0f,
+            maxPredictTokens = 16,
+            backendPreference = BackendPreference.CPU,
+            gpuLayers = 0,
+            microBatchSize = 16,
+            timeoutConfig = timeoutConfig
+        )
+        val client = InferenceClient(context, timeoutConfig = timeoutConfig)
+        var directBinding: BoundInferenceService? = null
+        try {
+            val initialization = client.initialize()
+            assertTrue("InferenceClient must initialize: ${initialization.exceptionOrNull()}", initialization.isSuccess)
+            val loaded = client.loadModel(ModelSource.FilePath(modelFile.absolutePath), config)
+            assertTrue("Tiny CPU GGUF must load: ${loaded.exceptionOrNull()}", loaded.isSuccess)
+            assertTrue(
+                "The test must exercise the CPU abort-callback path; backend=${loaded.getOrThrow().activeBackend}",
+                loaded.getOrThrow().activeBackend.contains("CPU", ignoreCase = true)
+            )
+
+            val originalPid = client.remotePid.value
+                ?: throw AssertionError("InferenceClient did not publish its model-owning service PID")
+            assertNotEquals("Native model must live outside the app process", appPid, originalPid)
+            directBinding = bindInferenceService(context)
+            assertEquals(originalPid, directBinding.pid)
+            val loadedDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
+            var serviceStatus = directBinding.service.status
+            while (serviceStatus != "MODEL_LOADED" && SystemClock.elapsedRealtime() < loadedDeadline) {
+                delay(PROCESS_POLL_INTERVAL_MS)
+                serviceStatus = runCatching { directBinding?.service?.status ?: "DISCONNECTED" }
+                    .getOrDefault("DISCONNECTED")
+            }
+            assertEquals("Real GGUF must remain loaded before cooperative cancellation", "MODEL_LOADED", serviceStatus)
+
+            // A long prompt with small native micro-batches leaves enough real CPU prefill
+            // work after the first progress callback for Binder cancellation to reach llama.cpp.
+            val longPrompt = buildString {
+                repeat(200) { append("hello ") }
+            }
+            val observed = Collections.synchronizedList(mutableListOf<InferenceEvent>())
+            val promptProgressSeen = CompletableDeferred<Unit>()
+            val streamJob = launch(Dispatchers.IO) {
+                client.streamChat(
+                    InferenceRequest.single(longPrompt, maxPredictTokens = 16)
+                        .copy(timeoutConfig = timeoutConfig)
+                ).collect { event ->
+                    observed.add(event)
+                    if (event is InferenceEvent.Progress &&
+                        event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION
+                    ) {
+                        promptProgressSeen.complete(Unit)
+                    }
+                }
+            }
+
+            withTimeout(timeoutConfig.prefillMs) { promptProgressSeen.await() }
+            client.cancelInference()
+            withTimeout(timeoutConfig.prefillMs) { streamJob.join() }
+
+            assertTrue(
+                "CPU prefill cancellation must complete cooperatively; events=${observed.joinToString()}",
+                observed.any { it is InferenceEvent.Cancelled }
+            )
+            assertFalse(
+                "Cancellation must happen before prompt completion",
+                observed.any { it is InferenceEvent.Started || it is InferenceEvent.Completed }
+            )
+            assertEquals("Cooperative cancellation must keep the original inference PID", originalPid, client.remotePid.value)
+            assertEquals("The original model must remain loaded", "MODEL_LOADED", directBinding.service.status)
+            assertEquals(modelFile.absolutePath, client.currentModel.value?.path)
+
+            val acknowledgementDeadline = SystemClock.elapsedRealtime() + 5_000L
+            var cooperativeAcknowledged = false
+            while (SystemClock.elapsedRealtime() < acknowledgementDeadline && !cooperativeAcknowledged) {
+                cooperativeAcknowledged = runCatching {
+                    appDiagnosticsFile.takeIf { it.isFile }?.readLines(Charsets.UTF_8)
+                        ?.any { line ->
+                            line.contains("[ipc_client] COOPERATIVE_CANCEL_ACKNOWLEDGED") &&
+                                line.contains("reason=explicit_cancel")
+                        } == true
+                }.getOrDefault(false)
+                if (!cooperativeAcknowledged) delay(PROCESS_POLL_INTERVAL_MS)
+            }
+            assertTrue(
+                "Client must acknowledge cooperative unwind before the grace deadline escalates",
+                cooperativeAcknowledged
+            )
+            val cancellationLog = appDiagnosticsFile.readLines(Charsets.UTF_8)
+            assertFalse(
+                "A successful cooperative cancel must not request process termination",
+                cancellationLog.any { line ->
+                    line.contains("[ipc_client] COOPERATIVE_CANCEL_ESCALATED") ||
+                        (line.contains("[ipc_client] PROCESS_KILL_REQUESTED") && line.contains("pid=$originalPid"))
+                }
+            )
+
+            // The first follow-up must use the same live EngineInstance. A stale Kotlin
+            // cancellation latch would incorrectly turn this request into CANCELLED once.
+            val followup = withTimeout(timeoutConfig.totalInferenceMs + 5_000L) {
+                client.generateChat(
+                    InferenceRequest.single("Write one short sentence.", maxPredictTokens = 12)
+                        .copy(timeoutConfig = timeoutConfig)
+                )
+            }
+            assertTrue("Same-process follow-up inference must succeed: ${followup.exceptionOrNull()}", followup.isSuccess)
+            val followupResult = followup.getOrThrow()
+            assertTrue(
+                "Follow-up must finish normally, not inherit the previous cancellation: ${followupResult.finishReason}",
+                followupResult.finishReason == FinishReason.STOP ||
+                    followupResult.finishReason == FinishReason.MAX_TOKENS
+            )
+            assertTrue(
+                "Follow-up must produce visible model output",
+                followupResult.tokensGenerated > 0 && followupResult.text.isNotBlank()
+            )
+            assertEquals("Follow-up must keep the same inference process", originalPid, client.remotePid.value)
+            assertEquals("The original GGUF must remain loaded", modelFile.absolutePath, client.currentModel.value?.path)
+        } finally {
+            client.close()
+            directBinding?.let { binding ->
+                runCatching { context.unbindService(binding.connection) }
+            }
+            modelFile.delete()
+        }
+    }
 
     @Test
     fun inferenceClientHardAbortsWhileNativeProcessChatIsBlockedAndReconnects() = runBlocking {
