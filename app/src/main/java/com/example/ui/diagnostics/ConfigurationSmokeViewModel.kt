@@ -222,6 +222,7 @@ abstract class ConfigurationSmokeViewModel(
                             profile.id + ":measured"
                         )
                         val cfg = profile.config
+                        val loadElapsedMs = profileLoadMs ?: -1L
                         val normalizedOutput = InferenceConfigSmokePlan.normalizeOutput(sample.result.text)
                         val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
                         val outputMatches = normalizedOutput == expectedOutput
@@ -310,6 +311,18 @@ abstract class ConfigurationSmokeViewModel(
                             delay(InferenceConfigSmokePlan.COOLDOWN_MS)
                         }
                     } catch (cancelled: CancellationException) {
+                        pendingRecoveryFromProfile?.let { failedProfile ->
+                            EngineDiagnostics.error(
+                                "config_test",
+                                "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                                IllegalStateException(
+                                    "Following model load was cancelled after profile $failedProfile",
+                                    cancelled
+                                )
+                            )
+                            pendingRecoveryFromProfile = null
+                            pendingRecoveryObservedState = null
+                        }
                         profileStatuses[profile.id] = "CANCELLED"
                         recordConfigurationSmokeProfileResult(
                             profile.id,
@@ -376,7 +389,7 @@ abstract class ConfigurationSmokeViewModel(
                         stoppedReason = "Profil " + profile.id + " fehlgeschlagen: " + reason
 
                         val nextProfile = profiles.getOrNull(index + 1)
-                        if (nextProfile != null && !vulkanUnavailable) {
+                        if (nextProfile != null && !vulkanUnavailable && stopRemainingProfilesReason == null) {
                             var followUpAttemptAllowed = false
                             try {
                                 EngineDiagnostics.info(
@@ -400,6 +413,12 @@ abstract class ConfigurationSmokeViewModel(
                                         ",state=" + stableState + ",nextAction=load_same_model"
                                 )
                             } catch (cancelled: CancellationException) {
+                                EngineDiagnostics.error(
+                                    "config_test",
+                                    "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                                    cancelled
+                                )
+                                stopRemainingProfilesReason = "USER_CANCELLED"
                                 throw cancelled
                             } catch (recoveryError: Exception) {
                                 val recoveryReason = recoveryError.message ?: recoveryError.javaClass.simpleName
@@ -414,7 +433,7 @@ abstract class ConfigurationSmokeViewModel(
                                 stoppedReason = "Service-Recovery nach " + profile.id + " fehlgeschlagen: " + recoveryReason
                             }
                             if (!InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
-                                    recoveryConfirmed = followUpAttemptAllowed
+                                    stableStateConfirmed = followUpAttemptAllowed
                                 )
                             ) {
                                 stopRemainingProfilesReason = stopRemainingProfilesReason
@@ -556,7 +575,7 @@ abstract class ConfigurationSmokeViewModel(
         loadMs: Long? = null,
         nativeRunId: String? = null
     ) {
-        val safeReason = reason.replace(',', ';').replace('\\n', ' ').take(320)
+        val safeReason = reason.replace(',', ';').replace("\\r", " ").replace("\\n", " ").take(320)
         EngineDiagnostics.info(
             "config_test",
             "CONFIG_SMOKE_PROFILE_RESULT",

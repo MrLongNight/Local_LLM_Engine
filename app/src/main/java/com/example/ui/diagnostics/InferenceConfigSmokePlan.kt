@@ -67,11 +67,11 @@ internal object InferenceConfigSmokePlan {
      * Successful loadModel completion, not Binder connection alone, confirms recovery.
      */
     internal fun mayContinueAfterProfileFailure(
-        recoveryConfirmed: Boolean,
+        stableStateConfirmed: Boolean,
         cancelled: Boolean = false,
         safetyStop: Boolean = false,
         modelIdentityMismatch: Boolean = false
-    ): Boolean = recoveryConfirmed && !cancelled && !safetyStop && !modelIdentityMismatch
+    ): Boolean = stableStateConfirmed && !cancelled && !safetyStop && !modelIdentityMismatch
 
     internal data class Profile(
         val id: String,

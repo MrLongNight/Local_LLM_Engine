@@ -158,27 +158,27 @@ class InferenceConfigSmokePlanTest {
 
     @Test
     fun continuesAfterProfileFailureOnlyWhenServiceRecoveryIsConfirmed() {
-        assertTrue(InferenceConfigSmokePlan.mayContinueAfterProfileFailure(recoveryConfirmed = true))
-        assertFalse(InferenceConfigSmokePlan.mayContinueAfterProfileFailure(recoveryConfirmed = false))
+        assertTrue(InferenceConfigSmokePlan.mayContinueAfterProfileFailure(stableStateConfirmed = true))
+        assertFalse(InferenceConfigSmokePlan.mayContinueAfterProfileFailure(stableStateConfirmed = false))
     }
 
     @Test
     fun cancellationSafetyStopAndModelIdentityMismatchAlwaysStopFollowingProfiles() {
         assertFalse(
             InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
-                recoveryConfirmed = true,
+                stableStateConfirmed = true,
                 cancelled = true
             )
         )
         assertFalse(
             InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
-                recoveryConfirmed = true,
+                stableStateConfirmed = true,
                 safetyStop = true
             )
         )
         assertFalse(
             InferenceConfigSmokePlan.mayContinueAfterProfileFailure(
-                recoveryConfirmed = true,
+                stableStateConfirmed = true,
                 modelIdentityMismatch = true
             )
         )
