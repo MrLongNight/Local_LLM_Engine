@@ -27,10 +27,10 @@ class InferenceConfigSmokePlanTest {
                 sha256 = "a".repeat(64)
             )
         )
-        assertEquals("REFERENCE_MODEL_MATCH", matching.status)
+        assertEquals("REFERENCE_MODEL_MATCH_SHA_AVAILABLE", matching.status)
         assertTrue(matching.isReferenceModel)
         assertTrue(matching.baselineEligible)
-        assertEquals("VERIFIED", matching.shaStatus)
+        assertEquals("AVAILABLE", matching.shaStatus)
 
         val wrongFamily = InferenceConfigSmokePlan.assessD0ReferenceModel(
             ModelInfo(

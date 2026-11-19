@@ -40,13 +40,13 @@ internal object InferenceConfigSmokePlan {
         val sha = model.sha256?.trim()
         val shaStatus = when {
             sha.isNullOrEmpty() -> "UNAVAILABLE"
-            sha.matches(Regex("[0-9a-fA-F]{64}")) -> "VERIFIED"
+            sha.matches(Regex("[0-9a-fA-F]{64}")) -> "AVAILABLE"
             else -> "INVALID"
         }
         val identityMatch = failed.isEmpty() && shaStatus != "INVALID"
         val status = when {
             !identityMatch -> "REFERENCE_MODEL_MISMATCH"
-            shaStatus == "VERIFIED" -> "REFERENCE_MODEL_MATCH"
+            shaStatus == "AVAILABLE" -> "REFERENCE_MODEL_MATCH_SHA_AVAILABLE"
             else -> "REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE"
         }
         val reason = buildList {
@@ -59,7 +59,7 @@ internal object InferenceConfigSmokePlan {
             reason = reason,
             shaStatus = shaStatus,
             isReferenceModel = identityMatch,
-            baselineEligible = identityMatch && shaStatus == "VERIFIED"
+            baselineEligible = identityMatch && shaStatus == "AVAILABLE"
         )
     }
     const val MEASURED_TOKENS = 96
