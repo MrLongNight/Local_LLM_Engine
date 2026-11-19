@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.EngineDiagnosticsStorage
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FinishReason
@@ -117,10 +118,11 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
             // A long prompt with small native micro-batches leaves enough real CPU prefill
             // work after the first progress callback for Binder cancellation to reach llama.cpp.
             val longPrompt = buildString {
-                repeat(200) { append("hello ") }
+                repeat(160) { append("hello ") }
             }
             val observed = Collections.synchronizedList(mutableListOf<InferenceEvent>())
-            val promptProgressSeen = CompletableDeferred<Unit>()
+            val promptProgressSeen = CompletableDeferred<Pair<Int, Int>>()
+            var promptProgressCheckpoint: Pair<Int, Int>? = null
             val streamJob = launch(Dispatchers.IO) {
                 client.streamChat(
                     InferenceRequest.single(longPrompt, maxPredictTokens = 16)
@@ -128,9 +130,13 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                 ).collect { event ->
                     observed.add(event)
                     if (event is InferenceEvent.Progress &&
-                        event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION
+                        event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION &&
+                        event.promptTokensProcessed > 0 &&
+                        event.promptTokensProcessed < event.promptTokensTotal
                     ) {
-                        promptProgressSeen.complete(Unit)
+                        promptProgressSeen.complete(
+                            event.promptTokensProcessed to event.promptTokensTotal
+                        )
                     }
                 }
             }
@@ -145,12 +151,29 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                 directBinding = directBinding,
                 appDiagnosticsFile = appDiagnosticsFile
             ) {
-                promptProgressSeen.await()
+                promptProgressCheckpoint = promptProgressSeen.await()
             }
+            val progressCheckpoint = requireNotNull(promptProgressCheckpoint) {
+                "Cooperative cancellation test reached its wait phase without a native prompt-progress checkpoint"
+            }
+            val servicePromptStartedLine = EngineDiagnosticsStorage.readAllProcessLogs(context)
+                .lastOrNull { line ->
+                    line.contains("[inference] PROMPT_EVALUATION_STARTED") &&
+                        line.contains("pid=$originalPid")
+                }
+            val inferenceRunId = Regex("""runId=([^,]+)""")
+                .find(servicePromptStartedLine.orEmpty())
+                ?.groupValues
+                ?.get(1)
+                ?: throw AssertionError(
+                    "Could not correlate cancellation to a service-side PROMPT_EVALUATION_STARTED event; " +
+                        "serviceLine=$servicePromptStartedLine"
+                )
             EngineDiagnostics.info(
                 "ipc_test",
                 "COOPERATIVE_CANCEL_REQUESTED",
-                "appPid=$appPid,remotePid=$originalPid,eventCount=${synchronized(observed) { observed.size }}"
+                "appPid=$appPid,remotePid=$originalPid,eventCount=${synchronized(observed) { observed.size }}," +
+                    "promptProgress=${progressCheckpoint.first}/${progressCheckpoint.second},runId=$inferenceRunId"
             )
             client.cancelInference()
             EngineDiagnostics.info(
@@ -170,6 +193,33 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
             ) {
                 streamJob.join()
             }
+
+            val serviceCancelDeadline = SystemClock.elapsedRealtime() + 5_000L
+            var prefillCancellationLine: String? = null
+            while (SystemClock.elapsedRealtime() < serviceCancelDeadline && prefillCancellationLine == null) {
+                prefillCancellationLine = EngineDiagnosticsStorage.readAllProcessLogs(context)
+                    .lastOrNull { line ->
+                        line.contains("[inference] PREFILL_CANCELLED") &&
+                            line.contains("runId=$inferenceRunId,")
+                    }
+                if (prefillCancellationLine == null) delay(PROCESS_POLL_INTERVAL_MS)
+            }
+            val serviceDiagnosticsTail = EngineDiagnosticsStorage.readAllProcessLogs(context)
+                .filter { it.contains("pid=$originalPid") }
+                .takeLast(30)
+                .joinToString(" | ")
+            assertTrue(
+                "CPU prefill must be interrupted by llama.cpp's abort callback (dedicated nativeResult=6), " +
+                    "not converted from a different native outcome. runId=$inferenceRunId, " +
+                    "actual=$prefillCancellationLine, serviceTail=$serviceDiagnosticsTail",
+                prefillCancellationLine?.contains("nativeResult=6") == true
+            )
+            EngineDiagnostics.info(
+                "ipc_test",
+                "COOPERATIVE_CANCEL_NATIVE_ABORT_VERIFIED",
+                "runId=$inferenceRunId,remotePid=$originalPid,promptProgress=${progressCheckpoint.first}/${progressCheckpoint.second}," +
+                    "nativeResult=6"
+            )
 
             val activeBinding = directBinding
                 ?: throw AssertionError("Direct inference service binding was not established")

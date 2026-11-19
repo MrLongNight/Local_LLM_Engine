@@ -578,7 +578,10 @@ internal class LocalLlmEngineImpl(
             throw error
         }
 
-        if (processRes == 6 || isCancelled.get()) {
+        // Result 6 is llama.cpp's dedicated cooperative prefill-abort result. A cancel
+        // can also race just after a successful native return (result 0), but must never
+        // mask a genuine native failure such as PROMPT_TOO_LONG (result 8).
+        if (processRes == 6 || (processRes == 0 && isCancelled.get())) {
             nativeWorkActive.set(false)
             // This early prefill-cancel return bypasses the generation loop's finally block.
             // Consume the request-local Kotlin latch now so the next request is not cancelled
