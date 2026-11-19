@@ -156,7 +156,7 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
             EngineDiagnostics.info(
                 "ipc_test",
                 "COOPERATIVE_CANCEL_CALL_RETURNED",
-                "appPid=$appPid,remotePid=$originalPid,clientState=${client.state.value}"
+                "appPid=$appPid,remotePid=$originalPid,clientState=${client.state.value.javaClass.simpleName}"
             )
             awaitCancellationPhase(
                 context = context,
@@ -171,64 +171,77 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                 streamJob.join()
             }
 
-            assertTrue(
-                "CPU prefill cancellation must complete cooperatively; events=${observed.joinToString()}",
-                observed.any { it is InferenceEvent.Cancelled }
-            )
-            assertFalse(
-                "Cancellation must happen before prompt completion",
-                observed.any { it is InferenceEvent.Started || it is InferenceEvent.Completed }
-            )
-            assertEquals("Cooperative cancellation must keep the original inference PID", originalPid, client.remotePid.value)
-            assertEquals("The original model must remain loaded", "MODEL_LOADED", directBinding.service.status)
-            assertEquals(modelFile.absolutePath, client.currentModel.value?.path)
-
-            val acknowledgementDeadline = SystemClock.elapsedRealtime() + 5_000L
-            var cooperativeAcknowledged = false
-            while (SystemClock.elapsedRealtime() < acknowledgementDeadline && !cooperativeAcknowledged) {
-                cooperativeAcknowledged = runCatching {
-                    appDiagnosticsFile.takeIf { it.isFile }?.readLines(Charsets.UTF_8)
-                        ?.any { line ->
-                            line.contains("[ipc_client] COOPERATIVE_CANCEL_ACKNOWLEDGED") &&
-                                line.contains("reason=explicit_cancel")
-                        } == true
-                }.getOrDefault(false)
-                if (!cooperativeAcknowledged) delay(PROCESS_POLL_INTERVAL_MS)
-            }
-            assertTrue(
-                "Client must acknowledge cooperative unwind before the grace deadline escalates",
-                cooperativeAcknowledged
-            )
-            val cancellationLog = appDiagnosticsFile.readLines(Charsets.UTF_8)
-            assertFalse(
-                "A successful cooperative cancel must not request process termination",
-                cancellationLog.any { line ->
-                    line.contains("[ipc_client] COOPERATIVE_CANCEL_ESCALATED") ||
-                        (line.contains("[ipc_client] PROCESS_KILL_REQUESTED") && line.contains("pid=$originalPid"))
-                }
-            )
-
-            // The first follow-up must use the same live EngineInstance. A stale Kotlin
-            // cancellation latch would incorrectly turn this request into CANCELLED once.
-            val followup = withTimeout(timeoutConfig.totalInferenceMs + 5_000L) {
-                client.generateChat(
-                    InferenceRequest.single("Write one short sentence.", maxPredictTokens = 12)
-                        .copy(timeoutConfig = timeoutConfig)
+            val activeBinding = directBinding
+                ?: throw AssertionError("Direct inference service binding was not established")
+            awaitCancellationPhase(
+                context = context,
+                phase = "VERIFY_COOPERATIVE_CANCEL_AND_SAME_MODEL_REUSE",
+                timeoutMs = timeoutConfig.totalInferenceMs + 5_000L,
+                testStartedAtMs = testStartedAtMs,
+                observed = observed,
+                client = client,
+                directBinding = activeBinding,
+                appDiagnosticsFile = appDiagnosticsFile
+            ) {
+                assertTrue(
+                    "CPU prefill cancellation must complete cooperatively; events=${observed.joinToString()}",
+                    observed.any { it is InferenceEvent.Cancelled }
                 )
+                assertFalse(
+                    "Cancellation must happen before prompt completion",
+                    observed.any { it is InferenceEvent.Started || it is InferenceEvent.Completed }
+                )
+                assertEquals("Cooperative cancellation must keep the original inference PID", originalPid, client.remotePid.value)
+                assertEquals("The original model must remain loaded", "MODEL_LOADED", activeBinding.service.status)
+                assertEquals(modelFile.absolutePath, client.currentModel.value?.path)
+    
+                val acknowledgementDeadline = SystemClock.elapsedRealtime() + 5_000L
+                var cooperativeAcknowledged = false
+                while (SystemClock.elapsedRealtime() < acknowledgementDeadline && !cooperativeAcknowledged) {
+                    cooperativeAcknowledged = runCatching {
+                        appDiagnosticsFile.takeIf { it.isFile }?.readLines(Charsets.UTF_8)
+                            ?.any { line ->
+                                line.contains("[ipc_client] COOPERATIVE_CANCEL_ACKNOWLEDGED") &&
+                                    line.contains("reason=explicit_cancel")
+                            } == true
+                    }.getOrDefault(false)
+                    if (!cooperativeAcknowledged) delay(PROCESS_POLL_INTERVAL_MS)
+                }
+                assertTrue(
+                    "Client must acknowledge cooperative unwind before the grace deadline escalates",
+                    cooperativeAcknowledged
+                )
+                val cancellationLog = appDiagnosticsFile.readLines(Charsets.UTF_8)
+                assertFalse(
+                    "A successful cooperative cancel must not request process termination",
+                    cancellationLog.any { line ->
+                        line.contains("[ipc_client] COOPERATIVE_CANCEL_ESCALATED") ||
+                            (line.contains("[ipc_client] PROCESS_KILL_REQUESTED") && line.contains("pid=$originalPid"))
+                    }
+                )
+    
+                // The first follow-up must use the same live EngineInstance. A stale Kotlin
+                // cancellation latch would incorrectly turn this request into CANCELLED once.
+                val followup = withTimeout(timeoutConfig.totalInferenceMs + 5_000L) {
+                    client.generateChat(
+                        InferenceRequest.single("Write one short sentence.", maxPredictTokens = 12)
+                            .copy(timeoutConfig = timeoutConfig)
+                    )
+                }
+                assertTrue("Same-process follow-up inference must succeed: ${followup.exceptionOrNull()}", followup.isSuccess)
+                val followupResult = followup.getOrThrow()
+                assertTrue(
+                    "Follow-up must finish normally, not inherit the previous cancellation: ${followupResult.finishReason}",
+                    followupResult.finishReason == FinishReason.STOP ||
+                        followupResult.finishReason == FinishReason.MAX_TOKENS
+                )
+                assertTrue(
+                    "Follow-up must produce visible model output",
+                    followupResult.tokensGenerated > 0 && followupResult.text.isNotBlank()
+                )
+                assertEquals("Follow-up must keep the same inference process", originalPid, client.remotePid.value)
+                assertEquals("The original GGUF must remain loaded", modelFile.absolutePath, client.currentModel.value?.path)
             }
-            assertTrue("Same-process follow-up inference must succeed: ${followup.exceptionOrNull()}", followup.isSuccess)
-            val followupResult = followup.getOrThrow()
-            assertTrue(
-                "Follow-up must finish normally, not inherit the previous cancellation: ${followupResult.finishReason}",
-                followupResult.finishReason == FinishReason.STOP ||
-                    followupResult.finishReason == FinishReason.MAX_TOKENS
-            )
-            assertTrue(
-                "Follow-up must produce visible model output",
-                followupResult.tokensGenerated > 0 && followupResult.text.isNotBlank()
-            )
-            assertEquals("Follow-up must keep the same inference process", originalPid, client.remotePid.value)
-            assertEquals("The original GGUF must remain loaded", modelFile.absolutePath, client.currentModel.value?.path)
         } finally {
             client.close()
             directBinding?.let { binding ->
@@ -428,7 +441,7 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                 phaseElapsedMs=$phaseElapsedMs
                 testElapsedMs=${SystemClock.elapsedRealtime() - testStartedAtMs}
                 appPid=${Process.myPid()}
-                clientState=${client.state.value.toString().take(240)}
+                clientState=${client.state.value.javaClass.simpleName}
                 remotePid=${client.remotePid.value}
                 currentModelPath=${client.currentModel.value?.path ?: "none"}
                 directServicePid=${directBinding?.pid ?: "none"}

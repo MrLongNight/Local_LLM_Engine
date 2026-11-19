@@ -2,7 +2,8 @@
 set -uo pipefail
 
 diagnostics_dir="${RUNNER_TEMP:?RUNNER_TEMP must be set}/local-llm-emulator-diagnostics"
-app_id="com.aistudio.localllm.mdoanx.dmmv"
+# The instrumentation APK package is namespace + ".test" (verified by aapt dump badging).
+test_app_id="com.mydocanizer.llm.engine.test"
 
 mkdir -p "$diagnostics_dir" || exit 1
 
@@ -29,7 +30,10 @@ done
 adb logcat -b all -d -v threadtime \
   > "$diagnostics_dir/logcat-all.txt" \
   2> "$diagnostics_dir/logcat-pull.stderr" || true
-adb exec-out run-as "$app_id" sh -c '
+adb shell pm path "$test_app_id" \
+  > "$diagnostics_dir/test-app-package-path.txt" \
+  2> "$diagnostics_dir/test-app-package-path.stderr" || true
+adb exec-out run-as "$test_app_id" sh -c '
   for file in files/diagnostics/engine-*.log; do
     [ -f "$file" ] || continue
     printf "\n===== %s =====\n" "$file"
@@ -37,7 +41,7 @@ adb exec-out run-as "$app_id" sh -c '
   done
 ' > "$diagnostics_dir/app-process-diagnostics.txt" \
   2> "$diagnostics_dir/app-diagnostics-pull.stderr" || true
-adb shell dumpsys activity exit-info "$app_id" \
+adb shell dumpsys activity exit-info "$test_app_id" \
   > "$diagnostics_dir/activity-exit-info.txt" \
   2> "$diagnostics_dir/exit-info-pull.stderr" || true
 adb shell ps -A \
