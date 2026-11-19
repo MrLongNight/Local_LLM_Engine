@@ -45,6 +45,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.UUID
 
+internal fun isCooperativePrefillCancellation(
+    nativeResult: Int,
+    cancellationRequested: Boolean
+): Boolean = nativeResult == 6 || (nativeResult == 0 && cancellationRequested)
+
 internal class LocalLlmEngineImpl(
     private val context: Context
 ) : LocalLlmEngine {
@@ -561,17 +566,21 @@ internal class LocalLlmEngineImpl(
             }
         } catch (cancelled: CancellationException) {
             nativeWorkActive.set(false)
+            val cancelFlagConsumed = isCancelled.getAndSet(false)
             EngineDiagnostics.info(
                 "inference", "INFERENCE_TERMINAL_FAILURE",
-                "runId=$inferenceRunId,phase=NATIVE_PROMPT,finishReason=CANCELLED"
+                "runId=$inferenceRunId,phase=NATIVE_PROMPT,finishReason=CANCELLED," +
+                    "cancelFlagConsumed=$cancelFlagConsumed"
             )
             EngineDiagnostics.recordInferenceOutput(inferenceRunId, "", "CANCELLED_BEFORE_DECODE", 0)
             throw cancelled
         } catch (error: Throwable) {
             nativeWorkActive.set(false)
+            val cancelFlagConsumed = isCancelled.getAndSet(false)
             EngineDiagnostics.info(
                 "inference", "INFERENCE_TERMINAL_FAILURE",
-                "runId=$inferenceRunId,phase=NATIVE_PROMPT,errorType=${error.javaClass.simpleName}"
+                "runId=$inferenceRunId,phase=NATIVE_PROMPT,errorType=${error.javaClass.simpleName}," +
+                    "cancelFlagConsumed=$cancelFlagConsumed"
             )
             EngineDiagnostics.recordInferenceOutput(inferenceRunId, "", "NATIVE_PROMPT_EXCEPTION", 0)
             EngineDiagnostics.error("inference", "NATIVE_PROMPT_CALL_FAILED", error)
@@ -581,7 +590,7 @@ internal class LocalLlmEngineImpl(
         // Result 6 is llama.cpp's dedicated cooperative prefill-abort result. A cancel
         // can also race just after a successful native return (result 0), but must never
         // mask a genuine native failure such as PROMPT_TOO_LONG (result 8).
-        if (processRes == 6 || (processRes == 0 && isCancelled.get())) {
+        if (isCooperativePrefillCancellation(processRes, isCancelled.get())) {
             nativeWorkActive.set(false)
             // This early prefill-cancel return bypasses the generation loop's finally block.
             // Consume the request-local Kotlin latch now so the next request is not cancelled
@@ -602,6 +611,9 @@ internal class LocalLlmEngineImpl(
 
         if (processRes != 0) {
             nativeWorkActive.set(false)
+            // A cancel can race with a genuine native prompt failure. The failure remains
+            // an Error; consume the Kotlin-side request latch so the next request is clean.
+            val cancelFlagConsumed = isCancelled.getAndSet(false)
             val message = when (processRes) {
                 1 -> "Native prompt evaluation has no valid model/context handle"
                 2 -> "The native prompt message list is invalid"
@@ -615,7 +627,8 @@ internal class LocalLlmEngineImpl(
             val err = IllegalStateException(message)
             EngineDiagnostics.info(
                 "inference", "INFERENCE_TERMINAL_FAILURE",
-                "runId=$inferenceRunId,phase=PROMPT,backend=${modelInfo.activeBackend},nativeResult=$processRes"
+                "runId=$inferenceRunId,phase=PROMPT,backend=${modelInfo.activeBackend}," +
+                    "nativeResult=$processRes,cancelFlagConsumed=$cancelFlagConsumed"
             )
             EngineDiagnostics.recordInferenceOutput(inferenceRunId, "", "PROMPT_ERROR_$processRes", 0)
             EngineDiagnostics.error("native", "PROMPT_EVALUATION_FAILED", err)

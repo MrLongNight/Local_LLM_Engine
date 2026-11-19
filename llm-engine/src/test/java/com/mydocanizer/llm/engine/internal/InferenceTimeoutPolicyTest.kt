@@ -6,6 +6,16 @@ import org.junit.Test
 
 class InferenceTimeoutPolicyTest {
     @Test
+    fun nativePromptFailureIsNeverReclassifiedAsCooperativeCancellation() {
+        assertTrue(isCooperativePrefillCancellation(nativeResult = 6, cancellationRequested = false))
+        assertTrue(isCooperativePrefillCancellation(nativeResult = 6, cancellationRequested = true))
+        assertTrue(isCooperativePrefillCancellation(nativeResult = 0, cancellationRequested = true))
+        assertFalse(isCooperativePrefillCancellation(nativeResult = 0, cancellationRequested = false))
+        assertFalse(isCooperativePrefillCancellation(nativeResult = 8, cancellationRequested = true))
+        assertFalse(isCooperativePrefillCancellation(nativeResult = 4, cancellationRequested = true))
+    }
+
+    @Test
     fun promptProgressRestartsStallDeadlineForLongPrefill() {
         val timeoutMs = 120_000L
         var lastProgress = 0L
