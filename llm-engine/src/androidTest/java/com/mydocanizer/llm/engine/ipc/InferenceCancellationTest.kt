@@ -71,9 +71,9 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
             reconnectMs = 15_000L
         )
         val config = EngineConfig(
-            // The tiny fixture uses a byte-oriented tokenizer; leave enough headroom for
-            // the long prompt while still forcing multiple 16-token native decode chunks.
-            contextSize = 1024,
+            // Keep the model's trained context (256) and the test request below its
+            // verified safe budget, while still requiring multiple 16-token decode chunks.
+            contextSize = 256,
             batchSize = 64,
             threads = 2,
             temperature = 0.0f,
@@ -120,7 +120,9 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
             // A long prompt with small native micro-batches leaves enough real CPU prefill
             // work after the first progress callback for Binder cancellation to reach llama.cpp.
             val longPrompt = buildString {
-                repeat(160) { append("hello ") }
+                // A 160-repeat prompt measured 523 tokens and exceeded the 248-token
+                // safe budget. 60 repeats stay below that budget but still span many chunks.
+                repeat(60) { append("hello ") }
             }
             val observed = Collections.synchronizedList(mutableListOf<InferenceEvent>())
             val promptProgressSeen = CompletableDeferred<Pair<Int, Int>>()
