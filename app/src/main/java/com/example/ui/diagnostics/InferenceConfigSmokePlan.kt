@@ -4,6 +4,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FlashAttentionMode
 import com.mydocanizer.llm.engine.GdnPolicy
+import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 
 /**
@@ -12,6 +13,55 @@ import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
  * deterministic sampling; only backend-specific GPU offload differs.
  */
 internal object InferenceConfigSmokePlan {
+    internal data class D0ReferenceAssessment(
+        val status: String,
+        val reason: String,
+        val shaStatus: String,
+        val isReferenceModel: Boolean,
+        val baselineEligible: Boolean
+    )
+
+    /**
+     * D0 is tied to the documented Qwen3-4B-Instruct-2507 Q4_K_M file.
+     * Missing SHA permits a functional reference run, but not a comparable baseline.
+     */
+    internal fun assessD0ReferenceModel(model: ModelInfo): D0ReferenceAssessment {
+        val fileIdentity = (model.name + " " + model.path).lowercase()
+        val metadata = (model.name + " " + model.path + " " + model.description).lowercase()
+        val checks = listOf(
+            "architecture_qwen3" to model.architecture.equals("qwen3", ignoreCase = true),
+            "parameter_count_3_5b_to_4_5b" to
+                (model.parameterCount in 3_500_000_000L..4_500_000_000L),
+            "reference_file_qwen3_4b_instruct_2507" to
+                fileIdentity.contains("qwen3-4b-instruct-2507"),
+            "quantization_q4_k_m" to metadata.contains("q4_k_m")
+        )
+        val failed = checks.filterNot { it.second }.map { it.first }
+        val sha = model.sha256?.trim()
+        val shaStatus = when {
+            sha.isNullOrEmpty() -> "UNAVAILABLE"
+            sha.matches(Regex("[0-9a-fA-F]{64}")) -> "VERIFIED"
+            else -> "INVALID"
+        }
+        val identityMatch = failed.isEmpty() && shaStatus != "INVALID"
+        val status = when {
+            !identityMatch -> "REFERENCE_MODEL_MISMATCH"
+            shaStatus == "VERIFIED" -> "REFERENCE_MODEL_MATCH"
+            else -> "REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE"
+        }
+        val reason = buildList {
+            addAll(failed)
+            if (shaStatus == "INVALID") add("sha256_invalid")
+            if (shaStatus == "UNAVAILABLE") add("sha256_unavailable")
+        }.joinToString("|").ifBlank { "all_reference_metadata_matched" }
+        return D0ReferenceAssessment(
+            status = status,
+            reason = reason,
+            shaStatus = shaStatus,
+            isReferenceModel = identityMatch,
+            baselineEligible = identityMatch && shaStatus == "VERIFIED"
+        )
+    }
     const val MEASURED_TOKENS = 96
     const val COOLDOWN_MS = 0L
 

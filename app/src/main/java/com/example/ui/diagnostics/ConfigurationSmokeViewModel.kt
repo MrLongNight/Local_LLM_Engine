@@ -58,7 +58,12 @@ abstract class ConfigurationSmokeViewModel(
      * is the only intentional configuration difference. The original configuration
      * is restored in finally; bounded test input/output text is Debug-diagnostic only.
      */
-    fun runConfigurationSmokeTest() {
+    fun runConfigurationSmokeTest() = startConfigurationSmokeTest(requireD0Reference = true)
+
+    /** General candidate check; its result is never counted as the fixed D0 baseline. */
+    fun runGeneralConfigurationSmokeTest() = startConfigurationSmokeTest(requireD0Reference = false)
+
+    private fun startConfigurationSmokeTest(requireD0Reference: Boolean) {
         if (_isBenchmarking.value || _isConfigSmokeTesting.value) return
         if (_isGenerating.value || _isImporting.value) {
             _errorMessage.value = "Konfigurationstest erst starten, wenn keine Inferenz oder Modell-Operation läuft."
@@ -67,6 +72,25 @@ abstract class ConfigurationSmokeViewModel(
         val model = currentModel.value
         if (model == null) {
             _errorMessage.value = "Bitte zuerst ein GGUF-Modell laden."
+            return
+        }
+
+        val referenceAssessment = InferenceConfigSmokePlan.assessD0ReferenceModel(model)
+        val testMode = if (requireD0Reference) "D0_REFERENCE" else "GENERAL_MODEL_AGNOSTIC"
+        val d0BaselineEligible = requireD0Reference && referenceAssessment.baselineEligible
+        if (requireD0Reference && !referenceAssessment.isReferenceModel) {
+            val reason = referenceAssessment.reason
+            EngineDiagnostics.info(
+                "config_test",
+                "CONFIG_SMOKE_REFERENCE_REJECTED",
+                "status=REFERENCE_MODEL_MISMATCH,reason=$reason,model=${model.name}," +
+                    "architecture=${model.architecture},parameters=${model.parameterCount}," +
+                    "shaStatus=${referenceAssessment.shaStatus}"
+            )
+            _configSmokeReport.value =
+                "D0-Referenzlauf nicht gestartet: REFERENCE_MODEL_MISMATCH ($reason). " +
+                    "Bitte Qwen3-4B-Instruct-2507 Q4_K_M laden. Für andere Modelle den allgemeinen CPU/Vulkan-Test verwenden."
+            _errorMessage.value = "Falsches Referenzmodell: " + reason
             return
         }
 
@@ -103,7 +127,13 @@ abstract class ConfigurationSmokeViewModel(
             EngineDiagnostics.info(
                 "config_test",
                 "CONFIG_SMOKE_STARTED",
-                "model=" + model.name + ",bytes=" + model.sizeBytes +
+                "testMode=" + testMode +
+                    ",referenceModelStatus=" + referenceAssessment.status +
+                    ",referenceReason=" + referenceAssessment.reason +
+                    ",referenceShaStatus=" + referenceAssessment.shaStatus +
+                    ",d0BaselineEligible=" + d0BaselineEligible +
+                    ",model=" + model.name + ",bytes=" + model.sizeBytes +
+                    ",architecture=" + model.architecture + ",parameters=" + model.parameterCount +
                     ",profiles=" + profiles.size + ",context=" + originalConfig.contextSize +
                     ",batch=" + originalConfig.batchSize + ",threads=" + originalConfig.threads +
                     ",backend=" + originalConfig.backendPreference + ",gpuLayers=" + originalConfig.gpuLayers
@@ -279,6 +309,9 @@ abstract class ConfigurationSmokeViewModel(
                             "profile=" + profile.id + ",requestedBackend=" + profile.expectedBackend +
                                 ",backend=" + backend + ",status=" +
                                 (if (outputGatePassed) "PASS" else "FAIL") +
+                                ",testMode=" + testMode +
+                                ",referenceModelStatus=" + referenceAssessment.status +
+                                ",d0BaselineEligible=" + d0BaselineEligible +
                                 ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
                                 ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
                                 ",loadMs=" + (profileLoadMs ?: -1L) + ",nThreads=" + cfg.threads +
@@ -563,6 +596,11 @@ abstract class ConfigurationSmokeViewModel(
                 }
                 _configSmokeReport.value = buildString {
                     appendLine("Automatischer In-App-Konfigurationstest")
+                    appendLine("Testmodus: " + testMode)
+                    appendLine("D0-Referenzstatus: " + referenceAssessment.status +
+                        " (" + referenceAssessment.reason + ")")
+                    appendLine("D0-SHA-256: " + referenceAssessment.shaStatus)
+                    appendLine("D0-Baseline vergleichbar: " + if (d0BaselineEligible) "JA" else "NEIN")
                     appendLine("Modell: " + model.name + " (" + model.sizeMb.toInt() + " MB)")
                     appendLine("Backend-Ergebnisse: " + confirmedBackends.joinToString(", ").ifBlank { "keines bestätigt" })
                     appendLine("Kontext: " + originalConfig.contextSize + "; Batch: " + originalConfig.batchSize +

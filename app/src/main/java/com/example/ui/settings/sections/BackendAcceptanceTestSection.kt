@@ -28,14 +28,13 @@ internal fun BackendAcceptanceTestSection(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Kurzer CPU/Vulkan-Funktionstest",
+                text = "CPU/Vulkan-Funktionstest",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Für die wiederholbare Geräte-Baseline Qwen3-4B-Instruct-2507 Q4_K_M laden. Der Test führt denselben festen Rechen-/Sequenzprompt einmal auf CPU und einmal auf Vulkan aus; nur Backend und GPU-Layer-Offload unterscheiden sich. " +
-                    "Er prüft exakte Ausgabe und Finish-Grund und protokolliert je Backend Modellidentität, Konfiguration, echte Graph-Verteilung, Lade-/Prefill-/TTFT-/Decode-Zeiten und RAM. Keine Parameter-Sweeps.",
+                text = "Der D0-Referenzlauf akzeptiert ausschließlich Qwen3-4B-Instruct-2507 Q4_K_M mit passender Architektur und Parameterzahl. Ein fehlender SHA-256 erlaubt einen Funktionstest, aber keine vergleichbare D0-Baseline. Andere GGUF-Kandidaten können separat im allgemeinen Lauf geprüft werden; sie werden niemals als 4B-Referenz gezählt.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -45,7 +44,15 @@ internal fun BackendAcceptanceTestSection(
                 enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
                 modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
             ) {
-                Text(if (isBenchmarking) "CPU/Vulkan-Test läuft…" else "CPU + Vulkan prüfen")
+                Text(if (isBenchmarking) "CPU/Vulkan-Test läuft…" else "D0: Qwen3-4B-Referenz prüfen")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { viewModel.runGeneralConfigurationSmokeTest() },
+                enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                modifier = Modifier.fillMaxWidth().testTag("backend_general_smoke_button")
+            ) {
+                Text(if (isBenchmarking) "CPU/Vulkan-Test läuft…" else "Allgemeinen Modellkandidaten prüfen")
             }
         }
     }

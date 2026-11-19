@@ -142,6 +142,7 @@ internal object EngineDiagnosticsReportBuilder {
             "SERVICE_CONNECTED",
             "BINDING_DIED",
             "CANCEL_REQUESTED",
+            "CONFIG_SMOKE_REFERENCE_REJECTED",
             "CONFIG_SMOKE_STARTED",
             "CONFIG_SMOKE_PROFILE_STARTED",
             "CONFIG_SMOKE_PROFILE_RESULT",
@@ -182,6 +183,7 @@ internal object EngineDiagnosticsReportBuilder {
     private val fieldSeparator = Regex(""",(?=[A-Za-z][A-Za-z0-9_]*=)""")
 
     private fun readableEventTitle(event: String): String = when (event) {
+        "CONFIG_SMOKE_REFERENCE_REJECTED" -> "D0-Referenzmodell abgelehnt"
         "CONFIG_SMOKE_STARTED" -> "Vulkan-Kurztest gestartet"
         "CONFIG_SMOKE_PROFILE_STARTED" -> "Backend-Profil gestartet"
         "CONFIG_SMOKE_PROFILE_RESULT" -> "Backend-Profil abgeschlossen"

@@ -5,6 +5,7 @@ import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FlashAttentionMode
 import com.mydocanizer.llm.engine.GdnPolicy
+import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -13,6 +14,99 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InferenceConfigSmokePlanTest {
+    @Test
+    fun acceptsOnlyTheFixedQwen3FourBInstruct2507Q4KmReferenceForD0() {
+        val matching = InferenceConfigSmokePlan.assessD0ReferenceModel(
+            ModelInfo(
+                name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+                path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+                sizeBytes = 2_500_000_000L,
+                parameterCount = 4_020_000_000L,
+                architecture = "qwen3",
+                description = "Q4_K_M",
+                sha256 = "a".repeat(64)
+            )
+        )
+        assertEquals("REFERENCE_MODEL_MATCH", matching.status)
+        assertTrue(matching.isReferenceModel)
+        assertTrue(matching.baselineEligible)
+        assertEquals("VERIFIED", matching.shaStatus)
+
+        val wrongFamily = InferenceConfigSmokePlan.assessD0ReferenceModel(
+            ModelInfo(
+                name = "Qwen3-1.7B-Q4_K_M.gguf",
+                path = "/models/Qwen3-1.7B-Q4_K_M.gguf",
+                sizeBytes = 1_700_000_000L,
+                parameterCount = 1_700_000_000L,
+                architecture = "qwen3",
+                description = "Q4_K_M"
+            )
+        )
+        assertEquals("REFERENCE_MODEL_MISMATCH", wrongFamily.status)
+        assertFalse(wrongFamily.isReferenceModel)
+        assertFalse(wrongFamily.baselineEligible)
+        assertTrue(wrongFamily.reason.contains("reference_file_qwen3_4b_instruct_2507"))
+    }
+
+    @Test
+    fun requiresArchitectureParameterCountAndQ4KmMetadataForD0() {
+        val base = ModelInfo(
+            name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            sizeBytes = 2_500_000_000L,
+            parameterCount = 4_020_000_000L,
+            architecture = "qwen3",
+            description = "Q4_K_M",
+            sha256 = "b".repeat(64)
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(architecture = "qwen2")).isReferenceModel
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(parameterCount = 1_700_000_000L)).isReferenceModel
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(description = "Q5_K_M")).isReferenceModel
+        )
+    }
+
+    @Test
+    fun missingShaAllowsFunctionalReferenceCheckButDisqualifiesComparableD0Baseline() {
+        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
+            ModelInfo(
+                name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+                path = "content://provider/document/42",
+                sizeBytes = 2_500_000_000L,
+                parameterCount = 4_020_000_000L,
+                architecture = "qwen3",
+                description = "Q4_K_M",
+                sha256 = null
+            )
+        )
+        assertEquals("REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE", result.status)
+        assertTrue(result.isReferenceModel)
+        assertFalse(result.baselineEligible)
+        assertEquals("UNAVAILABLE", result.shaStatus)
+    }
+
+    @Test
+    fun malformedShaDisqualifiesD0ReferenceIdentity() {
+        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
+            ModelInfo(
+                name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+                path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+                sizeBytes = 2_500_000_000L,
+                parameterCount = 4_020_000_000L,
+                architecture = "qwen3",
+                description = "Q4_K_M",
+                sha256 = "not-a-sha"
+            )
+        )
+        assertEquals("REFERENCE_MODEL_MISMATCH", result.status)
+        assertEquals("INVALID", result.shaStatus)
+        assertFalse(result.isReferenceModel)
+    }
+
     @Test
     fun createsPairedCpuAndVulkanProfilesWithFixedSharedParameters() {
         val base = EngineConfig(
