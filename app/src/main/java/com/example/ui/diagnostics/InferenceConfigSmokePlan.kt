@@ -27,6 +27,41 @@ internal object InferenceConfigSmokePlan {
     fun normalizeOutput(output: String): String =
         output.replace("\r\n", "\n").replace('\r', '\n').trim()
 
+    internal data class PairedGateSummary(
+        val outputGateStatus: String,
+        val backendParityStatus: String,
+        val combinedStatus: String
+    )
+
+    /**
+     * Keeps deterministic-output correctness separate from numeric CPU/Vulkan parity.
+     * The parity evaluator runs whenever both backend samples exist, even if either
+     * sample failed its exact-output/STOP gate.
+     */
+    internal fun evaluatePairedGate(
+        cpuOutputGatePassed: Boolean?,
+        vulkanOutputGatePassed: Boolean?,
+        evaluateBackendParity: () -> String
+    ): PairedGateSummary {
+        val bothRunsAvailable = cpuOutputGatePassed != null && vulkanOutputGatePassed != null
+        val outputGateStatus = when {
+            cpuOutputGatePassed == false || vulkanOutputGatePassed == false -> "FAIL"
+            bothRunsAvailable -> "PASS"
+            else -> "UNAVAILABLE"
+        }
+        val backendParityStatus = if (bothRunsAvailable) {
+            evaluateBackendParity().takeIf { it == "PASS" || it == "FAIL" } ?: "UNAVAILABLE"
+        } else {
+            "UNAVAILABLE"
+        }
+        val combinedStatus = when {
+            outputGateStatus == "FAIL" || backendParityStatus == "FAIL" -> "FAIL"
+            outputGateStatus == "PASS" && backendParityStatus == "PASS" -> "PASS"
+            else -> "UNAVAILABLE"
+        }
+        return PairedGateSummary(outputGateStatus, backendParityStatus, combinedStatus)
+    }
+
     internal data class Profile(
         val id: String,
         val label: String,

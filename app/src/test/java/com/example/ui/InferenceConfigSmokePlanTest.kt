@@ -7,7 +7,9 @@ import com.mydocanizer.llm.engine.FlashAttentionMode
 import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InferenceConfigSmokePlanTest {
@@ -106,6 +108,52 @@ class InferenceConfigSmokePlanTest {
             InferenceConfigSmokePlan.normalizeOutput("ERGEBNIS=155\nFOLGE=1, 2,3,4")
         )
         assertEquals(true, InferenceConfigSmokePlan.USER_PROMPT.contains("8 * 24 - 37"))
+    }
+
+    @Test
+    fun evaluatesNumericParityEvenWhenAnOutputGateFails() {
+        var parityEvaluationCount = 0
+        val summary = InferenceConfigSmokePlan.evaluatePairedGate(
+            cpuOutputGatePassed = false,
+            vulkanOutputGatePassed = true
+        ) {
+            parityEvaluationCount++
+            "PASS"
+        }
+
+        assertEquals(1, parityEvaluationCount)
+        assertEquals("FAIL", summary.outputGateStatus)
+        assertEquals("PASS", summary.backendParityStatus)
+        assertEquals("FAIL", summary.combinedStatus)
+    }
+
+    @Test
+    fun missingBackendRunKeepsNumericParityUnavailableAndDoesNotInvokeEvaluator() {
+        var parityEvaluated = false
+        val summary = InferenceConfigSmokePlan.evaluatePairedGate(
+            cpuOutputGatePassed = false,
+            vulkanOutputGatePassed = null
+        ) {
+            parityEvaluated = true
+            "PASS"
+        }
+
+        assertFalse(parityEvaluated)
+        assertEquals("FAIL", summary.outputGateStatus)
+        assertEquals("UNAVAILABLE", summary.backendParityStatus)
+        assertEquals("FAIL", summary.combinedStatus)
+    }
+
+    @Test
+    fun bothPassingOutputGatesStillRequireAvailablePassingNumericParity() {
+        val unavailable = InferenceConfigSmokePlan.evaluatePairedGate(true, true) { "UNAVAILABLE" }
+        val passing = InferenceConfigSmokePlan.evaluatePairedGate(true, true) { "PASS" }
+        val failing = InferenceConfigSmokePlan.evaluatePairedGate(true, true) { "FAIL" }
+
+        assertEquals("PASS", unavailable.outputGateStatus)
+        assertEquals("UNAVAILABLE", unavailable.combinedStatus)
+        assertEquals("PASS", passing.combinedStatus)
+        assertEquals("FAIL", failing.combinedStatus)
     }
 
     @Test

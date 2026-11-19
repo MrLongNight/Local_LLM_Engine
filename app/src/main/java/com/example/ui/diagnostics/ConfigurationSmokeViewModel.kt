@@ -238,16 +238,30 @@ abstract class ConfigurationSmokeViewModel(
                 }
                 val cpuSample = profileSamples["cpu-reference"]
                 val vulkanSample = profileSamples["vulkan-candidate"]
-                val gate = when {
-                    cpuSample == null || vulkanSample == null ->
-                        EngineDiagnostics.BackendCorrectnessResult("UNAVAILABLE", "CPU_OR_VULKAN_RUN_MISSING")
-                    !cpuSample.outputGatePassed || !vulkanSample.outputGatePassed ->
-                        EngineDiagnostics.BackendCorrectnessResult("FAIL", "EXPECTED_OUTPUT_OR_STOP_GATE_FAILED")
-                    else -> EngineDiagnostics.evaluateCpuVulkanCorrectnessGate(
+                var numericGate: EngineDiagnostics.BackendCorrectnessResult? = null
+                val pairedGateSummary = InferenceConfigSmokePlan.evaluatePairedGate(
+                    cpuSample?.outputGatePassed,
+                    vulkanSample?.outputGatePassed
+                ) {
+                    EngineDiagnostics.evaluateCpuVulkanCorrectnessGate(
                         getApplication<Application>(),
-                        cpuSample.result.nativeRunId,
-                        vulkanSample.result.nativeRunId
-                    )
+                        requireNotNull(cpuSample).result.nativeRunId,
+                        requireNotNull(vulkanSample).result.nativeRunId
+                    ).also { numericGate = it }.status
+                }
+                val gate = numericGate ?: EngineDiagnostics.BackendCorrectnessResult(
+                    "UNAVAILABLE",
+                    "CPU_OR_VULKAN_RUN_MISSING"
+                )
+                val cpuOutputGateStatus = when (cpuSample?.outputGatePassed) {
+                    true -> "PASS"
+                    false -> "FAIL"
+                    null -> "UNAVAILABLE"
+                }
+                val vulkanOutputGateStatus = when (vulkanSample?.outputGatePassed) {
+                    true -> "PASS"
+                    false -> "FAIL"
+                    null -> "UNAVAILABLE"
                 }
                 val gateDetails = "profile=CPU_VULKAN_SMOKE,backend=Vulkan," +
                     "gateRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable") +
@@ -258,10 +272,24 @@ abstract class ConfigurationSmokeViewModel(
                     ",minimumTop5Overlap=" + gate.minimumTop5Overlap + "/5" +
                     ",firstDivergenceStep=" + (gate.firstDivergenceStep ?: "n/a")
                 EngineDiagnostics.info("benchmark", "CORRECTNESS_GATE_RESULT", gateDetails)
-                rows += "CPU/Vulkan-Korrektheits-Gate: " + gate.status +
+                EngineDiagnostics.info(
+                    "config_test",
+                    "CONFIG_SMOKE_RESULT",
+                    "profile=paired-gates,outputGateStatus=" + pairedGateSummary.outputGateStatus +
+                        ",cpuOutputGateStatus=" + cpuOutputGateStatus +
+                        ",vulkanOutputGateStatus=" + vulkanOutputGateStatus +
+                        ",backendParityStatus=" + pairedGateSummary.backendParityStatus +
+                        ",status=" + pairedGateSummary.combinedStatus +
+                        ",cpuNativeRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
+                        ",vulkanNativeRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable")
+                )
+                rows += "Ausgabe-/Finish-Gate: " + pairedGateSummary.outputGateStatus +
+                    " (CPU=" + cpuOutputGateStatus + ", Vulkan=" + vulkanOutputGateStatus + ")"
+                rows += "Numerisches CPU/Vulkan-Paritäts-Gate: " + gate.status +
                     " (" + gate.reason + ", Schritte=" + gate.comparedSteps +
                     ", min. Top-5-Überlappung=" + gate.minimumTop5Overlap + "/5)"
-                if (!gate.passed) {
+                rows += "Kombiniertes CPU/Vulkan-Gesamtgate: " + pairedGateSummary.combinedStatus
+                if (pairedGateSummary.combinedStatus != "PASS") {
                     rows += "Keine Performance-/Kernel-Konfiguration durch diesen Lauf freigegeben."
                 }
             } catch (cancelled: CancellationException) {
