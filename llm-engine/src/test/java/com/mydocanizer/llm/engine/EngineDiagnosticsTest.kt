@@ -530,21 +530,38 @@ class EngineDiagnosticsTest {
     }
 
     @Test
-    fun compactReportRetainsRunCorrelatedNativeTimeoutSnapshot() {
+    fun compactReportRetainsLateTimeoutFieldsFromFullNativeRunContext() {
+        // Preserve the production field order: timeout values follow backend, model,
+        // context and sampler metadata, beyond the ordinary 16-field compact limit.
         val line =
             "2026-11-18 12:00:00.000 [INFO] [inference] INFERENCE_RUN_CONTEXT - " +
-                "runId=native-timeout-run,pid=1234,model=qwen3,timeoutSource=loaded_model_config," +
-                "timeoutPrefillMs=120000,timeoutFirstTokenMs=120000," +
-                "timeoutInterTokenMs=30000,timeoutTotalInferenceMs=600000," +
-                "timeoutAbortGracePeriodMs=3000,timeoutReconnectMs=15000"
+                "runId=native-timeout-run,pid=1234,model=qwen3,modelBytes=2491323904," +
+                "modelSha256=unavailable,architecture=qwen3,activeBackend=Vulkan," +
+                "backendPreference=VULKAN,contextSize=256,batchSize=128," +
+                "microBatchRequested=64,microBatchEffective=64,threads=6,batchThreads=6," +
+                "gpuLayersRequested=99,flashAttention=AUTO,vulkanMatvecWorkgroup=AUTO," +
+                "gdnPolicy=ARCH_DEFAULT,temperatureDefault=0.7,temperatureOverride=0.0," +
+                "topPDefault=0.9,topPOverride=1.0,topK=20,minP=0.05,maxPredictTokens=96," +
+                "enableThinking=false,messageCount=1,inputChars=220," +
+                "timeoutSource=loaded_model_config,timeoutServiceBindMs=10000," +
+                "timeoutModelLoadMs=180000,timeoutPrefillMs=120000," +
+                "timeoutFirstTokenMs=120000,timeoutInterTokenMs=30000," +
+                "timeoutTotalInferenceMs=600000,timeoutAbortGracePeriodMs=3000," +
+                "timeoutReconnectMs=15000"
 
         val report = EngineDiagnostics.buildCompactReportForTest(listOf(line))
 
         assertTrue(report.contains("INFERENCE_RUN_CONTEXT"))
         assertTrue(report.contains("runId=native-timeout-run"))
         assertTrue(report.contains("timeoutSource=loaded_model_config"))
-        assertTrue(report.contains("timeoutAbortGracePeriodMs=3000"))
-        assertTrue(report.contains("timeoutReconnectMs=15000"))
+        assertTrue(report.contains("Timeout IPC-Bindung (ms): 10000"))
+        assertTrue(report.contains("Timeout Modellladen (ms): 180000"))
+        assertTrue(report.contains("Timeout Prefill-Stall (ms): 120000"))
+        assertTrue(report.contains("Timeout bis erstes Token (ms): 120000"))
+        assertTrue(report.contains("Timeout zwischen Tokens (ms): 30000"))
+        assertTrue(report.contains("Timeout gesamte Inferenz (ms): 600000"))
+        assertTrue(report.contains("Abbruch-Gnadenfrist (ms): 3000"))
+        assertTrue(report.contains("Timeout Reconnect (ms): 15000"))
     }
 
     @Test

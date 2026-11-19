@@ -226,23 +226,52 @@ internal object EngineDiagnosticsReportBuilder {
         "cpuNodes" to "CPU-Knoten",
         "vulkanNodes" to "Vulkan-Knoten",
         "systemAvailableRamMb" to "Verfügbarer RAM (MB)",
-        "processPssMb" to "Prozess-PSS (MB)"
+        "processPssMb" to "Prozess-PSS (MB)",
+        "timeoutSource" to "Timeout-Quelle",
+        "timeoutServiceBindMs" to "Timeout IPC-Bindung (ms)",
+        "timeoutModelLoadMs" to "Timeout Modellladen (ms)",
+        "timeoutPrefillMs" to "Timeout Prefill-Stall (ms)",
+        "timeoutFirstTokenMs" to "Timeout bis erstes Token (ms)",
+        "timeoutInterTokenMs" to "Timeout zwischen Tokens (ms)",
+        "timeoutTotalInferenceMs" to "Timeout gesamte Inferenz (ms)",
+        "timeoutAbortGracePeriodMs" to "Abbruch-Gnadenfrist (ms)",
+        "timeoutReconnectMs" to "Timeout Reconnect (ms)",
     )
 
-    private fun readableFields(details: String): List<String> =
-        details.split(fieldSeparator)
+    private val inferenceTimeoutFieldKeys = setOf(
+        "timeoutSource",
+        "timeoutServiceBindMs",
+        "timeoutModelLoadMs",
+        "timeoutPrefillMs",
+        "timeoutFirstTokenMs",
+        "timeoutInterTokenMs",
+        "timeoutTotalInferenceMs",
+        "timeoutAbortGracePeriodMs",
+        "timeoutReconnectMs"
+    )
+
+    private fun readableFields(
+        details: String,
+        preserveKeys: Set<String> = emptySet()
+    ): List<String> {
+        val fields = details.split(fieldSeparator)
             .filterNot { field ->
                 val key = field.substringBefore('=')
                 key in setOf("schemaVersion", "eventId", "pid", "correlationType", "correlationId")
             }
-            .take(16)
-            .map { field ->
-                val key = field.substringBefore('=')
-                val value = field.substringAfter('=', "")
-                val label = readableFieldNames[key]
-                if (label == null || value.isEmpty()) "• $field"
-                else "• $label: $value  [$key=$value]"
-            }
+        // Keep the ordinary compact limit, but append explicitly required diagnostics
+        // that occur later in long structured records such as INFERENCE_RUN_CONTEXT.
+        val selectedFields = fields.take(16) + fields.drop(16).filter {
+            it.substringBefore('=') in preserveKeys
+        }
+        return selectedFields.map { field ->
+            val key = field.substringBefore('=')
+            val value = field.substringAfter('=', "")
+            val label = readableFieldNames[key]
+            if (label == null || value.isEmpty()) "• $field"
+            else "• $label: $value  [$key=$value]"
+        }
+    }
 
     private fun readableEventLine(line: String, maxChars: Int = 560): String {
         val match = eventLinePattern.matchEntire(line) ?: return compactLine(line, maxChars)
@@ -278,7 +307,13 @@ internal object EngineDiagnosticsReportBuilder {
         val body = line.substringAfter(" [NATIVE] ", line).trim()
         val header = body.substringBefore(" - ").replace(Regex("\\s+"), " ")
         val details = body.substringAfter(" - ", "")
-        val fields = readableFields(details)
+        val event = header.substringAfterLast("] ", "").trim()
+        val preserveKeys = if (event == "INFERENCE_RUN_CONTEXT") {
+            inferenceTimeoutFieldKeys
+        } else {
+            emptySet()
+        }
+        val fields = readableFields(details, preserveKeys)
         return buildString {
             if (timestamp.isNotBlank()) append(timestamp).append("  ")
             append("NATIVE  ").append(header)

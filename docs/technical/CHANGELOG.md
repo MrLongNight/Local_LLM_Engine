@@ -57,6 +57,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Compact diagnostics now preserve the complete timeout source and all effective timeout values from long `INFERENCE_RUN_CONTEXT` records. The ordinary 16-field cap remains for other events; timeout fields are appended explicitly and covered by a production-order regression fixture.
+
 - Remembered-model storage now persists the selected GDN fusion policy; older preference records safely restore to `ARCH_DEFAULT`. Configuration-change diagnostics include GDN policy changes.
 - Compact diagnostics now export all 48 matrix profile rows independently of profile-start and gate-pass events. Invalid rows explicitly carry `tok/s=n/a`; the matrix section is prioritized within the 128 KiB export limit.
 - Tightened the 16-step greedy correctness gate to reject malformed/extra trace rows, mixed run/backend metadata, non-finite or unsorted Top-5 logits, and reused CPU-reference run IDs; synthetic regression tests cover each fail-closed condition.
