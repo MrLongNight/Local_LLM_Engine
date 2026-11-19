@@ -74,6 +74,9 @@ import kotlin.coroutines.CoroutineContext
  * - Dynamic reconnection lifecycle through [EngineState.Reconnecting].
  * - Request-ID versioning to ensure stale events never corrupt engine state.
  */
+internal fun promptProgressPhaseForIpc(totalPromptTokens: Int): ProgressPhase =
+    if (totalPromptTokens > 0) ProgressPhase.PROMPT_EVALUATION else ProgressPhase.PROMPT_PREPARATION
+
 internal class InferenceClient(
     private val context: Context,
     private val mockService: IInferenceService? = null,
@@ -1345,7 +1348,7 @@ internal class InferenceClient(
                             InferenceEvent.Progress(
                                 tokensGenerated = 0,
                                 elapsedMs = measuredElapsedMs,
-                                phase = ProgressPhase.PROMPT_EVALUATION,
+                                phase = promptProgressPhaseForIpc(total),
                                 promptTokensProcessed = processed,
                                 promptTokensTotal = total,
                                 tokensPerSecond = speed,

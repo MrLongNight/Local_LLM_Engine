@@ -7,6 +7,7 @@ import com.mydocanizer.llm.engine.ChatMessage
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.FinishReason
 import com.mydocanizer.llm.engine.InferenceEvent
+import com.mydocanizer.llm.engine.InferenceEvent.ProgressPhase
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.InferenceTimeoutException
@@ -242,6 +243,14 @@ class InferenceIpcTest {
         override fun shutdown() {
             isShutdown.set(true)
         }
+    }
+
+    @Test
+    fun promptProgressSeparatesPreparationFromNativeEvaluation() {
+        assertEquals(ProgressPhase.PROMPT_PREPARATION, promptProgressPhaseForIpc(0))
+        assertEquals(ProgressPhase.PROMPT_PREPARATION, promptProgressPhaseForIpc(-1))
+        assertEquals(ProgressPhase.PROMPT_EVALUATION, promptProgressPhaseForIpc(1))
+        assertEquals(ProgressPhase.PROMPT_EVALUATION, promptProgressPhaseForIpc(33))
     }
 
     @Test

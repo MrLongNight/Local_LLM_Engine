@@ -27,37 +27,32 @@ done
 adb logcat -b all -d -v threadtime \
   > "$diagnostics_dir/logcat-all.txt" \
   2> "$diagnostics_dir/logcat-pull.stderr" || true
-adb shell pm list packages -3 \
-  > "$diagnostics_dir/installed-third-party-packages.txt" \
-  2> "$diagnostics_dir/package-list.stderr" || true
+adb shell pm list instrumentation \
+  > "$diagnostics_dir/installed-instrumentation.txt" \
+  2> "$diagnostics_dir/instrumentation-list.stderr" || true
+target_app_id="$(sed -n 's/.*(target=\([^)]*\)).*/\1/p' "$diagnostics_dir/installed-instrumentation.txt" | head -n 1 | tr -d '\r')"
+printf '%s\n' "$target_app_id" > "$diagnostics_dir/diagnostics-target-package.txt"
 : > "$diagnostics_dir/app-process-diagnostics.txt"
 : > "$diagnostics_dir/app-diagnostics-pull.stderr"
 : > "$diagnostics_dir/activity-exit-info.txt"
 : > "$diagnostics_dir/exit-info-pull.stderr"
-printf '%s\\n' "No readable app-private diagnostics package discovered yet." > "$diagnostics_dir/diagnostics-package.txt"
-while IFS= read -r package_line; do
-  package="${package_line#package:}"
-  case "$package" in
-    *mydocanizer*|*localllm*) ;;
-    *) continue ;;
-  esac
-  if adb shell run-as "$package" sh -c 'test -d files/diagnostics' \
-      >/dev/null 2> "$diagnostics_dir/run-as-${package}.stderr"; then
-    printf '%s\\n' "$package" > "$diagnostics_dir/diagnostics-package.txt"
-    adb exec-out run-as "$package" sh -c '
-      for file in files/diagnostics/engine-*.log; do
-        [ -f "$file" ] || continue
-        printf "\\n===== %s =====\\n" "$file"
-        cat "$file"
-      done
-    ' > "$diagnostics_dir/app-process-diagnostics.txt" \
-      2> "$diagnostics_dir/app-diagnostics-pull.stderr" || true
-    adb shell dumpsys activity exit-info "$package" \
-      > "$diagnostics_dir/activity-exit-info.txt" \
-      2> "$diagnostics_dir/exit-info-pull.stderr" || true
-    break
-  fi
-done < "$diagnostics_dir/installed-third-party-packages.txt"
+if [[ -n "$target_app_id" ]] && adb shell run-as "$target_app_id" sh -c 'test -d files/diagnostics' \
+    >/dev/null 2> "$diagnostics_dir/run-as-target.stderr"; then
+  adb exec-out run-as "$target_app_id" sh -c '
+    for file in files/diagnostics/engine-*.log; do
+      [ -f "$file" ] || continue
+      printf "\n===== %s =====\n" "$file"
+      cat "$file"
+    done
+  ' > "$diagnostics_dir/app-process-diagnostics.txt" \
+    2> "$diagnostics_dir/app-diagnostics-pull.stderr" || true
+  adb shell dumpsys activity exit-info "$target_app_id" \
+    > "$diagnostics_dir/activity-exit-info.txt" \
+    2> "$diagnostics_dir/exit-info-pull.stderr" || true
+else
+  printf 'No readable diagnostics directory for instrumentation target package: %s\n' "${target_app_id:-unavailable}" \
+    > "$diagnostics_dir/app-diagnostics-pull.stderr"
+fi
 adb shell ps -A \
   > "$diagnostics_dir/process-list.txt" \
   2> "$diagnostics_dir/process-list.stderr" || true
