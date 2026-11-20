@@ -146,10 +146,17 @@ inline bool system_messages_are_prefix_only(const std::vector<bool>& system_mess
     return true;
 }
 
+// Hybrid/recurrent memory includes tensor-backed recurrent state in addition to
+// sequence metadata. Those models require llama_memory_clear(..., true) so the
+// attention and recurrent backing buffers are cleared together.
+inline bool requires_full_memory_data_clear(bool is_hybrid, bool is_recurrent) noexcept {
+    return is_hybrid || is_recurrent;
+}
+
 // Incremental KV/prefix reuse and context shifts are safe only for ordinary attention
 // models. Hybrid/recurrent architectures must always clear their full memory state.
 inline bool supports_incremental_memory_ops(bool is_hybrid, bool is_recurrent) noexcept {
-    return !is_hybrid && !is_recurrent;
+    return !requires_full_memory_data_clear(is_hybrid, is_recurrent);
 }
 
 // The cached token vector mirrors the exact length of sequence-0 KV state.

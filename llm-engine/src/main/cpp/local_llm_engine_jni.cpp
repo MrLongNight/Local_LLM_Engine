@@ -467,25 +467,36 @@ struct EngineInstance {
 #endif
     }
 
-    void clear_prompt_cache_identity() {
-        cached_prompt_identity = {};
-        has_cached_prompt_identity = false;
+    bool requires_full_memory_data_clear() const {
+        return model != nullptr && local_llm::requires_full_memory_data_clear(
+            llama_model_is_hybrid(model), llama_model_is_recurrent(model));
     }
 
-    bool clear_prompt_cache_state(llama_memory_t memory) {
+    bool clear_prompt_cache_state(
+            llama_memory_t memory,
+            const char* reason = "prompt_cache_invalidation") {
         if (memory == nullptr) {
             cached_tokens.clear();
+            system_prompt_position = 0;
             current_position = 0;
             stop_generation_position = 0;
             clear_prompt_cache_identity();
             LOGE("Cannot clear prompt cache because llama memory is unavailable");
             return false;
         }
-        llama_memory_clear(memory, false);
+        const bool clear_data = requires_full_memory_data_clear();
+        llama_memory_clear(memory, clear_data);
         cached_tokens.clear();
+        system_prompt_position = 0;
         current_position = 0;
         stop_generation_position = 0;
         clear_prompt_cache_identity();
+        if (clear_data) {
+            LOGI("LOCAL_LLM_FULL_MEMORY_CLEAR - reason=%s,hybrid=%d,recurrent=%d,data=true",
+                 reason != nullptr ? reason : "unspecified",
+                 llama_model_is_hybrid(model) ? 1 : 0,
+                 llama_model_is_recurrent(model) ? 1 : 0);
+        }
 
         const llama_pos memory_position_min = llama_memory_seq_pos_min(memory, 0);
         const llama_pos memory_position_max = llama_memory_seq_pos_max(memory, 0);
@@ -498,14 +509,21 @@ struct EngineInstance {
         return true;
     }
 
-    void reset_long_term(bool clear_kv = true) {
+    void reset_long_term(
+            bool clear_kv = true,
+            const char* reason = "long_term_reset") {
         chat_msgs.clear();
-        cached_tokens.clear();
-        clear_prompt_cache_identity();
-        system_prompt_position = 0;
-        current_position = 0;
         if (clear_kv && context != nullptr) {
-            llama_memory_clear(llama_get_memory(context), false);
+            if (!clear_prompt_cache_state(llama_get_memory(context), reason)) {
+                LOGE("Could not verify model memory reset: reason=%s",
+                     reason != nullptr ? reason : "unspecified");
+            }
+        } else {
+            cached_tokens.clear();
+            clear_prompt_cache_identity();
+            system_prompt_position = 0;
+            current_position = 0;
+            stop_generation_position = 0;
         }
     }
 
@@ -596,7 +614,7 @@ struct EngineInstance {
     // Caller must hold mtx.
     void unload_unlocked() {
         reset_short_term();
-        reset_long_term(false);
+        reset_long_term(true, "unload");
         detach_backend_sampler();
         if (sampler) {
             common_sampler_free(sampler);
@@ -627,6 +645,30 @@ struct EngineInstance {
         std::lock_guard<std::mutex> lock(mtx);
         unload_unlocked();
     }
+};
+
+class RecurrentMemoryClearOnException {
+public:
+    explicit RecurrentMemoryClearOnException(EngineInstance* engine)
+        : engine_(engine), uncaught_exceptions_(std::uncaught_exceptions()) {}
+
+    ~RecurrentMemoryClearOnException() noexcept {
+        if (engine_ == nullptr ||
+            std::uncaught_exceptions() <= uncaught_exceptions_ ||
+            !engine_->requires_full_memory_data_clear() ||
+            engine_->context == nullptr) {
+            return;
+        }
+        if (!engine_->clear_prompt_cache_state(
+                llama_get_memory(engine_->context), "native_exception")) {
+            engine_->last_finish_reason = 3;
+            LOGE("Could not verify hybrid/recurrent memory clear during native exception cleanup");
+        }
+    }
+
+private:
+    EngineInstance* engine_;
+    int uncaught_exceptions_;
 };
 
 
@@ -1064,6 +1106,17 @@ static jstring finish_native_generation(JNIEnv* env, EngineInstance* engine) {
             ",kind=FINAL_ASSISTANT_OUTPUT\n" + engine->assistant_ss.str());
     }
 #endif
+    if (engine != nullptr &&
+        (engine->last_finish_reason == 2 || engine->last_finish_reason == 3) &&
+        engine->requires_full_memory_data_clear() &&
+        engine->context != nullptr) {
+        const char* reason =
+            engine->last_finish_reason == 2 ? "terminal_cancelled" : "terminal_error";
+        if (!engine->clear_prompt_cache_state(llama_get_memory(engine->context), reason)) {
+            engine->last_finish_reason = 3;
+            LOGE("Could not verify complete hybrid/recurrent memory clear after %s", reason);
+        }
+    }
     flush_native_log_file();
     return final_piece;
 }
@@ -1712,7 +1765,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     report_model_load_stage(&progress_context, 0.86f); // native runtime ready
 
     engine->reset_short_term();
-    engine->reset_long_term(true);
+    engine->reset_long_term(true, "model_load");
     ++engine->model_generation;
     if (engine->model_generation == 0) ++engine->model_generation;
     engine->cancel_requested.store(false);
@@ -1871,6 +1924,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     // Covers prompt prefill and its llama_synchronize() call.
     VulkanProfileRunScope profile_run_scope(inference_run_id);
     std::lock_guard<std::mutex> lock(engine->mtx);
+    RecurrentMemoryClearOnException memory_clear_on_exception(engine);
     engine->inference_run_id = inference_run_id;
     // Copy/sync phase samples are scoped per token decode; map is retained
     // from model setup or the first logits output readback.
@@ -1878,6 +1932,15 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     // before entering JNI. Never clear it here: a Binder cancel racing with
     // nativeProcessChat must not be lost.
     engine->reset_short_term();
+
+    const bool memory_is_hybrid = engine->requires_full_memory_data_clear();
+    llama_memory_t memory = nullptr;
+    if (memory_is_hybrid) {
+        // Recurrent tensors are not safely reusable across independent requests.
+        // Clear both metadata and backing data before validation/rendering can fail.
+        memory = llama_get_memory(engine->context);
+        if (!engine->clear_prompt_cache_state(memory, "new_request")) return 4;
+    }
 
     jsize count = env->GetArrayLength(jroles);
     if (count == 0 || count != env->GetArrayLength(jcontents)) {
@@ -2283,13 +2346,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         engine->current_position = 0;
     }
 
-    llama_memory_t memory = llama_get_memory(engine->context);
+    if (memory == nullptr) memory = llama_get_memory(engine->context);
     if (memory == nullptr) {
         LOGE("Prompt cache cannot be evaluated because llama memory is unavailable");
         return 4;
     }
-    const bool memory_is_hybrid = llama_model_is_hybrid(engine->model) ||
-                                  llama_model_is_recurrent(engine->model);
     size_t reused_tokens = 0;
     if (engine->supports_incremental_memory_ops && !memory_is_hybrid) {
         const llama_pos memory_position_min = llama_memory_seq_pos_min(memory, 0);
@@ -2334,12 +2395,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
                 return 4;
             }
         }
+    } else if (memory_is_hybrid) {
+        // The complete attention + recurrent backing state was already cleared at
+        // request entry, before any prompt/sampler error could leave it reusable.
+        LOGI("Hybrid/recurrent model detected; full memory data was cleared for this request; partial sequence removal and context shifting are disabled");
     } else {
-        // Gated/recurrent and hybrid memory layouts are not prefix-removable.
-        if (!engine->clear_prompt_cache_state(memory)) return 4;
-        if (memory_is_hybrid) {
-            LOGI("Hybrid/recurrent model detected; partial sequence removal and context shifting are disabled");
-        }
+        LOGW("Incremental memory operations are disabled for an unclassified memory model; clearing before inference");
+        if (!engine->clear_prompt_cache_state(memory, "unsupported_memory_policy")) return 4;
     }
 
     if (reused_tokens > engine->cached_tokens.size()) reused_tokens = 0;
@@ -2368,19 +2430,18 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     engine->last_prompt_tokens = evaluated_prompt_tokens;
     if (dec_res == -2) {
         engine->last_finish_reason = 2; // CANCELLED during prompt prefill
-        llama_memory_clear(llama_get_memory(engine->context), false);
-        engine->cached_tokens.clear();
-        engine->current_position = 0;
-        engine->clear_prompt_cache_identity();
+        if (!engine->clear_prompt_cache_state(memory, "prompt_prefill_cancelled")) {
+            engine->last_finish_reason = 3;
+            return 4;
+        }
         LOGI("Prompt prefill cancelled cooperatively after %d of %d evaluated tokens",
              engine->last_prompt_tokens, evaluated_prompt_tokens);
         return 6; // dedicated cancellation result; not a decode error
     }
     if (dec_res != 0) {
-        llama_memory_clear(llama_get_memory(engine->context), false);
-        engine->cached_tokens.clear();
-        engine->current_position = 0;
-        engine->clear_prompt_cache_identity();
+        if (!engine->clear_prompt_cache_state(memory, "prompt_prefill_error")) {
+            engine->last_finish_reason = 3;
+        }
         LOGE("Prompt decoding failed with code %d", dec_res);
         return 4;
     }
@@ -2424,6 +2485,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     // context/model pointers so a close cannot free llama_context during this token step.
     std::lock_guard<std::mutex> lock(engine->mtx);
     if (!engine->model || !engine->context) return nullptr;
+    RecurrentMemoryClearOnException memory_clear_on_exception(engine);
 
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     // The Kotlin caller reads the trace after every native step, including a
@@ -2580,24 +2642,24 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         }
     }
     if (decode_result == 2) {
-        LOGI("Token decode aborted by native cancellation callback; invalidating partially evaluated KV state");
-        llama_memory_clear(llama_get_memory(engine->context), false);
-        engine->cached_tokens.clear();
-        engine->current_position = 0;
-        engine->system_prompt_position = 0;
-        engine->clear_prompt_cache_identity();
+        LOGI("Token decode aborted by native cancellation callback; invalidating partially evaluated memory state");
         engine->last_finish_reason = 2; // CANCELLED
+        if (!engine->requires_full_memory_data_clear() &&
+            !engine->clear_prompt_cache_state(
+                llama_get_memory(engine->context), "token_decode_cancelled")) {
+            engine->last_finish_reason = 3;
+        }
         engine->generation_finished = true;
         return finish_native_generation(env, engine);
     }
     if (decode_result != 0) {
-        LOGE("llama_decode failed during token generation with code %d; invalidating KV state", decode_result);
-        llama_memory_clear(llama_get_memory(engine->context), false);
-        engine->cached_tokens.clear();
-        engine->current_position = 0;
-        engine->system_prompt_position = 0;
-        engine->clear_prompt_cache_identity();
+        LOGE("llama_decode failed during token generation with code %d; invalidating memory state", decode_result);
         engine->last_finish_reason = 3; // ERROR
+        if (!engine->requires_full_memory_data_clear() &&
+            !engine->clear_prompt_cache_state(
+                llama_get_memory(engine->context), "token_decode_error")) {
+            engine->last_finish_reason = 3;
+        }
         engine->generation_finished = true;
         return finish_native_generation(env, engine);
     }

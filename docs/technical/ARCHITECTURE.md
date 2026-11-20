@@ -111,6 +111,7 @@ sequenceDiagram
   Client->>Service: AIDL inference request
   Service->>Impl: Stream inference
   Impl->>JNI: Prompt evaluation and token generation
+  Note over JNI: Hybrid/recurrent models clear attention and recurrent backing data before every new request, and again after cancellation or error; model replacement and unload clear before context teardown. Ordinary attention models retain guarded prefix reuse.
   JNI-->>Impl: Progress and token pieces (control/special IDs and malformed UTF-8 rejected natively)
   Note over JNI,Impl: Kotlin output gate rejects empty/invalid/control text; MAX_TOKENS is explicitly marked TRUNCATED
   Impl-->>Service: Inference events

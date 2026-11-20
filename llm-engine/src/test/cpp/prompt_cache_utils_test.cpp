@@ -38,8 +38,12 @@ int main() {
     assert(!local_llm::is_valid_token_id(0, 0));
     assert(!local_llm::is_valid_token_id(0, -1));
 
-    // Incremental KV reuse/context shifting stays disabled for either hybrid
-    // or recurrent memory. Only ordinary-attention models may enter the prefix cache.
+    // Hybrid/recurrent models require the full data-buffer clear; ordinary attention
+    // keeps metadata-only invalidation and may use incremental prefix operations.
+    assert(!local_llm::requires_full_memory_data_clear(false, false));
+    assert(local_llm::requires_full_memory_data_clear(true, false));
+    assert(local_llm::requires_full_memory_data_clear(false, true));
+    assert(local_llm::requires_full_memory_data_clear(true, true));
     assert(local_llm::supports_incremental_memory_ops(false, false));
     assert(!local_llm::supports_incremental_memory_ops(true, false));
     assert(!local_llm::supports_incremental_memory_ops(false, true));
