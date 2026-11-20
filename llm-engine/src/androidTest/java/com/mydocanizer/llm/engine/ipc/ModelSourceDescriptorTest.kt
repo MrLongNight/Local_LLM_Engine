@@ -87,11 +87,21 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             gpuLayers = 0,
             timeoutConfig = timeoutConfig
         )
+        val clientPid = Process.myPid()
         val client = InferenceClient(resolverContext, timeoutConfig = timeoutConfig)
         var directBinding: BoundInferenceService? = null
         try {
             assertTrue("Inference service must initialize for ContentUri loading",
                 client.initialize().isSuccess)
+
+            val binding = bindInferenceService(appContext)
+            directBinding = binding
+            val servicePid = binding.pid
+            assertTrue("Client and inference service must own descriptors in separate processes",
+                clientPid != servicePid)
+            assertEquals(client.remotePid.value, servicePid)
+            val serviceDescriptorBaseline = descriptorCountFor(servicePid, modelFiles)
+            val clientDescriptorBaseline = descriptorCountFor(clientPid, modelFiles)
 
             val loaded = client.loadModel(
                 ModelSource.ContentUri(modelUri.toString(), modelFile.name),
@@ -117,15 +127,19 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
                 }
             )
 
-            directBinding = bindInferenceService(appContext)
-            assertEquals(client.remotePid.value, directBinding.pid)
+            // Binder's in-PFD gives the service one owned descriptor; JNI dup()/fdopen()
+            // gives the native model a second. The client's temporary copy must be closed
+            // before loadModel returns, while both service-side copies remain until unload.
+            awaitDescriptorCount(servicePid, modelFiles, expectedCount = serviceDescriptorBaseline + 2)
+            awaitDescriptorCount(clientPid, modelFiles, expectedCount = clientDescriptorBaseline)
+
             val loadedDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
-            var serviceStatus = directBinding.service.status
+            var serviceStatus = binding.service.status
             while (serviceStatus != "MODEL_LOADED" &&
                 SystemClock.elapsedRealtime() < loadedDeadline
             ) {
                 SystemClock.sleep(PROCESS_POLL_INTERVAL_MS)
-                serviceStatus = runCatching { directBinding?.service?.status ?: "DISCONNECTED" }
+                serviceStatus = runCatching { binding.service.status }
                     .getOrDefault("DISCONNECTED")
             }
             assertEquals("Remote :inference service must own the loaded model descriptor",
@@ -157,7 +171,8 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             assertTrue("Unloading must release the service-owned descriptor: ${unloaded.exceptionOrNull()}",
                 unloaded.isSuccess)
             assertEquals(null, client.currentModel.value)
-            assertEquals("READY", directBinding.service.status)
+            assertEquals("READY", binding.service.status)
+            awaitDescriptorCount(servicePid, modelFiles, expectedCount = serviceDescriptorBaseline)
 
             val reloaded = client.loadModel(
                 ModelSource.ContentUri(modelUri.toString(), modelFile.name),
@@ -166,9 +181,12 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             assertTrue("The original provider URI must be reopenable after unload: ${reloaded.exceptionOrNull()}",
                 reloaded.isSuccess)
             assertEquals(modelUri.toString(), client.currentModel.value?.path)
+            awaitDescriptorCount(servicePid, modelFiles, expectedCount = serviceDescriptorBaseline + 2)
+            awaitDescriptorCount(clientPid, modelFiles, expectedCount = clientDescriptorBaseline)
             val finalUnload = client.unloadModel()
             assertTrue("Final provider reload must release its descriptor: ${finalUnload.exceptionOrNull()}",
                 finalUnload.isSuccess)
+            awaitDescriptorCount(servicePid, modelFiles, expectedCount = serviceDescriptorBaseline)
         } finally {
             client.close()
             directBinding?.let { binding ->
