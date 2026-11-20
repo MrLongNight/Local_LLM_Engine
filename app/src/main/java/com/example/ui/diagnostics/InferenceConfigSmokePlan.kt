@@ -92,7 +92,7 @@ internal object InferenceConfigSmokePlan {
      */
     private fun matchesD0ReferenceIdentity(candidate: String): Boolean {
         val normalized = candidate.lowercase()
-            .replace(Regex("""\b0?4(?:[.,]0)?\s*b\b"""), "4b")
+            .replace(Regex("""(?<![a-z0-9])0?4(?:[.,]0)?b(?![a-z0-9])"""), "4b")
             .replace(Regex("""[^a-z0-9]+"""), " ")
             .trim()
         val tokens = normalized.split(Regex("""\s+"""))
