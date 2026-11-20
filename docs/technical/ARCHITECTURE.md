@@ -71,6 +71,7 @@ sequenceDiagram
   autonumber
   participant Screen as Prototype screen
   participant VM as Shared EngineViewModel
+  participant Library as ModelLibrary
   participant API as LocalLlmEngine
   participant Client as InferenceClient
   participant Resolver as ModelSourceResolver
@@ -78,8 +79,16 @@ sequenceDiagram
   participant Impl as LocalLlmEngineImpl
   participant JNI as JNI and llama.cpp
 
-  Screen->>VM: User selects GGUF or starts chat
-  VM->>API: loadModel(source, config)
+  Screen->>VM: User selects one or multiple GGUF documents
+  VM->>Library: importFromSaf(uri) — same path for single and multi-select
+  Library->>Resolver: resolveToFile(ContentUri)
+  Resolver->>Resolver: Validate GGUF, hash and atomically publish private copy
+  Resolver-->>Library: Private model file
+  Library-->>VM: Imported model entry
+  VM-->>Screen: Refresh imported model list
+
+  Screen->>VM: User selects an imported model or starts chat
+  VM->>API: loadModel(FilePath, config)
   API->>Client: loadModel(source, config)
   Client->>Resolver: resolveToFile(source)
   alt SAF ContentUri, AssetPath or RemoteUrl
