@@ -30,7 +30,7 @@ collector_stop_file="$diagnostics_dir/.stop-device-diagnostics-collector"
 rm -f "$collector_stop_file"
 
 collect_device_diagnostics() {
-  local loop_count=0 package_path app_pids app_tmp app_err app_clean_tmp
+  local loop_count=0 package_path app_pids app_tmp app_err app_clean_tmp app_listing app_log_tmp file found
   local exit_tmp exit_err process_tmp app_captured=false exit_info_captured=false process_list_captured=false
   local last_app_attempt="No app process observed yet."
 
@@ -51,55 +51,80 @@ collect_device_diagnostics() {
         app_err="$diagnostics_dir/.app-diagnostics-pull.stderr.tmp"
         app_clean_tmp="$diagnostics_dir/.app-process-diagnostics.clean.tmp"
 
-        # The explicit completion marker is important: adb shell/exec transports
-        # can return success even when run-as itself prints an error to stdout.
-        # Never accept a non-empty error message as a captured diagnostics file.
-        if adb shell run-as "$target_package" sh -c '
-          set -eu
+        # Avoid a nested remote "sh -c" here. adb shell argument quoting can
+        # strip the script argument, leaving run-as to invoke sh -c without a
+        # command. List the app-private files directly, then stream each file
+        # with exec-out so no second shell parses a multiline command.
+        app_tmp="$diagnostics_dir/.app-process-diagnostics.tmp"
+        app_err="$diagnostics_dir/.app-diagnostics-pull.stderr.tmp"
+        app_clean_tmp="$diagnostics_dir/.app-process-diagnostics.clean.tmp"
+        app_listing="$diagnostics_dir/.app-diagnostics-files.tmp"
+        : > "$app_tmp"
+        : > "$app_err"
+
+        if adb shell run-as "$target_package" ls -1 files/diagnostics \
+            > "$app_listing" 2> "$app_err"; then
           found=0
-          for file in files/diagnostics/engine-*.log; do
-            [ -f "$file" ] || continue
-            printf "\\n===== %s =====\\n" "$file"
-            cat "$file"
-            found=$((found + 1))
-          done
-          [ "$found" -gt 0 ]
-          printf "APP_DIAGNOSTICS_CAPTURE_OK files=%s\\n" "$found"
-        ' > "$app_tmp" 2> "$app_err"; then
-          tr -d '\r' < "$app_tmp" > "$app_clean_tmp"
-          if grep -Eq '^APP_DIAGNOSTICS_CAPTURE_OK files=[1-9][0-9]*$' "$app_clean_tmp" &&
-              grep -Eq '^===== files/diagnostics/engine-[0-9]+\.log =====$' "$app_clean_tmp" &&
-              grep -q 'APP_PROCESS_LOG_PERSISTENCE_PROBE' "$app_clean_tmp"; then
-            sed -E '/^APP_DIAGNOSTICS_CAPTURE_OK files=[0-9]+$/d' "$app_clean_tmp" \
-              > "$diagnostics_dir/app-process-diagnostics.txt"
-            : > "$diagnostics_dir/run-as-target.stderr"
-            : > "$diagnostics_dir/app-diagnostics-pull.stderr"
-            app_captured=true
-            last_app_attempt="Captured engine logs for app PID(s) ${app_pids}."
-            printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt" \
-              >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
+          while IFS= read -r file || [[ -n "$file" ]]; do
+            file="$(printf '%s' "$file" | tr -d '\r')"
+            [[ "$file" =~ ^engine-[0-9]+\.log$ ]] || continue
+            app_log_tmp="$diagnostics_dir/.app-diagnostics-$file.tmp"
+            if adb exec-out run-as "$target_package" cat "files/diagnostics/$file" \
+                > "$app_log_tmp" 2>> "$app_err" && [[ -s "$app_log_tmp" ]]; then
+              printf '===== files/diagnostics/%s =====\n' "$file" >> "$app_tmp"
+              cat "$app_log_tmp" >> "$app_tmp"
+              printf '\n' >> "$app_tmp"
+              found=$((found + 1))
+            fi
+            rm -f "$app_log_tmp"
+          done < "$app_listing"
+
+          if (( found > 0 )); then
+            printf 'APP_DIAGNOSTICS_CAPTURE_OK files=%s\n' "$found" >> "$app_tmp"
+            tr -d '\r' < "$app_tmp" > "$app_clean_tmp"
+            if grep -Eq '^APP_DIAGNOSTICS_CAPTURE_OK files=[1-9][0-9]*$' "$app_clean_tmp" &&
+                grep -Eq '^===== files/diagnostics/engine-[0-9]+\.log =====$' "$app_clean_tmp" &&
+                grep -q 'APP_PROCESS_LOG_PERSISTENCE_PROBE' "$app_clean_tmp"; then
+              sed -E '/^APP_DIAGNOSTICS_CAPTURE_OK files=[0-9]+$/d' "$app_clean_tmp" \
+                > "$diagnostics_dir/app-process-diagnostics.txt"
+              : > "$diagnostics_dir/run-as-target.stderr"
+              : > "$diagnostics_dir/app-diagnostics-pull.stderr"
+              app_captured=true
+              last_app_attempt="Captured engine logs for app PID(s) $app_pids."
+              printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt" \
+                >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
+            else
+              last_app_attempt="run-as listed engine logs but the snapshot did not contain the required persistence probe for app PID(s) $app_pids."
+              if [[ "$app_captured" != true ]]; then
+                cp "$app_err" "$diagnostics_dir/run-as-target.stderr" 2>/dev/null || true
+                {
+                  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt"
+                  sed -n '1,20p' "$app_clean_tmp"
+                  sed -n '1,20p' "$app_err"
+                } >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
+              fi
+            fi
           else
-            last_app_attempt="run-as returned without a valid engine-log completion marker for app PID(s) ${app_pids}."
+            last_app_attempt="run-as listed files/diagnostics but no readable engine-*.log snapshot was found for app PID(s) $app_pids."
             if [[ "$app_captured" != true ]]; then
               cp "$app_err" "$diagnostics_dir/run-as-target.stderr" 2>/dev/null || true
               {
                 printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt"
-                sed -n '1,20p' "$app_clean_tmp"
+                sed -n '1,20p' "$app_err"
               } >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
             fi
           fi
         else
-          last_app_attempt="run-as command failed for app PID(s) ${app_pids}."
+          last_app_attempt="run-as could not list files/diagnostics for app PID(s) $app_pids."
           if [[ "$app_captured" != true ]]; then
             cp "$app_err" "$diagnostics_dir/run-as-target.stderr" 2>/dev/null || true
             {
               printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt"
-              sed -n '1,20p' "$app_tmp" 2>/dev/null || true
-              sed -n '1,20p' "$app_err" 2>/dev/null || true
+              sed -n '1,20p' "$app_err"
             } >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
           fi
         fi
-        rm -f "$app_tmp" "$app_err" "$app_clean_tmp"
+        rm -f "$app_tmp" "$app_err" "$app_clean_tmp" "$app_listing"
       fi
 
       # These snapshots are independent of run-as and are sampled less often
