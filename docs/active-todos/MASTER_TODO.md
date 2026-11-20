@@ -108,6 +108,7 @@
 - [ ] **P1-03a** 🛠️ AGENT · CODE/TESTS · M · Impact M — Für HTTPS-Downloads eine harte, konfigurierbare Dateigrößenobergrenze und eine Prüfung des freien Speichers implementieren. `Content-Length` nur als Hinweis verwenden; Streaming darf die Grenze nicht umgehen.
 - [ ] **P1-03b** 🛠️ AGENT · CODE/TESTS · S · Impact M — Temporäre Download-Dateien bei Fehler, Abbruch und ungültigem GGUF zuverlässig bereinigen. Nur vollständig validierte Dateien atomar veröffentlichen; vorhandene valide Modelle nicht beschädigen.
 - [ ] **P1-03c** 🛠️ AGENT · CODE/TESTS · M · Impact M — Retry/Backoff und Resume nur für den Fall implementieren, dass `RemoteUrl` als Engine-Funktion beibehalten wird. Range-/ETag-Konsistenz, Server ohne Range-Support und abweichende Teildateien gezielt testen.
+- [ ] **P1-03d** 🛠️ AGENT · CODE/TESTS · S · Impact M — Einzel- und Mehrfachauswahl von SAF-GGUFs über denselben Importpfad in die private Modellbibliothek führen. Gleiche GGUF-Prüfung, SHA-/Content-Addressed-Persistenz und Modelllisten-Sichtbarkeit; die Anzahl ausgewählter Dateien ist der einzige Import-Unterschied. Regressionstest für beide Auswahlarten ergänzen. Fehlender SHA bei einem direkten Descriptor darf die funktionale Inferenz nicht blockieren.
 
 ### P1-04 — Laufzeitstatus und Diagnostik
 
