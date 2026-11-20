@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.ui.EngineViewModel
+import com.example.ui.diagnostics.ConfigurationSmokeProgress
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.ModelInfo
@@ -30,6 +31,9 @@ fun SettingsScreen(
     val systemPrompt: String by viewModel.systemPrompt.collectAsState()
     val currentModel: ModelInfo? by viewModel.currentModel.collectAsState()
     val isBenchmarking: Boolean by viewModel.isBenchmarking.collectAsState()
+    val isConfigSmokeTesting: Boolean by viewModel.isConfigSmokeTesting.collectAsState()
+    val configurationSmokeProgress: ConfigurationSmokeProgress? by
+        viewModel.configurationSmokeProgress.collectAsState()
     val benchmarkReport: String? by viewModel.benchmarkReport.collectAsState()
     val isGenerating: Boolean by viewModel.isGenerating.collectAsState()
     val isImporting: Boolean by viewModel.isImporting.collectAsState()
@@ -73,6 +77,8 @@ fun SettingsScreen(
             BackendAcceptanceTestSection(
                 currentModel = currentModel,
                 isBenchmarking = isBenchmarking,
+                isConfigSmokeTesting = isConfigSmokeTesting,
+                configurationSmokeProgress = configurationSmokeProgress,
                 isGenerating = isGenerating,
                 isImporting = isImporting,
                 viewModel = viewModel

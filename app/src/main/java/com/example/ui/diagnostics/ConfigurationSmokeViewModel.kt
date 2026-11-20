@@ -50,7 +50,47 @@ abstract class ConfigurationSmokeViewModel(
     private val _configSmokeReport = MutableStateFlow<String?>(null)
     val configSmokeReport: StateFlow<String?> = _configSmokeReport.asStateFlow()
 
+    private val _configurationSmokeProgress = MutableStateFlow<ConfigurationSmokeProgress?>(null)
+    val configurationSmokeProgress: StateFlow<ConfigurationSmokeProgress?> =
+        _configurationSmokeProgress.asStateFlow()
+
     private var configurationSmokeJob: Job? = null
+
+    private fun publishSmokeProgress(
+        phase: ConfigurationSmokePhase,
+        currentStep: Int,
+        message: String,
+        profileLabel: String? = null,
+        promptTokensProcessed: Int? = null,
+        promptTokensTotal: Int? = null,
+        generatedTokens: Int? = null,
+        tokenLimit: Int? = null,
+        tokensPerSecond: Double? = null
+    ) {
+        _configurationSmokeProgress.value = ConfigurationSmokeProgress(
+            status = ConfigurationSmokeRunStatus.RUNNING,
+            phase = phase,
+            message = message,
+            currentStep = currentStep,
+            profileLabel = profileLabel,
+            promptTokensProcessed = promptTokensProcessed,
+            promptTokensTotal = promptTokensTotal,
+            generatedTokens = generatedTokens,
+            tokenLimit = tokenLimit,
+            tokensPerSecond = tokensPerSecond
+        )
+    }
+
+    private fun rejectSmokeRun(message: String) {
+        _configSmokeReport.value = message
+        _errorMessage.value = message
+        _configurationSmokeProgress.value = ConfigurationSmokeProgress(
+            status = ConfigurationSmokeRunStatus.REJECTED,
+            phase = ConfigurationSmokePhase.PREPARING,
+            message = message,
+            currentStep = 1
+        )
+    }
 
     /**
      * Short, fixed CPU-reference/Vulkan-candidate comparison using the same model
@@ -64,17 +104,26 @@ abstract class ConfigurationSmokeViewModel(
     fun runGeneralConfigurationSmokeTest() = startConfigurationSmokeTest(requireD0Reference = false)
 
     private fun startConfigurationSmokeTest(requireD0Reference: Boolean) {
-        if (_isBenchmarking.value || _isConfigSmokeTesting.value) return
+        if (_isConfigSmokeTesting.value) return
+        if (_isBenchmarking.value) {
+            rejectSmokeRun("Ein anderer Benchmark läuft bereits. Bitte warten, bis dieser abgeschlossen ist.")
+            return
+        }
         if (_isGenerating.value || _isImporting.value) {
-            _errorMessage.value = "Konfigurationstest erst starten, wenn keine Inferenz oder Modell-Operation läuft."
+            rejectSmokeRun("Konfigurationstest erst starten, wenn keine Inferenz oder Modell-Operation läuft.")
             return
         }
         val model = currentModel.value
         if (model == null) {
-            _errorMessage.value = "Bitte zuerst ein GGUF-Modell laden."
+            rejectSmokeRun("Bitte zuerst ein GGUF-Modell laden.")
             return
         }
 
+        publishSmokeProgress(
+            phase = ConfigurationSmokePhase.PREPARING,
+            currentStep = 1,
+            message = "Prüfe Modellidentität und bereite CPU-/Vulkan-Vergleich vor…"
+        )
         val referenceAssessment = InferenceConfigSmokePlan.assessD0ReferenceModel(model)
         val testMode = if (requireD0Reference) "D0_REFERENCE" else "GENERAL_MODEL_AGNOSTIC"
         val d0BaselineEligible = requireD0Reference && referenceAssessment.baselineEligible
@@ -87,10 +136,10 @@ abstract class ConfigurationSmokeViewModel(
                     "architecture=${model.architecture},parameters=${model.parameterCount}," +
                     "shaStatus=${referenceAssessment.shaStatus}"
             )
-            _configSmokeReport.value =
-                "D0-Referenzlauf nicht gestartet: REFERENCE_MODEL_MISMATCH ($reason). " +
-                    "Bitte Qwen3-4B-Instruct-2507 Q4_K_M laden. Für andere Modelle den allgemeinen CPU/Vulkan-Test verwenden."
-            _errorMessage.value = "Falsches Referenzmodell: " + reason
+            rejectSmokeRun(
+                "D0 nicht gestartet: falsches Referenzmodell ($reason). " +
+                    "Bitte Qwen3-4B-Instruct-2507 Q4_K_M laden. Andere Modelle nur über den allgemeinen CPU/Vulkan-Test prüfen."
+            )
             return
         }
 
@@ -105,10 +154,19 @@ abstract class ConfigurationSmokeViewModel(
             Runtime.getRuntime().availableProcessors()
         )
         if (profiles.isEmpty()) {
-            _errorMessage.value = "Kein Vulkan-Diagnoseprofil verfügbar."
+            rejectSmokeRun("Kein Vulkan-Diagnoseprofil verfügbar.")
             return
         }
 
+        publishSmokeProgress(
+            phase = ConfigurationSmokePhase.PREPARING,
+            currentStep = 1,
+            message = if (requireD0Reference && !d0BaselineEligible) {
+                "Referenzmodell erkannt, aber SHA-256 fehlt. Dieser Lauf ist nur eine Funktionsprüfung und keine vergleichbare D0-Baseline."
+            } else {
+                "Referenzmodell geprüft. CPU- und Vulkan-Test werden vorbereitet…"
+            }
+        )
         _isBenchmarking.value = true
         _isConfigSmokeTesting.value = true
         _configSmokeReport.value = "Konfigurationstest wird vorbereitet…"
@@ -124,6 +182,9 @@ abstract class ConfigurationSmokeViewModel(
             var restoreRequired = false
             val confirmedBackends = mutableListOf<String>()
             var stoppedReason: String? = null
+            var pairedGateCombinedStatus: String? = null
+            var cancelledByUser = false
+            var restoreFailed = false
             EngineDiagnostics.info(
                 "config_test",
                 "CONFIG_SMOKE_STARTED",
@@ -189,9 +250,17 @@ abstract class ConfigurationSmokeViewModel(
                             break
                         }
 
+                        restoreRequired = true
+                        val isCpuProfile = profile.expectedBackend == "CPU"
+                        publishSmokeProgress(
+                            phase = if (isCpuProfile) ConfigurationSmokePhase.CPU_MODEL_LOADING
+                                else ConfigurationSmokePhase.VULKAN_MODEL_LOADING,
+                            currentStep = if (isCpuProfile) 2 else 4,
+                            message = profile.label + ": Modell wird für dieses Backend neu geladen…",
+                            profileLabel = profile.label
+                        )
                         _configSmokeReport.value =
                             "Profil " + (index + 1) + "/" + profiles.size + ": " + profile.label + " – Modell wird neu geladen…"
-                        restoreRequired = true
                         val loadStart = System.nanoTime()
                         val loadResult = engine.loadModel(source, profile.config)
                         profileLoadMs = (System.nanoTime() - loadStart) / 1_000_000L
@@ -258,6 +327,13 @@ abstract class ConfigurationSmokeViewModel(
                             "UNAVAILABLE"
                         }
 
+                        publishSmokeProgress(
+                            phase = if (profile.expectedBackend == "CPU") ConfigurationSmokePhase.CPU_INFERENCE
+                                else ConfigurationSmokePhase.VULKAN_INFERENCE,
+                            currentStep = if (profile.expectedBackend == "CPU") 3 else 5,
+                            message = profile.label + ": Inferenz startet. Prompt und Tokenfortschritt werden live angezeigt…",
+                            profileLabel = profile.label
+                        )
                         val sample = collectConfigurationSmokeSample(
                             InferenceConfigSmokePlan.MEASURED_TOKENS,
                             profile.id + ":measured"
@@ -486,6 +562,11 @@ abstract class ConfigurationSmokeViewModel(
                         }
                     }
                 }
+                publishSmokeProgress(
+                    phase = ConfigurationSmokePhase.CHECKING_RESULTS,
+                    currentStep = 6,
+                    message = "CPU-/Vulkan-Ausgaben, Finish-Grund und numerische Token-Parität werden geprüft…"
+                )
                 val cpuSample = profileSamples["cpu-reference"]
                 val vulkanSample = profileSamples["vulkan-candidate"]
                 var numericGate: EngineDiagnostics.BackendCorrectnessResult? = null
@@ -499,6 +580,7 @@ abstract class ConfigurationSmokeViewModel(
                         requireNotNull(vulkanSample).result.nativeRunId
                     ).also { numericGate = it }.status
                 }
+                pairedGateCombinedStatus = pairedGateSummary.combinedStatus
                 val gate = numericGate ?: EngineDiagnostics.BackendCorrectnessResult(
                     "UNAVAILABLE",
                     "CPU_OR_VULKAN_RUN_MISSING"
@@ -543,6 +625,7 @@ abstract class ConfigurationSmokeViewModel(
                     rows += "Keine Performance-/Kernel-Konfiguration durch diesen Lauf freigegeben."
                 }
             } catch (cancelled: CancellationException) {
+                cancelledByUser = true
                 stoppedReason = "Vom Nutzer abgebrochen."
                 rows += "ABGEBROCHEN: Der laufende Test wurde beendet."
                 EngineDiagnostics.info("config_test", "CONFIG_SMOKE_CANCELLED")
@@ -577,6 +660,11 @@ abstract class ConfigurationSmokeViewModel(
                     }
                 }
                 if (restoreRequired) {
+                    publishSmokeProgress(
+                        phase = ConfigurationSmokePhase.RESTORING_MODEL,
+                        currentStep = 7,
+                        message = "Stelle die ursprüngliche Modellkonfiguration wieder her…"
+                    )
                     _configSmokeReport.value = "Stelle die ursprüngliche Modellkonfiguration wieder her…"
                     withContext(NonCancellable) {
                         runCatching { engine.loadModel(source, originalConfig).getOrThrow() }
@@ -589,6 +677,7 @@ abstract class ConfigurationSmokeViewModel(
                                 )
                             }
                             .onFailure { error ->
+                                restoreFailed = true
                                 rows += "KRITISCH: Restore fehlgeschlagen: " + (error.message ?: error.javaClass.simpleName)
                                 EngineDiagnostics.error("config_test", "CONFIG_SMOKE_RESTORE_FAILED", error)
                             }
@@ -611,6 +700,29 @@ abstract class ConfigurationSmokeViewModel(
                     if (stoppedReason != null) appendLine("Hinweis: " + stoppedReason)
                     append("Restore-Status steht im Diagnoseexport.")
                 }
+                val terminalStatus = when {
+                    cancelledByUser -> ConfigurationSmokeRunStatus.CANCELLED
+                    pairedGateCombinedStatus == "PASS" && !restoreFailed &&
+                        (!requireD0Reference || d0BaselineEligible) -> ConfigurationSmokeRunStatus.PASSED
+                    else -> ConfigurationSmokeRunStatus.FAILED
+                }
+                val terminalMessage = when {
+                    cancelledByUser -> "Test abgebrochen. Die sichere Wiederherstellung ist abgeschlossen."
+                    restoreFailed -> "Test beendet, aber die ursprüngliche Modellkonfiguration konnte nicht wiederhergestellt werden."
+                    pairedGateCombinedStatus == "PASS" && requireD0Reference && !d0BaselineEligible ->
+                        "CPU-/Vulkan-Funktionstest bestanden, aber keine vergleichbare D0-Baseline: SHA-256 fehlt."
+                    pairedGateCombinedStatus == "PASS" ->
+                        "CPU-/Vulkan-Gesamtgate: PASS. Ursprüngliche Modellkonfiguration wiederhergestellt."
+                    else ->
+                        "Test beendet: " + (pairedGateCombinedStatus ?: "FAIL/UNAVAILABLE") +
+                            ". Details und konkrete Gate-Gründe stehen im Testergebnis darunter."
+                }
+                _configurationSmokeProgress.value = ConfigurationSmokeProgress(
+                    status = terminalStatus,
+                    phase = ConfigurationSmokePhase.COMPLETE,
+                    message = terminalMessage,
+                    currentStep = 7
+                )
                 _isConfigSmokeTesting.value = false
                 _isBenchmarking.value = false
                 configurationSmokeJob = null
@@ -624,6 +736,9 @@ abstract class ConfigurationSmokeViewModel(
         engine.cancelInference()
         configurationSmokeJob?.cancel(CancellationException("Configuration smoke test cancelled"))
         _configSmokeReport.value = "Abbruch angefordert – sichere Wiederherstellung wird ausgeführt…"
+        _configurationSmokeProgress.value = _configurationSmokeProgress.value?.copy(
+            message = "Abbruch angefordert – die laufende Inferenz wird beendet und die ursprüngliche Konfiguration wiederhergestellt."
+        )
     }
 
     private class ConfigurationSmokeModelIdentityException(message: String) : IllegalStateException(message)
@@ -713,6 +828,19 @@ abstract class ConfigurationSmokeViewModel(
         var failedPartialText: String? = null
         val prompt = InferenceConfigSmokePlan.USER_PROMPT
         val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
+        val isCpuProfile = diagnosticLabel.startsWith("cpu-reference")
+        val profileLabel = if (isCpuProfile) "CPU-Referenz" else "Vulkan-Kandidat"
+        val inferencePhase = if (isCpuProfile) ConfigurationSmokePhase.CPU_INFERENCE
+            else ConfigurationSmokePhase.VULKAN_INFERENCE
+        val inferenceStep = if (isCpuProfile) 3 else 5
+        var promptTokensProcessed = 0
+        publishSmokeProgress(
+            phase = inferencePhase,
+            currentStep = inferenceStep,
+            message = profileLabel + ": Prompt wird vorbereitet…",
+            profileLabel = profileLabel,
+            tokenLimit = maxTokens
+        )
         EngineDiagnostics.testText(
             "config_test",
             "CONFIG_SMOKE_TEST_INPUT",
@@ -730,15 +858,56 @@ abstract class ConfigurationSmokeViewModel(
             ).collect { event ->
             currentCoroutineContext().ensureActive()
             when (event) {
-                is InferenceEvent.Progress -> if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION) {
-                    promptElapsedMs = event.elapsedMs
-                    promptTokens = event.promptTokensTotal
+                is InferenceEvent.Progress -> {
+                    if (event.phase == InferenceEvent.ProgressPhase.PROMPT_EVALUATION) {
+                        promptElapsedMs = event.elapsedMs
+                        promptTokens = event.promptTokensTotal
+                        promptTokensProcessed = event.promptTokensProcessed
+                    }
+                    val progressMessage = when (event.phase) {
+                        InferenceEvent.ProgressPhase.PROMPT_PREPARATION ->
+                            profileLabel + ": Prompt wird vorbereitet…"
+                        InferenceEvent.ProgressPhase.PROMPT_EVALUATION ->
+                            profileLabel + ": Prompt-Verarbeitung " +
+                                event.promptTokensProcessed + "/" + event.promptTokensTotal + " Tokens"
+                        InferenceEvent.ProgressPhase.WAITING_FOR_FIRST_TOKEN ->
+                            profileLabel + ": Prompt verarbeitet; warte auf das erste Token…"
+                        InferenceEvent.ProgressPhase.GENERATING ->
+                            profileLabel + ": Generierung " + event.tokensGenerated + "/" + maxTokens +
+                                " Tokens" + if (event.tokensPerSecond > 0.0) {
+                                    " · " + String.format(java.util.Locale.US, "%.2f", event.tokensPerSecond) + " Token/s"
+                                } else {
+                                    ""
+                                }
+                    }
+                    publishSmokeProgress(
+                        phase = inferencePhase,
+                        currentStep = inferenceStep,
+                        message = progressMessage,
+                        profileLabel = profileLabel,
+                        promptTokensProcessed = event.promptTokensProcessed.takeIf { event.promptTokensTotal > 0 },
+                        promptTokensTotal = event.promptTokensTotal.takeIf { it > 0 },
+                        generatedTokens = event.tokensGenerated,
+                        tokenLimit = maxTokens,
+                        tokensPerSecond = event.tokensPerSecond.takeIf { it > 0.0 }
+                    )
                 }
                 is InferenceEvent.Token -> {
                     streamedOutput.append(event.token)
                     if (firstTokenMs == null) {
                         firstTokenMs = (System.nanoTime() - started) / 1_000_000L
                     }
+                    publishSmokeProgress(
+                        phase = inferencePhase,
+                        currentStep = inferenceStep,
+                        message = profileLabel + ": Generierung " +
+                            (event.tokenIndex + 1).coerceAtMost(maxTokens) + "/" + maxTokens + " Tokens",
+                        profileLabel = profileLabel,
+                        promptTokensProcessed = promptTokens.takeIf { it > 0 },
+                        promptTokensTotal = promptTokens.takeIf { it > 0 },
+                        generatedTokens = (event.tokenIndex + 1).coerceAtMost(maxTokens),
+                        tokenLimit = maxTokens
+                    )
                 }
                 is InferenceEvent.Completed -> completed = event.result
                 is InferenceEvent.Error -> {
@@ -796,6 +965,18 @@ abstract class ConfigurationSmokeViewModel(
         val outputGatePassed = result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP &&
             InferenceConfigSmokePlan.normalizeOutput(result.text) == expectedOutput &&
             result.tokensGenerated >= 4
+        publishSmokeProgress(
+            phase = inferencePhase,
+            currentStep = inferenceStep,
+            message = profileLabel + ": Inferenz beendet (" + result.finishReason.name +
+                ", " + result.tokensGenerated + "/" + maxTokens + " Tokens). Prüfe Ausgabe…",
+            profileLabel = profileLabel,
+            promptTokensProcessed = promptTokens.takeIf { it > 0 },
+            promptTokensTotal = promptTokens.takeIf { it > 0 },
+            generatedTokens = result.tokensGenerated,
+            tokenLimit = maxTokens,
+            tokensPerSecond = result.tokensPerSecond.takeIf { it > 0.0 }
+        )
         return ConfigurationSmokeSample(
             result, firstTokenMs, promptElapsedMs, promptTokens, outputGatePassed
         )
