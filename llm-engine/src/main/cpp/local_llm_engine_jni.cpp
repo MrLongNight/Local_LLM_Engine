@@ -467,6 +467,11 @@ struct EngineInstance {
 #endif
     }
 
+    void clear_prompt_cache_identity() {
+        cached_prompt_identity = {};
+        has_cached_prompt_identity = false;
+    }
+
     bool requires_full_memory_data_clear() const {
         return model != nullptr && local_llm::requires_full_memory_data_clear(
             llama_model_is_hybrid(model), llama_model_is_recurrent(model));
@@ -1924,7 +1929,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     // Covers prompt prefill and its llama_synchronize() call.
     VulkanProfileRunScope profile_run_scope(inference_run_id);
     std::lock_guard<std::mutex> lock(engine->mtx);
-    RecurrentMemoryClearOnException memory_clear_on_exception(engine);
+    [[maybe_unused]] RecurrentMemoryClearOnException memory_clear_on_exception(engine);
     engine->inference_run_id = inference_run_id;
     // Copy/sync phase samples are scoped per token decode; map is retained
     // from model setup or the first logits output readback.
@@ -2485,7 +2490,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
     // context/model pointers so a close cannot free llama_context during this token step.
     std::lock_guard<std::mutex> lock(engine->mtx);
     if (!engine->model || !engine->context) return nullptr;
-    RecurrentMemoryClearOnException memory_clear_on_exception(engine);
+    [[maybe_unused]] RecurrentMemoryClearOnException memory_clear_on_exception(engine);
 
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     // The Kotlin caller reads the trace after every native step, including a
