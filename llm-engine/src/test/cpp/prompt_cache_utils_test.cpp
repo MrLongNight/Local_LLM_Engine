@@ -174,6 +174,38 @@ int main() {
         assert(!local_llm::prompt_cache_state_is_consistent(5, 4));
         assert(!local_llm::prompt_cache_state_is_consistent(0, -1));
     }
+    {
+        // Native positions must represent the complete logical token range. A
+        // non-zero minimum is fail-closed (for example, an SWA cache that evicted
+        // the beginning of the prompt); a missing suffix is also inconsistent.
+        assert(local_llm::prompt_cache_memory_positions_are_consistent(0, 0, -1, -1));
+        assert(local_llm::prompt_cache_memory_positions_are_consistent(4, 4, 0, 3));
+        assert(!local_llm::prompt_cache_memory_positions_are_consistent(4, 4, 1, 3));
+        assert(!local_llm::prompt_cache_memory_positions_are_consistent(4, 4, 0, 2));
+        assert(!local_llm::prompt_cache_memory_positions_are_consistent(4, 4, -1, 3));
+        assert(!local_llm::prompt_cache_memory_positions_are_consistent(3, 4, 0, 3));
+        assert(!local_llm::prompt_cache_memory_positions_are_consistent(0, 0, 0, 0));
+    }
+    {
+        local_llm::PromptCacheContextShiftPlan plan;
+        assert(local_llm::make_prompt_cache_context_shift_plan(10, 10, 2, 18, plan));
+        assert(plan.tokens_to_discard == 4);
+        assert(plan.next_position == 6);
+        assert(plan.next_stop_generation_position == 14);
+
+        // A generation ceiling inside the protected system prefix is unchanged;
+        // one above it is clamped to the prefix boundary after shifting.
+        assert(local_llm::make_prompt_cache_context_shift_plan(10, 10, 2, 1, plan));
+        assert(plan.next_stop_generation_position == 1);
+        assert(local_llm::make_prompt_cache_context_shift_plan(10, 10, 2, 3, plan));
+        assert(plan.next_stop_generation_position == 2);
+
+        assert(!local_llm::make_prompt_cache_context_shift_plan(9, 10, 2, 18, plan));
+        assert(!local_llm::make_prompt_cache_context_shift_plan(10, 10, -1, 18, plan));
+        assert(!local_llm::make_prompt_cache_context_shift_plan(10, 10, 11, 18, plan));
+        assert(!local_llm::make_prompt_cache_context_shift_plan(10, 10, 10, 18, plan));
+        assert(!local_llm::make_prompt_cache_context_shift_plan(10, 10, 9, -1, plan));
+    }
 
     {
         // Qwen3-4B-Instruct-2507 ChatML reference shape. This fixture checks the

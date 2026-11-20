@@ -161,4 +161,56 @@ inline bool prompt_cache_state_is_consistent(
            static_cast<std::size_t>(current_position) == cached_token_count;
 }
 
+// The token mirror represents the complete logical sequence. Incremental reuse or
+// shifting is safe only while native memory still contains that complete range.
+// A non-zero minimum (for example, an SWA window that evicted old positions) cannot
+// be treated as a complete reusable prefix.
+inline bool prompt_cache_memory_positions_are_consistent(
+        std::size_t cached_token_count,
+        std::int64_t current_position,
+        std::int64_t memory_position_min,
+        std::int64_t memory_position_max) noexcept {
+    if (!prompt_cache_state_is_consistent(cached_token_count, current_position)) {
+        return false;
+    }
+    if (current_position == 0) {
+        return memory_position_min == -1 && memory_position_max == -1;
+    }
+    return memory_position_min == 0 &&
+           memory_position_max == current_position - 1;
+}
+
+struct PromptCacheContextShiftPlan {
+    std::int64_t tokens_to_discard = 0;
+    std::int64_t next_position = 0;
+    std::int64_t next_stop_generation_position = 0;
+};
+
+// Keep the immutable system prefix, discard half of the remaining history, and
+// shift the generation ceiling by exactly the same amount as the KV positions.
+inline bool make_prompt_cache_context_shift_plan(
+        std::size_t cached_token_count,
+        std::int64_t current_position,
+        std::int64_t system_prompt_position,
+        std::int64_t stop_generation_position,
+        PromptCacheContextShiftPlan& plan) noexcept {
+    if (!prompt_cache_state_is_consistent(cached_token_count, current_position) ||
+        system_prompt_position < 0 ||
+        system_prompt_position > current_position ||
+        stop_generation_position < 0) {
+        return false;
+    }
+
+    const std::int64_t discard = (current_position - system_prompt_position) / 2;
+    if (discard <= 0) return false;
+
+    plan.tokens_to_discard = discard;
+    plan.next_position = current_position - discard;
+    plan.next_stop_generation_position =
+        stop_generation_position > system_prompt_position
+            ? std::max(system_prompt_position, stop_generation_position - discard)
+            : stop_generation_position;
+    return true;
+}
+
 } // namespace local_llm

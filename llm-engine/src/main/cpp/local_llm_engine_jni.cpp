@@ -472,6 +472,32 @@ struct EngineInstance {
         has_cached_prompt_identity = false;
     }
 
+    bool clear_prompt_cache_state(llama_memory_t memory) {
+        if (memory == nullptr) {
+            cached_tokens.clear();
+            current_position = 0;
+            stop_generation_position = 0;
+            clear_prompt_cache_identity();
+            LOGE("Cannot clear prompt cache because llama memory is unavailable");
+            return false;
+        }
+        llama_memory_clear(memory, false);
+        cached_tokens.clear();
+        current_position = 0;
+        stop_generation_position = 0;
+        clear_prompt_cache_identity();
+
+        const llama_pos memory_position_min = llama_memory_seq_pos_min(memory, 0);
+        const llama_pos memory_position_max = llama_memory_seq_pos_max(memory, 0);
+        if (!local_llm::prompt_cache_memory_positions_are_consistent(
+                0, 0, memory_position_min, memory_position_max)) {
+            LOGE("Full KV clear did not leave sequence 0 empty: min=%d,max=%d",
+                 memory_position_min, memory_position_max);
+            return false;
+        }
+        return true;
+    }
+
     void reset_long_term(bool clear_kv = true) {
         chat_msgs.clear();
         cached_tokens.clear();
@@ -485,31 +511,76 @@ struct EngineInstance {
 
     bool shift_context() {
         if (!context || !supports_incremental_memory_ops) return false;
+
+        llama_memory_t memory = llama_get_memory(context);
+        if (memory == nullptr) return false;
+        const llama_pos memory_position_min = llama_memory_seq_pos_min(memory, 0);
+        const llama_pos memory_position_max = llama_memory_seq_pos_max(memory, 0);
+        if (!local_llm::prompt_cache_memory_positions_are_consistent(
+                    cached_tokens.size(),
+                    static_cast<int64_t>(current_position),
+                    memory_position_min,
+                    memory_position_max) ||
+            system_prompt_position < 0 ||
+            system_prompt_position > current_position) {
+            LOGW("Context shift rejected: cached tokens and native KV positions diverged; clearing full KV state");
+            clear_prompt_cache_state(memory);
+            return false;
+        }
+        if (!llama_memory_can_shift(memory)) {
+            LOGW("Context shift is unsupported by the native memory backend; clearing full KV state");
+            clear_prompt_cache_state(memory);
+            return false;
+        }
+
+        local_llm::PromptCacheContextShiftPlan plan;
+        if (!local_llm::make_prompt_cache_context_shift_plan(
+                cached_tokens.size(),
+                static_cast<int64_t>(current_position),
+                static_cast<int64_t>(system_prompt_position),
+                static_cast<int64_t>(stop_generation_position),
+                plan)) {
+            LOGW("No safe non-system context-shift range is available; clearing full KV state");
+            clear_prompt_cache_state(memory);
+            return false;
+        }
+
+        const llama_pos discard_count = static_cast<llama_pos>(plan.tokens_to_discard);
+        const llama_pos next_position = static_cast<llama_pos>(plan.next_position);
+        LOGI("Controlled context shift: discarding %d non-system tokens starting at %d",
+             discard_count, system_prompt_position);
+        if (!llama_memory_seq_rm(
+                memory, 0, system_prompt_position, system_prompt_position + discard_count)) {
+            LOGW("Context shift partial removal was refused; clearing full KV state");
+            clear_prompt_cache_state(memory);
+            return false;
+        }
+
+        llama_memory_seq_add(
+            memory, 0, system_prompt_position + discard_count, current_position, -discard_count);
+        const llama_pos shifted_position_min = llama_memory_seq_pos_min(memory, 0);
+        const llama_pos shifted_position_max = llama_memory_seq_pos_max(memory, 0);
+        if (!local_llm::prompt_cache_memory_positions_are_consistent(
+                static_cast<std::size_t>(plan.next_position),
+                plan.next_position,
+                shifted_position_min,
+                shifted_position_max)) {
+            LOGE("Context shift produced an unexpected native KV range; clearing full KV state");
+            clear_prompt_cache_state(memory);
+            return false;
+        }
+
+        cached_tokens.erase(
+            cached_tokens.begin() + system_prompt_position,
+            cached_tokens.begin() + system_prompt_position + discard_count);
+        current_position = next_position;
+        stop_generation_position =
+            static_cast<llama_pos>(plan.next_stop_generation_position);
         if (!local_llm::prompt_cache_state_is_consistent(
                 cached_tokens.size(), static_cast<int64_t>(current_position))) {
-            LOGW("Context shift rejected: cached token count does not match current KV position");
+            LOGE("Context shift broke the cached-token/current-position invariant; clearing full KV state");
+            clear_prompt_cache_state(memory);
             return false;
-        }
-        llama_memory_t memory = llama_get_memory(context);
-        if (!llama_memory_can_shift(memory)) return false;
-        const int n_discard = (current_position - system_prompt_position) / 2;
-        if (n_discard <= 0) return false;
-        LOGI("Controlled context shift: discarding %d non-system tokens starting at %d",
-             n_discard, system_prompt_position);
-        if (!llama_memory_seq_rm(memory, 0, system_prompt_position, system_prompt_position + n_discard)) {
-            LOGW("Context shift refused by llama memory backend; keeping current cache unchanged");
-            return false;
-        }
-        llama_memory_seq_add(memory, 0, system_prompt_position + n_discard, current_position, -n_discard);
-        cached_tokens.erase(cached_tokens.begin() + system_prompt_position,
-                            cached_tokens.begin() + system_prompt_position + n_discard);
-        current_position -= n_discard;
-        // The generation limit is an absolute KV position too. Move it by the
-        // same amount as the retained sequence or a context shift can extend
-        // generation beyond the caller's maxPredictTokens.
-        if (stop_generation_position > system_prompt_position) {
-            stop_generation_position = std::max(
-                system_prompt_position, stop_generation_position - n_discard);
         }
         return true;
     }
@@ -2212,36 +2283,60 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         engine->current_position = 0;
     }
 
+    llama_memory_t memory = llama_get_memory(engine->context);
+    if (memory == nullptr) {
+        LOGE("Prompt cache cannot be evaluated because llama memory is unavailable");
+        return 4;
+    }
     const bool memory_is_hybrid = llama_model_is_hybrid(engine->model) ||
                                   llama_model_is_recurrent(engine->model);
     size_t reused_tokens = 0;
     if (engine->supports_incremental_memory_ops && !memory_is_hybrid) {
-        llama_memory_t memory = llama_get_memory(engine->context);
-        if (!local_llm::prompt_cache_state_is_consistent(
-                engine->cached_tokens.size(), static_cast<int64_t>(engine->current_position))) {
-            LOGW(
-                "Prompt cache state mismatch: cachedTokens=%zu,currentPosition=%lld; clearing KV and disabling prefix reuse",
+        const llama_pos memory_position_min = llama_memory_seq_pos_min(memory, 0);
+        const llama_pos memory_position_max = llama_memory_seq_pos_max(memory, 0);
+        if (!local_llm::prompt_cache_memory_positions_are_consistent(
                 engine->cached_tokens.size(),
-                static_cast<long long>(engine->current_position));
-            llama_memory_clear(memory, false);
-            engine->cached_tokens.clear();
-            engine->current_position = 0;
-            engine->clear_prompt_cache_identity();
+                static_cast<int64_t>(engine->current_position),
+                memory_position_min,
+                memory_position_max)) {
+            LOGW(
+                "Prompt cache/native KV position mismatch: cachedTokens=%zu,currentPosition=%lld,memoryMin=%d,memoryMax=%d; clearing full KV state",
+                engine->cached_tokens.size(),
+                static_cast<long long>(engine->current_position),
+                memory_position_min,
+                memory_position_max);
+            if (!engine->clear_prompt_cache_state(memory)) return 4;
         } else {
             reused_tokens = local_llm::reusable_prefix_length(engine->cached_tokens, tokens);
             if (reused_tokens > 0) {
                 if (!llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(reused_tokens), -1)) {
-                    LOGW("llama_memory_seq_rm declined partial prefix reuse; falling back to full KV clear");
-                    llama_memory_clear(memory, false);
+                    LOGW("llama_memory_seq_rm declined partial prefix reuse; clearing full KV state");
+                    if (!engine->clear_prompt_cache_state(memory)) return 4;
                     reused_tokens = 0;
+                } else {
+                    const llama_pos prefix_position_min = llama_memory_seq_pos_min(memory, 0);
+                    const llama_pos prefix_position_max = llama_memory_seq_pos_max(memory, 0);
+                    if (!local_llm::prompt_cache_memory_positions_are_consistent(
+                            reused_tokens,
+                            static_cast<int64_t>(reused_tokens),
+                            prefix_position_min,
+                            prefix_position_max)) {
+                        LOGW(
+                            "Partial prefix removal left an unexpected native KV range: reusedTokens=%zu,min=%d,max=%d; clearing full KV state",
+                            reused_tokens,
+                            prefix_position_min,
+                            prefix_position_max);
+                        if (!engine->clear_prompt_cache_state(memory)) return 4;
+                        reused_tokens = 0;
+                    }
                 }
-            } else {
-                llama_memory_clear(memory, false);
+            } else if (!engine->clear_prompt_cache_state(memory)) {
+                return 4;
             }
         }
     } else {
         // Gated/recurrent and hybrid memory layouts are not prefix-removable.
-        llama_memory_clear(llama_get_memory(engine->context), false);
+        if (!engine->clear_prompt_cache_state(memory)) return 4;
         if (memory_is_hybrid) {
             LOGI("Hybrid/recurrent model detected; partial sequence removal and context shifting are disabled");
         }
