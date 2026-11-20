@@ -16,11 +16,22 @@ import android.os.Process
 import android.system.Os
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.mydocanizer.llm.engine.ModelLibrary
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.internal.ModelSourceResolver
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.collect
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -173,6 +184,7 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             assertEquals(null, client.currentModel.value)
             assertEquals("READY", binding.service.status)
             awaitDescriptorCount(servicePid, modelFiles, expectedCount = serviceDescriptorBaseline)
+            awaitDescriptorCount(clientPid, modelFiles, expectedCount = clientDescriptorBaseline)
 
             val reloaded = client.loadModel(
                 ModelSource.ContentUri(modelUri.toString(), modelFile.name),
@@ -187,6 +199,7 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             assertTrue("Final provider reload must release its descriptor: ${finalUnload.exceptionOrNull()}",
                 finalUnload.isSuccess)
             awaitDescriptorCount(servicePid, modelFiles, expectedCount = serviceDescriptorBaseline)
+            awaitDescriptorCount(clientPid, modelFiles, expectedCount = clientDescriptorBaseline)
         } finally {
             client.close()
             directBinding?.let { binding ->
@@ -200,10 +213,16 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
     fun failedProviderLoadClosesTransferredDescriptorBeforeNextLoad() = runBlocking {
         val appContext = ApplicationProvider.getApplicationContext<Context>()
         val testContext = InstrumentationRegistry.getInstrumentation().context
-        val invalidName = "invalid-provider-${System.nanoTime()}.gguf"
+        val invalidName = "truncated-native-provider-${System.nanoTime()}.gguf"
+        val invalidHeader = ByteArray(4096).apply {
+            this[0] = 0x47
+            this[1] = 0x47
+            this[2] = 0x55
+            this[3] = 0x46
+        }
         val invalidFiles = listOf(testContext.cacheDir, appContext.cacheDir)
             .distinct()
-            .map { File(it, invalidName).also { file -> file.writeBytes(byteArrayOf(0x42, 0x41, 0x44, 0x21)) } }
+            .map { File(it, invalidName).also { file -> file.writeBytes(invalidHeader) } }
         val validName = "valid-after-failure-${System.nanoTime()}.gguf"
         val validFiles = listOf(testContext.cacheDir, appContext.cacheDir)
             .distinct()
@@ -244,32 +263,264 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
         var binding: BoundInferenceService? = null
         try {
             assertTrue(client.initialize().isSuccess)
-            binding = bindInferenceService(appContext)
-            val pid = binding.pid
-            val invalidBaseline = descriptorCountFor(pid, invalidFiles)
+            val bound = bindInferenceService(appContext)
+            binding = bound
+            val pid = bound.pid
+            val clientPid = Process.myPid()
+            val invalidServiceBaseline = descriptorCountFor(pid, invalidFiles)
+            val invalidClientBaseline = descriptorCountFor(clientPid, invalidFiles)
             val failed = client.loadModel(
                 ModelSource.ContentUri(invalidUri.toString(), invalidName),
                 config
             )
-            assertTrue("Invalid provider GGUF must fail before native model ownership: ${failed.exceptionOrNull()}",
-                failed.isFailure)
-            awaitDescriptorCount(pid, invalidFiles, expectedCount = invalidBaseline)
+            assertTrue(
+                "A GGUF-magic-valid but truncated file must reach native loading and fail: ${failed.exceptionOrNull()}",
+                failed.isFailure
+            )
+            // JNI dup()/fdopen() has already happened before llama.cpp rejects the truncated
+            // GGUF. Both the Binder-delivered service PFD and native FILE* must be gone.
+            awaitDescriptorCount(pid, invalidFiles, expectedCount = invalidServiceBaseline)
+            awaitDescriptorCount(clientPid, invalidFiles, expectedCount = invalidClientBaseline)
+            val unloadAfterFailure = client.unloadModel()
+            assertTrue("Unload after a failed native load must remain safe: ${unloadAfterFailure.exceptionOrNull()}",
+                unloadAfterFailure.isSuccess)
+            awaitDescriptorCount(pid, invalidFiles, expectedCount = invalidServiceBaseline)
+            awaitDescriptorCount(clientPid, invalidFiles, expectedCount = invalidClientBaseline)
 
-            val validBaseline = descriptorCountFor(pid, validFiles)
+            val validServiceBaseline = descriptorCountFor(pid, validFiles)
+            val validClientBaseline = descriptorCountFor(clientPid, validFiles)
             val loaded = client.loadModel(
                 ModelSource.ContentUri(validUri.toString(), validName),
                 config
             )
-            assertTrue("A valid provider model must load after the failed descriptor handoff: ${loaded.exceptionOrNull()}",
+            assertTrue("A valid provider model must load after native load failure: ${loaded.exceptionOrNull()}",
                 loaded.isSuccess)
-            awaitDescriptorCount(pid, validFiles, minimumCount = validBaseline + 1)
+            awaitDescriptorCount(pid, validFiles, expectedCount = validServiceBaseline + 2)
+            awaitDescriptorCount(clientPid, validFiles, expectedCount = validClientBaseline)
             assertTrue(client.unloadModel().isSuccess)
-            awaitDescriptorCount(pid, validFiles, expectedCount = validBaseline)
+            awaitDescriptorCount(pid, validFiles, expectedCount = validServiceBaseline)
+            awaitDescriptorCount(clientPid, validFiles, expectedCount = validClientBaseline)
         } finally {
             client.close()
             binding?.let { runCatching { appContext.unbindService(it.connection) } }
             invalidFiles.forEach { it.delete() }
             validFiles.forEach { it.delete() }
+        }
+    }
+
+    @Test
+    fun cancellingProviderLoadAfterNativeDescriptorDupTerminatesOriginalServiceAndReleasesAllDescriptors() = runBlocking {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        val testContext = InstrumentationRegistry.getInstrumentation().context
+        assertInferenceServiceManifest(appContext)
+        val fixtureName = "cancel-native-load-${System.nanoTime()}.gguf"
+        val modelFiles = listOf(testContext.cacheDir, appContext.cacheDir)
+            .distinct()
+            .map { cacheDir ->
+                File(cacheDir, fixtureName).also { file ->
+                    testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }
+        val modelFile = modelFiles.first()
+        val modelUri = Uri.parse("content://com.mydocanizer.llm.engine.test-model-provider/$fixtureName")
+        val resolverContext = object : ContextWrapper(appContext) {
+            override fun getContentResolver(): ContentResolver = testContext.contentResolver
+        }
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 15_000L,
+            modelLoadMs = 60_000L,
+            prefillMs = 30_000L,
+            firstTokenMs = 30_000L,
+            interTokenMs = 10_000L,
+            totalInferenceMs = 60_000L,
+            abortGracePeriodMs = 500L,
+            reconnectMs = 20_000L
+        )
+        val config = EngineConfig(
+            contextSize = 256,
+            batchSize = 64,
+            threads = 2,
+            temperature = 0f,
+            topP = 1f,
+            maxPredictTokens = 16,
+            backendPreference = BackendPreference.CPU,
+            gpuLayers = 0,
+            timeoutConfig = timeoutConfig
+        )
+        val clientPid = Process.myPid()
+        val client = InferenceClient(resolverContext, timeoutConfig = timeoutConfig)
+        var directBinding: BoundInferenceService? = null
+        var replacementBinding: BoundInferenceService? = null
+        var progressJob: Job? = null
+        var loadJob: Job? = null
+        try {
+            assertTrue("Inference client must initialize", client.initialize().isSuccess)
+            val originalBinding = bindInferenceService(appContext)
+            directBinding = originalBinding
+            val originalPid = originalBinding.pid
+            assertNotEquals("Model loading must remain isolated from the app process", clientPid, originalPid)
+            val serviceBaseline = descriptorCountFor(originalPid, modelFiles)
+            val clientBaseline = descriptorCountFor(clientPid, modelFiles)
+            val nativeProgress = CompletableDeferred<Int>()
+            progressJob = launch(start = CoroutineStart.UNDISPATCHED) {
+                client.modelLoadProgressEvents.collect { percent ->
+                    if (percent in 1..99) nativeProgress.complete(percent)
+                }
+            }
+            val activeLoadJob = launch(Dispatchers.IO) {
+                client.loadModel(ModelSource.ContentUri(modelUri.toString(), modelFile.name), config)
+            }
+            loadJob = activeLoadJob
+
+            val progressPercent = withTimeout(15_000L) { nativeProgress.await() }
+            assertTrue("Cancellation must be synchronized to native loader progress", progressPercent in 1..99)
+            // Native JNI reports its 1% entry marker, duplicates the exact SAF FD and
+            // passes the FILE* to llama.cpp. Observe both service-side copies before cancel.
+            awaitDescriptorCount(originalPid, modelFiles, expectedCount = serviceBaseline + 2)
+            assertTrue(
+                "The model-load coroutine must still be active after the native descriptor is duplicated",
+                activeLoadJob.isActive
+            )
+
+            activeLoadJob.cancelAndJoin()
+            assertTrue("The in-flight load must propagate coroutine cancellation", activeLoadJob.isCancelled)
+            assertTrue(
+                "Cancellation must terminate the original inference process that owns the in-flight native load",
+                awaitProcessExit(originalPid, PROCESS_EXIT_TIMEOUT_MS)
+            )
+            assertTrue(
+                "The direct Binder connection must observe the original process death",
+                originalBinding.disconnected.await(PROCESS_EXIT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            )
+            awaitDescriptorCount(clientPid, modelFiles, expectedCount = clientBaseline)
+            assertEquals(
+                "The dead inference process cannot retain its Binder PFD or native dup()/FILE*",
+                0,
+                descriptorCountFor(originalPid, modelFiles)
+            )
+
+            val abortDeadline = SystemClock.elapsedRealtime() + PROCESS_EXIT_TIMEOUT_MS
+            var abortConfirmed = false
+            while (SystemClock.elapsedRealtime() < abortDeadline && !abortConfirmed) {
+                abortConfirmed = EngineDiagnostics.getLogs().any { line ->
+                    line.contains("PROCESS_ABORT_CONFIRMED") && line.contains("Inference PID=$originalPid")
+                }
+                if (!abortConfirmed) delay(PROCESS_POLL_INTERVAL_MS)
+            }
+            assertTrue("The surviving app process must persist confirmation of the original PID abort", abortConfirmed)
+
+            withTimeout(SERVICE_RECOVERY_TIMEOUT_MS) {
+                while (client.remotePid.value == null || client.remotePid.value == originalPid) {
+                    delay(PROCESS_POLL_INTERVAL_MS)
+                }
+            }
+            val replacementPid = requireNotNull(client.remotePid.value)
+            assertNotEquals("Recovery must use a new inference process", originalPid, replacementPid)
+            val recoveredBinding = bindInferenceService(appContext)
+            replacementBinding = recoveredBinding
+            assertEquals(replacementPid, recoveredBinding.pid)
+            assertEquals("A cancelled load must not be restored as a loaded model", "READY", recoveredBinding.service.status)
+            awaitDescriptorCount(replacementPid, modelFiles, expectedCount = serviceBaseline)
+            awaitDescriptorCount(clientPid, modelFiles, expectedCount = clientBaseline)
+            assertEquals(null, client.currentModel.value)
+        } finally {
+            progressJob?.cancelAndJoin()
+            loadJob?.cancelAndJoin()
+            client.close()
+            replacementBinding?.let { runCatching { appContext.unbindService(it.connection) } }
+            directBinding?.let { runCatching { appContext.unbindService(it.connection) } }
+            modelFiles.forEach { it.delete() }
+        }
+    }
+
+    @Test
+    fun explicitSafImportAlternativeCopiesAndLoadsSeparatelyFromDirectProviderLoading() = runBlocking {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        val testContext = InstrumentationRegistry.getInstrumentation().context
+        assertInferenceServiceManifest(appContext)
+        val fixtureName = "explicit-import-${System.nanoTime()}.gguf"
+        val modelFiles = listOf(testContext.cacheDir, appContext.cacheDir)
+            .distinct()
+            .map { cacheDir ->
+                File(cacheDir, fixtureName).also { file ->
+                    testContext.assets.open("tiny1m.Q4_K_M.gguf").use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }
+        val sourceFile = modelFiles.first()
+        val modelUri = Uri.parse("content://com.mydocanizer.llm.engine.test-model-provider/$fixtureName")
+        val importContext = object : ContextWrapper(appContext) {
+            override fun getApplicationContext(): Context = this
+            override fun getContentResolver(): ContentResolver = testContext.contentResolver
+        }
+        var importedFile: File? = null
+        val timeoutConfig = TimeoutConfig(
+            serviceBindMs = 15_000L,
+            modelLoadMs = 30_000L,
+            prefillMs = 30_000L,
+            firstTokenMs = 30_000L,
+            interTokenMs = 10_000L,
+            totalInferenceMs = 60_000L,
+            abortGracePeriodMs = 500L,
+            reconnectMs = 20_000L
+        )
+        val config = EngineConfig(
+            contextSize = 256,
+            batchSize = 64,
+            threads = 2,
+            temperature = 0f,
+            topP = 1f,
+            maxPredictTokens = 16,
+            backendPreference = BackendPreference.CPU,
+            gpuLayers = 0,
+            timeoutConfig = timeoutConfig
+        )
+        val client = InferenceClient(appContext, timeoutConfig = timeoutConfig)
+        var binding: BoundInferenceService? = null
+        try {
+            val imported = ModelLibrary.importFromSaf(importContext, modelUri, fixtureName)
+            importedFile = imported
+            assertTrue("Explicit SAF import must create a readable private GGUF copy", imported.isFile && imported.canRead())
+            assertEquals(
+                "The supported import alternative must publish into the app-private model library",
+                File(appContext.filesDir, "models").canonicalFile,
+                imported.parentFile?.canonicalFile
+            )
+            assertTrue("Imported bytes must match the original provider document",
+                imported.readBytes().contentEquals(sourceFile.readBytes()))
+            assertEquals("The private content-addressed name must preserve the original display name",
+                fixtureName, ModelLibrary.displayName(imported.name))
+            assertEquals(
+                "The import stream must close the provider source before model loading",
+                0,
+                descriptorCountFor(Process.myPid(), modelFiles)
+            )
+
+            assertTrue("Inference client must initialize", client.initialize().isSuccess)
+            val bound = bindInferenceService(appContext)
+            binding = bound
+            val servicePid = bound.pid
+            val clientPid = Process.myPid()
+            val serviceBaseline = descriptorCountFor(servicePid, listOf(imported))
+            val clientBaseline = descriptorCountFor(clientPid, listOf(imported))
+            val loaded = client.loadModel(ModelSource.FilePath(imported.absolutePath), config)
+            assertTrue("The explicitly imported private copy must load: ${loaded.exceptionOrNull()}", loaded.isSuccess)
+            awaitDescriptorCount(servicePid, listOf(imported), expectedCount = serviceBaseline + 2)
+            awaitDescriptorCount(clientPid, listOf(imported), expectedCount = clientBaseline)
+
+            assertTrue("Unloading the imported model must succeed", client.unloadModel().isSuccess)
+            awaitDescriptorCount(servicePid, listOf(imported), expectedCount = serviceBaseline)
+            awaitDescriptorCount(clientPid, listOf(imported), expectedCount = clientBaseline)
+            assertTrue("Unload must release descriptors without deleting the user's imported copy", imported.isFile)
+            assertTrue("The original SAF source must remain unchanged", sourceFile.isFile)
+        } finally {
+            client.close()
+            binding?.let { runCatching { appContext.unbindService(it.connection) } }
+            importedFile?.delete()
+            modelFiles.forEach { it.delete() }
         }
     }
 
