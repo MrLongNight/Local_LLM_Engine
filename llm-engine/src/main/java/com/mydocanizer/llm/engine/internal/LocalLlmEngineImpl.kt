@@ -284,17 +284,19 @@ internal class LocalLlmEngineImpl(
             val isDirectDescriptor = source is ModelSource.FilePath &&
                 source.path.startsWith("/proc/self/fd/")
             val shaStartNano = System.nanoTime()
-            val importedSha256 = if (isDirectDescriptor) null else trustedImportedSha256(file)
+            // A direct descriptor may still target our private content-addressed import.
+            // Reuse that trusted import digest before deciding whether a second read is safe.
+            val importedSha256 = trustedImportedSha256(file)
             val sha256 = when {
+                importedSha256 != null -> importedSha256
                 isDirectDescriptor -> {
                     EngineDiagnostics.info(
                         "engine",
                         "MODEL_SHA256_SKIPPED_DIRECT_SOURCE",
-                        "reason=avoid_second_full_file_read,fileBytes=${file.length()}"
+                        "reason=avoid_second_full_file_read,fileBytes=" + file.length()
                     )
                     null
                 }
-                importedSha256 != null -> importedSha256
                 else -> calculateSha256(file) { percent -> updateModelLoadProgress(percent) }
             }
             if (importedSha256 != null) {
@@ -996,17 +998,11 @@ internal class LocalLlmEngineImpl(
      * <sha256>-<display-name>.gguf. Trust that digest only inside our private models
      * directory; arbitrary external FilePath names are never treated as hashes.
      */
-    private fun trustedImportedSha256(file: File): String? = runCatching {
-        val privateModelsDir = File(context.filesDir, "models").canonicalFile
-        val canonicalFile = file.canonicalFile
-        if (canonicalFile.parentFile != privateModelsDir) {
-            return@runCatching null
-        }
-        val separator = canonicalFile.name.indexOf('-')
-        if (separator != 64) return@runCatching null
-        canonicalFile.name.substring(0, separator)
-            .takeIf { it.matches(Regex("[0-9a-f]{64}")) }
-    }.getOrNull()
+    private fun trustedImportedSha256(file: File): String? =
+        ModelFileNamePolicy.trustedPrivateImportSha256(
+            file = file,
+            privateModelsDir = File(context.filesDir, "models")
+        )
 
     private fun calculateSha256(file: File, onProgress: (Int) -> Unit): String? {
         val result = runCatching {

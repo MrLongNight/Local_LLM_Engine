@@ -49,6 +49,48 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
+    fun acceptsOwnerStandardizedQwen3FourBInstruct2507FilenameWithoutPromotingMissingShaToBaseline() {
+        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
+            ModelInfo(
+                name = "2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e-" +
+                    "04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf",
+                path = "content://provider/document/42",
+                sizeBytes = 2_491_329_904L,
+                parameterCount = 4_022_468_096L,
+                architecture = "qwen3",
+                description = "Qwen3 4B Instruct 2507 | qwen3 4B Q4_K - Medium",
+                sha256 = null
+            )
+        )
+
+        assertEquals("REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE", result.status)
+        assertTrue(result.isReferenceModel)
+        assertFalse(result.baselineEligible)
+        assertEquals("UNAVAILABLE", result.shaStatus)
+        assertEquals("sha256_unavailable", result.reason)
+    }
+
+    @Test
+    fun rejectsOwnerStandardizedFourBBaseModelAsD0InstructReference() {
+        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
+            ModelInfo(
+                name = "04.0B_Qwen3-2507_Base_256k_Q4_K_M.gguf",
+                path = "content://provider/document/43",
+                sizeBytes = 2_491_329_904L,
+                parameterCount = 4_022_468_096L,
+                architecture = "qwen3",
+                description = "Qwen3 4B Base 2507 | qwen3 4B Q4_K - Medium",
+                sha256 = "c".repeat(64)
+            )
+        )
+
+        assertEquals("REFERENCE_MODEL_MISMATCH", result.status)
+        assertFalse(result.isReferenceModel)
+        assertFalse(result.baselineEligible)
+        assertTrue(result.reason.contains("reference_file_qwen3_4b_instruct_2507"))
+    }
+
+    @Test
     fun requiresArchitectureParameterCountAndQ4KmMetadataForD0() {
         val base = ModelInfo(
             name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",

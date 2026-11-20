@@ -27,6 +27,11 @@ internal object InferenceConfigSmokePlan {
      */
     internal fun assessD0ReferenceModel(model: ModelInfo): D0ReferenceAssessment {
         val fileIdentity = (model.name + " " + model.path).lowercase()
+        val identityCandidates = listOf(
+            model.name,
+            model.path.substringAfterLast('/'),
+            model.description
+        )
         val quantizationText = listOf(model.name, model.path.substringAfterLast('/'), model.description)
             .joinToString(" ")
             .lowercase()
@@ -47,7 +52,7 @@ internal object InferenceConfigSmokePlan {
             "parameter_count_3_5b_to_4_5b" to
                 (model.parameterCount in 3_500_000_000L..4_500_000_000L),
             "reference_file_qwen3_4b_instruct_2507" to
-                fileIdentity.contains("qwen3-4b-instruct-2507"),
+                identityCandidates.any(::matchesD0ReferenceIdentity),
             "quantization_q4_k_m" to
                 (fileIdentity.contains("q4_k_m") &&
                     quantizationMarkers.isNotEmpty() &&
@@ -79,6 +84,23 @@ internal object InferenceConfigSmokePlan {
             baselineEligible = identityMatch && shaStatus == "AVAILABLE"
         )
     }
+    /**
+     * Accepts canonical upstream names and normalized owner-selected aliases such as
+     * 04.0B_Qwen3-2507_Instruct_... while keeping all four family markers in one
+     * filename/metadata candidate. Architecture, parameter count and quantization
+     * remain independent mandatory checks.
+     */
+    private fun matchesD0ReferenceIdentity(candidate: String): Boolean {
+        val normalized = candidate.lowercase()
+            .replace(Regex("""\b0?4(?:[.,]0)?\s*b\b"""), "4b")
+            .replace(Regex("""[^a-z0-9]+"""), " ")
+            .trim()
+        val tokens = normalized.split(Regex("""\s+"""))
+            .filter { it.isNotBlank() }
+            .toSet()
+        return listOf("qwen3", "4b", "instruct", "2507").all(tokens::contains)
+    }
+
     const val MEASURED_TOKENS = 96
     const val COOLDOWN_MS = 0L
 

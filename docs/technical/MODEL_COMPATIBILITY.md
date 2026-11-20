@@ -88,11 +88,13 @@ The overlay comment records repeated runtime-verified Mali-G57 measurements for 
 
 ## Standard paired device functional and performance smoke test
 
-Use the app's **Settings → Kurzer CPU/Vulkan-Funktionstest → CPU + Vulkan prüfen** after changes that may affect inference correctness, prompt/template handling, token output, backend selection, memory behavior or native execution. CPU and Vulkan are **both mandatory**. This built-in test is the repeatable short regression baseline between TODO tasks; it does not replace deeper D1a/D2 acceptance runs.
+Use the app's **Settings → CPU/Vulkan-Funktionstest → D0: Qwen3-4B-Referenz prüfen** after changes that may affect inference correctness, prompt/template handling, token output, backend selection, memory behavior or native execution. CPU and Vulkan are **both mandatory**. This built-in test is the repeatable short regression baseline between TODO tasks; it does not replace deeper D1a/D2 acceptance runs.
 
 ### Fixed model and conversation
 
 - **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Load the exact same unchanged GGUF before every comparison. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF).
+- **Filename aliases:** User-standardized names are supported. D0 matches the Qwen3 / 4B / Instruct / 2507 identity in one normalized filename or GGUF-description candidate (including the `04.0B_Qwen3-2507_Instruct_...` form), while architecture, 3.5–4.5 billion parameter count and Q4_K_M remain separate mandatory checks. A renamed filename cannot override conflicting GGUF metadata.
+- **SHA-256:** A content-addressed import under the app-private `files/models` directory may reuse its import-time SHA-256 prefix even when the same file is opened through a descriptor symlink. External SAF descriptors do not receive a SHA inferred from their display name; without a trusted/imported or computed digest, a functional check may run but the result is not a comparable D0 baseline.
 - Start with the model loaded and no inference running. The test itself creates a fresh single-message conversation for each backend profile, reloads the same model file, and restores the original model configuration afterwards.
 - The built-in test uses the fixed prompt and expected output below. Do not replace it with previous chat history or a different prompt when collecting the regression baseline.
 
