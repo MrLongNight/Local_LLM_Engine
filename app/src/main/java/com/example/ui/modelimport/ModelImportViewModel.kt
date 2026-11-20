@@ -16,7 +16,6 @@ import com.mydocanizer.llm.engine.InferenceEvent
 import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.ModelInfo
-import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.ModelLibrary
 import android.provider.OpenableColumns
 import com.mydocanizer.llm.engine.InferenceResult
@@ -224,35 +223,12 @@ abstract class ModelImportViewModel(
         }
     }
 
+    /**
+     * A single-file selection is the one-item form of the exact same import flow
+     * used by multi-select. Both publish into the private, verified model library;
+     * loading is then initiated explicitly from the imported-model list.
+     */
     fun importModelFromSaf(uri: Uri) {
-        // Auto-restore requires a persisted read grant, not the temporary picker grant.
-        val permissionResult = runCatching {
-            val resolver = getApplication<Application>().contentResolver
-            val alreadyPersisted = resolver.persistedUriPermissions.any {
-                it.uri.toString() == uri.toString() && it.isReadPermission
-            }
-            if (!alreadyPersisted) {
-                resolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            val persisted = resolver.persistedUriPermissions.any {
-                it.uri.toString() == uri.toString() && it.isReadPermission
-            }
-            check(persisted) { "Android did not retain a persistent read grant for this document." }
-        }
-        permissionResult.onFailure { error ->
-            EngineDiagnostics.error("model_restore", "SAF_PERSIST_PERMISSION_FAILED", error)
-            _errorMessage.value =
-                "Für den automatischen Modellstart konnte Android keinen dauerhaften Lesezugriff speichern. " +
-                "Bitte wähle die GGUF-Datei über „Modell-Import“ erneut aus."
-        }
-        if (permissionResult.isFailure) return
-
-        startModelLoad(
-            source = ModelSource.ContentUri(uriString = uri.toString()),
-            operationLabel = "Öffne GGUF-Datei direkt am Originalspeicherort..."
-        )
+        importModelsFromSaf(listOf(uri))
     }
 }
