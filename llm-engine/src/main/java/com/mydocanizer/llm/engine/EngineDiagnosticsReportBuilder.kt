@@ -85,6 +85,8 @@ internal object EngineDiagnosticsReportBuilder {
             "PROMPT_STAGE_METRICS",
             "PREFILL_COMPLETED",
             "FIRST_TOKEN_RECEIVED",
+            "TTFT_METRIC",
+            "INFERENCE_PHASE_METRICS",
             "GENERATION_COMPLETED"
         ) || event.startsWith("BACKEND_BENCHMARK_") ||
             event.startsWith("GPU_LAYER_SWEEP_") || event.startsWith("VULKAN_DMMV_SWEEP_") ||
@@ -199,7 +201,9 @@ internal object EngineDiagnosticsReportBuilder {
         "CONFIG_SMOKE_RESTORED" -> "Ursprüngliche Modellkonfiguration wiederhergestellt"
         "CONFIG_SMOKE_RESTORE_FAILED" -> "Wiederherstellung fehlgeschlagen"
         "PREFILL_COMPLETED" -> "Prompt-Verarbeitung abgeschlossen"
-        "FIRST_TOKEN_RECEIVED" -> "Erstes Token empfangen"
+        "FIRST_TOKEN_RECEIVED" -> "Erstes sichtbares Token empfangen"
+        "TTFT_METRIC" -> "Time-to-first-token"
+        "INFERENCE_PHASE_METRICS" -> "Inferenz-Phasenmessung"
         "GENERATION_COMPLETED" -> "Textgenerierung abgeschlossen"
         "MODEL_LOADED" -> "Modell geladen"
         "MODEL_LOAD_FAILED" -> "Modell konnte nicht geladen werden"
@@ -540,7 +544,7 @@ internal object EngineDiagnosticsReportBuilder {
 
         val nativeKeywords = listOf(
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
-            "TOKEN_STEP_METRIC", "MEMORY", "ALLOC", "PIPELINE", "SHADER", "FENCE", "QUEUE", "PERF_PROFILER",
+            "TOKEN_STEP_METRIC", "INFERENCE_PHASE_TOTALS", "MEMORY", "ALLOC", "PIPELINE", "SHADER", "FENCE", "QUEUE", "PERF_PROFILER",
             "FAILED", "ERROR", "WARN", "UNSUPPORTED", "FALLBACK",
             "OFFLOAD", "BUFFER", "LAYER", "OUT OF MEMORY", "DEVICE LOST",
             "CPU_RUNTIME_FEATURES", "ABORT_CALLBACK_POLICY", "GRAPH_SPLITS",
@@ -611,6 +615,9 @@ internal object EngineDiagnosticsReportBuilder {
         val graphOpBackendDistributionEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION") }
             .takeLast(72)
+        val inferencePhaseTotalsEvidence = nativeLines
+            .filter { it.contains("LOCAL_LLM_INFERENCE_PHASE_TOTALS") }
+            .takeLast(8)
         val qwen35GdnPolicyEvidence = nativeLines
             .filter { it.contains("LOCAL_LLM_QWEN35_GDN_POLICY") }
             .takeLast(4)
@@ -621,7 +628,8 @@ internal object EngineDiagnosticsReportBuilder {
             profilerConfigEvidence + vulkanCapabilityEvidence + actualLayerOffloadEvidence +
                 q4kPrefillEvidence + q4kDecodeEvidence + dmmvWorkgroupEvidence + memoryBudgetEvidence +
                 cpuFeatureEvidence + abortPolicyEvidence + graphSplitEvidence +
-                graphBackendDistributionEvidence + graphOpBackendDistributionEvidence + qwen35GdnPolicyEvidence
+                graphBackendDistributionEvidence + graphOpBackendDistributionEvidence +
+                inferencePhaseTotalsEvidence + qwen35GdnPolicyEvidence
             ).distinct().map { compactLine(it, 360) }
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.

@@ -450,9 +450,26 @@ struct EngineInstance {
     int64_t last_prompt_template_us = 0;
     int64_t last_prompt_tokenization_us = 0;
     int64_t last_prompt_decode_us = 0;
+    int64_t last_prompt_decode_submit_us = 0;
+    int64_t last_prompt_backend_sync_wait_us = 0;
     int32_t last_prompt_tokens = 0;
     int32_t last_prompt_batch_size = 0;
     int32_t last_prompt_threads = 0;
+
+    // Run-correlated phase totals. Per-token detail remains sampled; these totals
+    // account for every decode/synchronization/readback sample in the inference.
+    uint64_t inference_decode_submit_total_us = 0;
+    uint64_t inference_backend_sync_wait_total_us = 0;
+    uint64_t inference_vulkan_queue_submit_total_us = 0;
+    uint64_t inference_vulkan_fence_wait_total_us = 0;
+    uint64_t inference_logits_readback_map_total_us = 0;
+    uint64_t inference_logits_readback_map_allocations_total = 0;
+    uint64_t inference_logits_readback_copy_total_us = 0;
+    uint64_t inference_logits_readback_sync_total_us = 0;
+    uint64_t inference_sample_total_us = 0;
+    uint32_t inference_decode_calls = 0;
+    uint32_t inference_sample_calls = 0;
+    bool inference_phase_metrics_logged = false;
 
     void reset_short_term() {
         stop_generation_position = 0;
@@ -462,6 +479,20 @@ struct EngineInstance {
         last_finish_reason = 0;
         tokens_generated = 0;
         inference_start_us = 0;
+        last_prompt_decode_submit_us = 0;
+        last_prompt_backend_sync_wait_us = 0;
+        inference_decode_submit_total_us = 0;
+        inference_backend_sync_wait_total_us = 0;
+        inference_vulkan_queue_submit_total_us = 0;
+        inference_vulkan_fence_wait_total_us = 0;
+        inference_logits_readback_map_total_us = 0;
+        inference_logits_readback_map_allocations_total = 0;
+        inference_logits_readback_copy_total_us = 0;
+        inference_logits_readback_sync_total_us = 0;
+        inference_sample_total_us = 0;
+        inference_decode_calls = 0;
+        inference_sample_calls = 0;
+        inference_phase_metrics_logged = false;
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
         last_token_selection_trace.clear();
 #endif
@@ -1123,6 +1154,48 @@ static jstring finish_native_generation(JNIEnv* env, EngineInstance* engine) {
             engine->last_finish_reason = 3;
             LOGE("Could not verify complete hybrid/recurrent memory clear after %s", reason);
         }
+    }
+    if (engine != nullptr && !engine->inference_phase_metrics_logged &&
+        !engine->inference_run_id.empty()) {
+        engine->inference_phase_metrics_logged = true;
+        // A token may terminate immediately after decode without another sampler
+        // call. Drain any final readback sample so the run total remains complete.
+        engine->inference_logits_readback_map_total_us +=
+            g_vulkan_logits_readback_map_us.exchange(0, std::memory_order_relaxed);
+        engine->inference_logits_readback_map_allocations_total +=
+            g_vulkan_logits_readback_map_allocations.exchange(0, std::memory_order_relaxed);
+        engine->inference_logits_readback_copy_total_us +=
+            g_vulkan_logits_readback_copy_us.exchange(0, std::memory_order_relaxed);
+        engine->inference_logits_readback_sync_total_us +=
+            g_vulkan_logits_readback_sync_us.exchange(0, std::memory_order_relaxed);
+
+        const int64_t decode_wall_us = engine->inference_start_us > 0
+            ? llama_time_us() - engine->inference_start_us
+            : -1;
+        std::ostringstream phases;
+        phases << "LOCAL_LLM_INFERENCE_PHASE_TOTALS - runId=" << engine->inference_run_id
+               << ",pid=" << getpid()
+               << ",backend=" << engine->active_backend
+               << ",promptDecodeUs=" << engine->last_prompt_decode_us
+               << ",promptDecodeSubmitUs=" << engine->last_prompt_decode_submit_us
+               << ",promptBackendSyncWaitUs=" << engine->last_prompt_backend_sync_wait_us
+               << ",decodeWallUs=" << decode_wall_us
+               << ",decodeCalls=" << engine->inference_decode_calls
+               << ",decodeSubmitUs=" << engine->inference_decode_submit_total_us
+               << ",decodeBackendSyncWaitUs=" << engine->inference_backend_sync_wait_total_us
+               << ",vkQueueSubmitUs=" << engine->inference_vulkan_queue_submit_total_us
+               << ",vkFenceWaitUs=" << engine->inference_vulkan_fence_wait_total_us
+               << ",logitsReadbackMapUs=" << engine->inference_logits_readback_map_total_us
+               << ",logitsReadbackMapAllocations=" << engine->inference_logits_readback_map_allocations_total
+               << ",logitsReadbackCopyUs=" << engine->inference_logits_readback_copy_total_us
+               << ",logitsReadbackSyncUs=" << engine->inference_logits_readback_sync_total_us
+               << ",sampleUs=" << engine->inference_sample_total_us
+               << ",sampleCalls=" << engine->inference_sample_calls
+               << ",tokensGenerated=" << engine->tokens_generated
+               << ",graphSplits=" << (engine->context != nullptr
+                   ? local_llm_get_graph_splits(engine->context) : -1)
+               << ",copySyncTimingScope=token_decode,mapTimingScope=run";
+        log_native_info_message(phases.str());
     }
     flush_native_log_file();
     return final_piece;
@@ -1801,6 +1874,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetLastPromptM
     ss << "templateUs=" << engine->last_prompt_template_us
        << ";tokenizationUs=" << engine->last_prompt_tokenization_us
        << ";decodeUs=" << engine->last_prompt_decode_us
+       << ";decodeSubmitUs=" << engine->last_prompt_decode_submit_us
+       << ";backendSyncWaitUs=" << engine->last_prompt_backend_sync_wait_us
        << ";promptTokens=" << engine->last_prompt_tokens
        << ";batchSize=" << engine->last_prompt_batch_size
        << ";threads=" << engine->last_prompt_threads
@@ -1939,6 +2014,14 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     // before entering JNI. Never clear it here: a Binder cancel racing with
     // nativeProcessChat must not be lost.
     engine->reset_short_term();
+    // Reset process-global Vulkan counters at the native run boundary so a
+    // one-time staging allocation or pending sample cannot leak into a later run.
+    g_vulkan_logits_readback_map_us.store(0, std::memory_order_relaxed);
+    g_vulkan_logits_readback_map_allocations.store(0, std::memory_order_relaxed);
+    g_vulkan_logits_readback_copy_us.store(0, std::memory_order_relaxed);
+    g_vulkan_logits_readback_sync_us.store(0, std::memory_order_relaxed);
+    g_vulkan_queue_submit_us.store(0, std::memory_order_relaxed);
+    g_vulkan_fence_wait_us.store(0, std::memory_order_relaxed);
 
     const bool memory_is_hybrid = engine->requires_full_memory_data_clear();
     llama_memory_t memory = nullptr;
@@ -2427,13 +2510,20 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     const int64_t prompt_start_us = llama_time_us();
     int dec_res = decode_tokens(
         engine, tokens_to_evaluate, engine->current_position, true, &progress_context);
+    const int64_t prompt_decode_submit_us = llama_time_us() - prompt_start_us;
     // Vulkan may enqueue work asynchronously. Include completion of that GPU work
     // in prefill time rather than charging the wait to the first generated token.
+    int64_t prompt_backend_sync_wait_us = 0;
     if (dec_res == 0) {
+        const int64_t prompt_sync_start_us = llama_time_us();
         llama_synchronize(engine->context);
+        prompt_backend_sync_wait_us = llama_time_us() - prompt_sync_start_us;
     }
-    const int64_t prompt_duration_ms = (llama_time_us() - prompt_start_us) / 1000;
-    engine->last_prompt_decode_us = prompt_duration_ms * 1000;
+    const int64_t prompt_duration_us = llama_time_us() - prompt_start_us;
+    const int64_t prompt_duration_ms = prompt_duration_us / 1000;
+    engine->last_prompt_decode_us = prompt_duration_us;
+    engine->last_prompt_decode_submit_us = prompt_decode_submit_us;
+    engine->last_prompt_backend_sync_wait_us = prompt_backend_sync_wait_us;
     engine->last_prompt_tokens = evaluated_prompt_tokens;
     if (dec_res == -2) {
         engine->last_finish_reason = 2; // CANCELLED during prompt prefill
@@ -2551,6 +2641,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         g_vulkan_logits_readback_copy_us.exchange(0, std::memory_order_relaxed);
     const uint64_t logits_readback_sync_us =
         g_vulkan_logits_readback_sync_us.exchange(0, std::memory_order_relaxed);
+    const int64_t sample_duration_us = llama_time_us() - sample_start_us;
+    engine->inference_sample_total_us += static_cast<uint64_t>(sample_duration_us);
+    engine->inference_sample_calls++;
+    engine->inference_logits_readback_map_total_us += logits_readback_map_us;
+    engine->inference_logits_readback_map_allocations_total += logits_readback_map_allocations;
+    engine->inference_logits_readback_copy_total_us += logits_readback_copy_us;
+    engine->inference_logits_readback_sync_total_us += logits_readback_sync_us;
 #if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
     // Capture logits before the selected token is decoded and overwrites the output slot.
     log_token_selection_trace(engine, engine->tokens_generated + 1, new_token_id);
@@ -2599,7 +2696,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return finish_native_generation(env, engine);
     }
 
-    const int64_t sample_duration_us = llama_time_us() - sample_start_us;
     const int sample_metric_index = engine->tokens_generated + 1;
     if (engine->active_backend.find("Vulkan") != std::string::npos &&
         (sample_metric_index <= 4 || sample_metric_index % 8 == 0)) {
@@ -2648,6 +2744,19 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
             backend_sync_wait_us = llama_time_us() - backend_sync_start_us;
         }
     }
+    const uint64_t vulkan_queue_submit_us =
+        g_vulkan_queue_submit_us.exchange(0, std::memory_order_relaxed);
+    const uint64_t vulkan_fence_wait_us =
+        g_vulkan_fence_wait_us.exchange(0, std::memory_order_relaxed);
+    engine->inference_decode_calls++;
+    if (decode_submit_duration_us > 0) {
+        engine->inference_decode_submit_total_us += static_cast<uint64_t>(decode_submit_duration_us);
+    }
+    if (backend_sync_wait_us > 0) {
+        engine->inference_backend_sync_wait_total_us += static_cast<uint64_t>(backend_sync_wait_us);
+    }
+    engine->inference_vulkan_queue_submit_total_us += vulkan_queue_submit_us;
+    engine->inference_vulkan_fence_wait_total_us += vulkan_fence_wait_us;
     if (decode_result == 2) {
         LOGI("Token decode aborted by native cancellation callback; invalidating partially evaluated memory state");
         engine->last_finish_reason = 2; // CANCELLED
@@ -2671,10 +2780,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         return finish_native_generation(env, engine);
     }
     const int64_t decode_duration_us = decode_submit_duration_us + backend_sync_wait_us;
-    const uint64_t vulkan_queue_submit_us =
-        g_vulkan_queue_submit_us.exchange(0, std::memory_order_relaxed);
-    const uint64_t vulkan_fence_wait_us =
-        g_vulkan_fence_wait_us.exchange(0, std::memory_order_relaxed);
 
     engine->current_position++;
     engine->cached_tokens.push_back(new_token_id);

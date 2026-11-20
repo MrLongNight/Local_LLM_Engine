@@ -452,6 +452,26 @@ internal class LocalLlmEngineImpl(
 
         _state.value = EngineState.Inferring(request)
         val requestStartNano = System.nanoTime()
+        var prefillDurationUs = -1L
+        var ttftUs = -1L
+        var phaseMetricsLogged = false
+        fun logInferencePhaseMetrics(
+            status: String,
+            finishReason: String,
+            generatedTokens: Int,
+            decodeDurationUs: Long
+        ) {
+            if (phaseMetricsLogged) return
+            phaseMetricsLogged = true
+            EngineDiagnostics.info(
+                "inference",
+                "INFERENCE_PHASE_METRICS",
+                "runId=$inferenceRunId,pid=${android.os.Process.myPid()}," +
+                    "backend=${modelInfo.activeBackend},prefillUs=$prefillDurationUs," +
+                    "ttftUs=$ttftUs,decodeUs=$decodeDurationUs," +
+                    "finishReason=$finishReason,status=$status,generatedTokens=$generatedTokens"
+            )
+        }
         val nativeMessages = NativePromptMessageMapper.map(request.messages)
         val roles = nativeMessages.roles
         val contents = nativeMessages.contents
@@ -566,6 +586,8 @@ internal class LocalLlmEngineImpl(
             }
         } catch (cancelled: CancellationException) {
             nativeWorkActive.set(false)
+            prefillDurationUs = (System.nanoTime() - requestStartNano) / 1_000L
+            logInferencePhaseMetrics("PREFILL_CANCELLED", "CANCELLED", 0, -1L)
             val cancelFlagConsumed = isCancelled.getAndSet(false)
             EngineDiagnostics.info(
                 "inference", "INFERENCE_TERMINAL_FAILURE",
@@ -576,6 +598,8 @@ internal class LocalLlmEngineImpl(
             throw cancelled
         } catch (error: Throwable) {
             nativeWorkActive.set(false)
+            prefillDurationUs = (System.nanoTime() - requestStartNano) / 1_000L
+            logInferencePhaseMetrics("PREFILL_EXCEPTION", "ERROR", 0, -1L)
             val cancelFlagConsumed = isCancelled.getAndSet(false)
             EngineDiagnostics.info(
                 "inference", "INFERENCE_TERMINAL_FAILURE",
@@ -592,12 +616,14 @@ internal class LocalLlmEngineImpl(
         // mask a genuine native failure such as PROMPT_TOO_LONG (result 8).
         if (isCooperativePrefillCancellation(processRes, isCancelled.get())) {
             nativeWorkActive.set(false)
+            prefillDurationUs = (System.nanoTime() - requestStartNano) / 1_000L
             // This early prefill-cancel return bypasses the generation loop's finally block.
             // Consume the request-local Kotlin latch now so the next request is not cancelled
             // once before it reaches nativeResetCancellation().
             isCancelled.set(false)
             val cancelledTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
-            EngineDiagnostics.info(
+            logInferencePhaseMetrics("PREFILL_CANCELLED", "CANCELLED", cancelledTokens, -1L)
+            EngineDiagnostics.info 
                 "inference",
                 "PREFILL_CANCELLED",
                 "runId=$inferenceRunId,pid=${android.os.Process.myPid()}, " +
@@ -611,6 +637,8 @@ internal class LocalLlmEngineImpl(
 
         if (processRes != 0) {
             nativeWorkActive.set(false)
+            prefillDurationUs = (System.nanoTime() - requestStartNano) / 1_000L
+            logInferencePhaseMetrics("PREFILL_FAILED", "ERROR", 0, -1L)
             // A cancel can race with a genuine native prompt failure. The failure remains
             // an Error; consume the Kotlin-side request latch so the next request is clean.
             val cancelFlagConsumed = isCancelled.getAndSet(false)
@@ -638,7 +666,8 @@ internal class LocalLlmEngineImpl(
             return@channelFlow
         }
 
-        val prefillDurationMs = (System.nanoTime() - requestStartNano) / 1_000_000L
+        prefillDurationUs = (System.nanoTime() - requestStartNano) / 1_000L
+        val prefillDurationMs = prefillDurationUs / 1_000L
         val promptMetrics = NativeEngineHandle.nativeGetLastPromptMetrics(handle)
         val graphSplits = promptMetrics.split(';')
             .firstOrNull { it.startsWith("graphSplits=") }
@@ -654,7 +683,7 @@ internal class LocalLlmEngineImpl(
             "inference",
             "PREFILL_COMPLETED",
             "runId=$inferenceRunId,pid=${android.os.Process.myPid()},messages=${request.messages.size}, " +
-                "prefillMs=$prefillDurationMs,backend=${modelInfo.activeBackend}"
+                "prefillMs=$prefillDurationMs,prefillUs=$prefillDurationUs,backend=${modelInfo.activeBackend}"
         )
         val prefillCompletedNano = System.nanoTime()
         trySend(InferenceEvent.Started(request.messages.size))
@@ -710,6 +739,17 @@ internal class LocalLlmEngineImpl(
                     break
                 }
                 nativeTokenSteps++
+                if (ttftUs < 0L) {
+                    ttftUs = (System.nanoTime() - requestStartNano) / 1_000L
+                    val afterPrefillUs = (System.nanoTime() - prefillCompletedNano) / 1_000L
+                    EngineDiagnostics.info(
+                        "inference",
+                        "TTFT_METRIC",
+                        "runId=$inferenceRunId,pid=${android.os.Process.myPid()},nativeStep=$nativeTokenSteps," +
+                            "ttftUs=$ttftUs,afterPrefillUs=$afterPrefillUs," +
+                            "firstPieceChars=${tokenPiece.length},backend=${modelInfo.activeBackend}"
+                    )
+                }
                 if (nativeTokenSteps <= 4 || nativeTokenSteps % 8 == 0) {
                     EngineDiagnostics.info(
                         "inference",
@@ -738,7 +778,7 @@ internal class LocalLlmEngineImpl(
                             "inference",
                             "FIRST_TOKEN_RECEIVED",
                             "runId=$inferenceRunId,pid=${android.os.Process.myPid()}, " +
-                                "latencyAfterPrefillMs=$latencyAfterPrefillMs,backend=${modelInfo.activeBackend}"
+                                "latencyAfterPrefillMs=$latencyAfterPrefillMs,ttftUs=$ttftUs,backend=${modelInfo.activeBackend}"
                         )
                     }
                     outputBuilder.append(tokenPiece)
@@ -779,9 +819,10 @@ internal class LocalLlmEngineImpl(
                 "inference",
                 "GENERATION_COMPLETED",
                 "runId=$inferenceRunId,pid=${android.os.Process.myPid()},tokens=$actualTokens, " +
-                    "generationMs=$durationMs,tokensPerSecond=$tokensPerSec,finishReason=$finishReason, " +
+                    "generationMs=$durationMs,decodeUs=$durationUs,tokensPerSecond=$tokensPerSec,finishReason=$finishReason, " +
                     "backend=${modelInfo.activeBackend}"
             )
+            logInferencePhaseMetrics("COMPLETED", finishReason.name, actualTokens, durationUs)
             EngineDiagnostics.recordInferenceOutput(
                 runId = inferenceRunId,
                 text = fullText,
@@ -833,6 +874,12 @@ internal class LocalLlmEngineImpl(
             Log.i(TAG, "streamChat coroutine cancelled, finalizing pending native UTF-8 output")
             finalizePendingNativeOutput()
             val actualTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(tokenCount)
+            logInferencePhaseMetrics(
+                "GENERATION_CANCELLED",
+                "CANCELLED",
+                actualTokens,
+                NativeEngineHandle.nativeGetInferenceDurationUs(handle).coerceAtLeast(0L)
+            )
             EngineDiagnostics.recordInferenceOutput(
                 inferenceRunId, outputBuilder.toString(), "CANCELLED", actualTokens
             )
@@ -849,6 +896,12 @@ internal class LocalLlmEngineImpl(
                 "runId=$inferenceRunId,phase=GENERATION,backend=${modelInfo.activeBackend},outputChars=${outputBuilder.length}"
             )
             finalizePendingNativeOutput()
+            logInferencePhaseMetrics(
+                "GENERATION_FAILED",
+                "ERROR",
+                tokenCount,
+                NativeEngineHandle.nativeGetInferenceDurationUs(handle).coerceAtLeast(0L)
+            )
             EngineDiagnostics.recordInferenceOutput(
                 inferenceRunId, outputBuilder.toString(), "ERROR", tokenCount
             )

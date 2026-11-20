@@ -10,6 +10,38 @@ import org.junit.Test
 class EngineDiagnosticsTest {
 
     @Test
+    fun inferencePhaseMetricsRemainCorrelatedAcrossKotlinNativeAndGraphEvidence() {
+        val runId = "phase-run-01"
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(
+                "2026-11-20 19:00:00.000 [INFO] [inference] INFERENCE_PHASE_METRICS - " +
+                    "runId=$runId,pid=701,backend=Vulkan,prefillUs=1200000,ttftUs=1450000," +
+                    "decodeUs=3200000,finishReason=STOP,status=COMPLETED,generatedTokens=32",
+                "2026-11-20 19:00:00.001 [INFO] [inference] TTFT_METRIC - " +
+                    "runId=$runId,pid=701,nativeStep=1,ttftUs=1450000,afterPrefillUs=250000," +
+                    "firstPieceChars=1,backend=Vulkan",
+                "2026-11-20 19:00:00.002 [NATIVE] LocalLlmEngineNative " +
+                    "LOCAL_LLM_INFERENCE_PHASE_TOTALS - runId=$runId,pid=701,backend=Vulkan," +
+                    "decodeWallUs=3200000,decodeCalls=32,decodeSubmitUs=90000," +
+                    "decodeBackendSyncWaitUs=2800000,vkQueueSubmitUs=7000,vkFenceWaitUs=2400000," +
+                    "logitsReadbackMapUs=0,logitsReadbackMapAllocations=0," +
+                    "logitsReadbackCopyUs=1200,logitsReadbackSyncUs=900,sampleUs=5000," +
+                    "sampleCalls=33,tokensGenerated=32,graphSplits=4,copySyncTimingScope=token_decode",
+                "2026-11-20 19:00:00.003 [NATIVE] llama_context: " +
+                    "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - runId=$runId,graphNodes=120," +
+                    "graphSplits=4,cpuNodes=8,vulkanNodes=112,otherNodes=0,unassignedNodes=0"
+            )
+        )
+
+        assertTrue(report.contains("Inferenz-Phasenmessung"))
+        assertTrue(report.contains("ttftUs=1450000"))
+        assertTrue(report.contains("LOCAL_LLM_INFERENCE_PHASE_TOTALS"))
+        assertTrue(report.contains("vkFenceWaitUs=2400000"))
+        assertTrue(report.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION"))
+        assertTrue(report.contains("runId=$runId"))
+    }
+
+    @Test
     fun extractedNativeMetricParserKeepsCurrentAndLegacySyncFieldsDistinct() {
         val currentLine = nativeMetric(
             index = 3, decodeUs = 900L, pid = 42, runId = "current-run", backend = "Vulkan"
