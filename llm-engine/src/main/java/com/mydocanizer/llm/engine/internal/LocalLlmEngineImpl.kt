@@ -623,7 +623,7 @@ internal class LocalLlmEngineImpl(
             isCancelled.set(false)
             val cancelledTokens = NativeEngineHandle.nativeGetTokensGenerated(handle).coerceAtLeast(0)
             logInferencePhaseMetrics("PREFILL_CANCELLED", "CANCELLED", cancelledTokens, -1L)
-            EngineDiagnostics.info 
+            EngineDiagnostics.info(
                 "inference",
                 "PREFILL_CANCELLED",
                 "runId=$inferenceRunId,pid=${android.os.Process.myPid()}, " +
