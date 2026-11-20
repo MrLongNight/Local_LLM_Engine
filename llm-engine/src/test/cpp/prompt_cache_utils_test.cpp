@@ -4,6 +4,32 @@
 #include <vector>
 
 int main() {
+    {
+        const local_llm::PromptCacheIdentity baseline{
+            "model:generation=1;architecture=qwen3",
+            "prompt:template=JINJA;thinking=0;bos=0",
+            "sampler:temperature=0;topK=20;topP=1",
+            "context:nCtx=256;batch=128;ubatch=64"
+        };
+        assert(local_llm::prompt_cache_identity_matches(baseline, baseline));
+
+        auto changed = baseline;
+        changed.model_signature += ";generation=2";
+        assert(!local_llm::prompt_cache_identity_matches(baseline, changed));
+
+        changed = baseline;
+        changed.prompt_signature += ";thinking=1";
+        assert(!local_llm::prompt_cache_identity_matches(baseline, changed));
+
+        changed = baseline;
+        changed.sampler_signature += ";topP=0.9";
+        assert(!local_llm::prompt_cache_identity_matches(baseline, changed));
+
+        changed = baseline;
+        changed.context_signature += ";nCtx=2048";
+        assert(!local_llm::prompt_cache_identity_matches(baseline, changed));
+    }
+
     // Sampler output must be a real vocabulary ID before EOG lookup/decode.
     assert(local_llm::is_valid_token_id(0, 1));
     assert(local_llm::is_valid_token_id(32000, 32001));

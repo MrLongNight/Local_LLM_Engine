@@ -9,6 +9,24 @@
 
 namespace local_llm {
 
+// The KV/token mirror is reusable only while every state-affecting input remains
+// identical. Prompt token IDs are still compared separately to find the exact prefix.
+struct PromptCacheIdentity {
+    std::string model_signature;
+    std::string prompt_signature;
+    std::string sampler_signature;
+    std::string context_signature;
+};
+
+inline bool prompt_cache_identity_matches(
+        const PromptCacheIdentity& cached,
+        const PromptCacheIdentity& requested) {
+    return cached.model_signature == requested.model_signature &&
+           cached.prompt_signature == requested.prompt_signature &&
+           cached.sampler_signature == requested.sampler_signature &&
+           cached.context_signature == requested.context_signature;
+}
+
 // Reject sentinel/out-of-range sampler results before vocabulary lookups or
 // decode. This is intentionally independent of llama.cpp types for host tests.
 template <typename Token>

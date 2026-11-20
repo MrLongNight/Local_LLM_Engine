@@ -405,6 +405,8 @@ struct EngineInstance {
     int32_t n_threads = 4;
     int32_t n_threads_batch = 4;
     int32_t micro_batch_size = BATCH_SIZE;
+    int32_t flash_attention_mode = 0;
+    uint64_t model_generation = 0;
     float default_temperature = DEFAULT_TEMP;
     float default_top_p = 0.9f;
     int32_t default_top_k = 20;
@@ -427,6 +429,8 @@ struct EngineInstance {
     std::vector<common_chat_msg> chat_msgs;
     // Mirrors sequence 0 KV exactly: prompt prefix plus every successfully decoded output token.
     std::vector<llama_token> cached_tokens;
+    local_llm::PromptCacheIdentity cached_prompt_identity;
+    bool has_cached_prompt_identity = false;
     bool supports_incremental_memory_ops = false;
     llama_pos system_prompt_position = 0;
     llama_pos current_position = 0;
@@ -463,9 +467,15 @@ struct EngineInstance {
 #endif
     }
 
+    void clear_prompt_cache_identity() {
+        cached_prompt_identity = {};
+        has_cached_prompt_identity = false;
+    }
+
     void reset_long_term(bool clear_kv = true) {
         chat_msgs.clear();
         cached_tokens.clear();
+        clear_prompt_cache_identity();
         system_prompt_position = 0;
         current_position = 0;
         if (clear_kv && context != nullptr) {
@@ -562,6 +572,147 @@ static std::string read_model_metadata_value(const llama_model* model, const cha
         }
     }
     return normalized.empty() ? "empty" : normalized;
+}
+
+static std::string build_prompt_cache_sampler_signature(
+        const common_params_sampling& sampling) {
+    std::ostringstream signature;
+    signature << std::setprecision(std::numeric_limits<float>::max_digits10)
+              << "seed=" << sampling.seed
+              << ";nPrev=" << sampling.n_prev
+              << ";nProbs=" << sampling.n_probs
+              << ";minKeep=" << sampling.min_keep
+              << ";topK=" << sampling.top_k
+              << ";topP=" << sampling.top_p
+              << ";minP=" << sampling.min_p
+              << ";xtcProbability=" << sampling.xtc_probability
+              << ";xtcThreshold=" << sampling.xtc_threshold
+              << ";typicalP=" << sampling.typ_p
+              << ";temperature=" << sampling.temp
+              << ";dynatempRange=" << sampling.dynatemp_range
+              << ";dynatempExponent=" << sampling.dynatemp_exponent
+              << ";penaltyLastN=" << sampling.penalty_last_n
+              << ";repeatPenalty=" << sampling.penalty_repeat
+              << ";frequencyPenalty=" << sampling.penalty_freq
+              << ";presencePenalty=" << sampling.penalty_present
+              << ";dryMultiplier=" << sampling.dry_multiplier
+              << ";dryBase=" << sampling.dry_base
+              << ";dryAllowedLength=" << sampling.dry_allowed_length
+              << ";dryPenaltyLastN=" << sampling.dry_penalty_last_n
+              << ";adaptiveTarget=" << sampling.adaptive_target
+              << ";adaptiveDecay=" << sampling.adaptive_decay
+              << ";mirostat=" << sampling.mirostat
+              << ";topNSigma=" << sampling.top_n_sigma
+              << ";mirostatTau=" << sampling.mirostat_tau
+              << ";mirostatEta=" << sampling.mirostat_eta
+              << ";ignoreEos=" << sampling.ignore_eos
+              << ";noPerf=" << sampling.no_perf
+              << ";timingPerToken=" << sampling.timing_per_token
+              << ";userSamplingConfig=" << sampling.user_sampling_config
+              << ";samplers=";
+    for (const auto sampler : sampling.samplers) {
+        signature << static_cast<int>(sampler) << ',';
+    }
+    signature << ";dryBreakers=";
+    for (const auto& breaker : sampling.dry_sequence_breakers) {
+        signature << std::quoted(breaker) << ',';
+    }
+    signature << ";grammarType=" << static_cast<int>(sampling.grammar.type)
+              << ";grammar=" << std::quoted(sampling.grammar.grammar)
+              << ";grammarLazy=" << sampling.grammar_lazy
+              << ";grammarTriggers=";
+    for (const auto& trigger : sampling.grammar_triggers) {
+        signature << static_cast<int>(trigger.type) << ':'
+                  << std::quoted(trigger.value) << ':'
+                  << trigger.token << ',';
+    }
+    signature << ";preservedTokens=";
+    for (const auto token : sampling.preserved_tokens) {
+        signature << token << ',';
+    }
+    signature << ";logitBias=";
+    for (const auto& bias : sampling.logit_bias) {
+        signature << bias.token << ':' << bias.bias << ',';
+    }
+    signature << ";logitBiasEog=";
+    for (const auto& bias : sampling.logit_bias_eog) {
+        signature << bias.token << ':' << bias.bias << ',';
+    }
+    signature << ";generationPrompt=" << std::quoted(sampling.generation_prompt)
+              << ";reasoningBudgetTokens=" << sampling.reasoning_budget_tokens
+              << ";reasoningBudgetStart=";
+    for (const auto token : sampling.reasoning_budget_start) {
+        signature << token << ',';
+    }
+    signature << ";reasoningBudgetEnd=";
+    for (const auto& sequence : sampling.reasoning_budget_end) {
+        signature << '[';
+        for (const auto token : sequence) signature << token << ',';
+        signature << ']';
+    }
+    signature << ";reasoningBudgetForced=";
+    for (const auto token : sampling.reasoning_budget_forced) {
+        signature << token << ',';
+    }
+    signature << ";reasoningBudgetMessage=" << std::quoted(sampling.reasoning_budget_message)
+              << ";reasoningControl=" << sampling.reasoning_control
+              << ";backendSampling=" << sampling.backend_sampling;
+    return signature.str();
+}
+
+static local_llm::PromptCacheIdentity build_prompt_cache_identity(
+        const EngineInstance* engine,
+        const llama_vocab* vocab,
+        bool explicit_chat_template,
+        bool used_chat_template,
+        const std::string& template_mode,
+        bool thinking_enabled,
+        bool add_bos,
+        llama_token bos_token,
+        bool add_eos,
+        llama_token eos_token,
+        const common_params_sampling& sampling,
+        int max_predict) {
+    local_llm::PromptCacheIdentity identity;
+
+    std::ostringstream model;
+    model << "generation=" << engine->model_generation
+          << ";architecture=" << std::quoted(read_model_metadata_value(engine->model, "general.architecture"))
+          << ";name=" << std::quoted(read_model_metadata_value(engine->model, "general.name"))
+          << ";tokenizer=" << std::quoted(read_model_metadata_value(engine->model, "tokenizer.ggml.model"))
+          << ";parameters=" << llama_model_n_params(engine->model)
+          << ";bytes=" << llama_model_size(engine->model)
+          << ";trainedContext=" << llama_model_n_ctx_train(engine->model)
+          << ";vocabulary=" << llama_vocab_n_tokens(vocab);
+    identity.model_signature = model.str();
+
+    std::ostringstream prompt;
+    prompt << "explicitTemplate=" << explicit_chat_template
+           << ";usedTemplate=" << used_chat_template
+           << ";templateMode=" << std::quoted(template_mode)
+           << ";thinking=" << thinking_enabled
+           << ";tokenizer=" << std::quoted(read_model_metadata_value(engine->model, "tokenizer.ggml.model"))
+           << ";vocabulary=" << llama_vocab_n_tokens(vocab)
+           << ";addBOS=" << add_bos
+           << ";bosId=" << bos_token
+           << ";addEOS=" << add_eos
+           << ";eosId=" << eos_token;
+    identity.prompt_signature = prompt.str();
+
+    identity.sampler_signature = build_prompt_cache_sampler_signature(sampling);
+
+    std::ostringstream context;
+    context << "nCtx=" << engine->context_size
+            << ";nBatch=" << engine->batch_size
+            << ";nUbatch=" << engine->micro_batch_size
+            << ";threads=" << engine->n_threads
+            << ";batchThreads=" << engine->n_threads_batch
+            << ";flashAttention=" << engine->flash_attention_mode
+            << ";backend=" << std::quoted(engine->active_backend)
+            << ";incrementalMemory=" << engine->supports_incremental_memory_ops
+            << ";maxPredict=" << max_predict;
+    identity.context_signature = context.str();
+    return identity;
 }
 
 static void log_prompt_metadata(
@@ -1400,6 +1551,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = resolved_batch_threads;
     ctx_params.flash_attn_type = static_cast<llama_flash_attn_type>(flash_attention_mode);
+    engine->flash_attention_mode = flash_attention_mode;
     LOGI("Context policy: backend=%s,n_ctx=%d,n_batch=%d,n_ubatch=%d,flash_attn_type=%d",
          use_vulkan ? "VULKAN" : "CPU", ctx_size, b_size, resolved_micro_batch,
          flash_attention_mode);
@@ -1490,6 +1642,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     engine->reset_short_term();
     engine->reset_long_term(true);
+    ++engine->model_generation;
+    if (engine->model_generation == 0) ++engine->model_generation;
     engine->cancel_requested.store(false);
 
     LOGI("Model loaded: n_ctx=%d, n_batch=%d, n_ubatch=%d, n_threads=%d, n_threads_batch=%d, active_backend=%s",
@@ -2024,6 +2178,10 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     log_prompt_metadata(engine, tokens, used_chat_template, template_mode,
         model_vocab, model_add_bos, model_bos_token, model_add_eos, model_eos_token,
         enable_thinking == JNI_TRUE);
+    const auto requested_cache_identity = build_prompt_cache_identity(
+        engine, model_vocab, has_chat_template, used_chat_template, template_mode,
+        enable_thinking == JNI_TRUE, model_add_bos, model_bos_token,
+        model_add_eos, model_eos_token, request_sampling, max_predict);
     PromptEvalProgressContext progress_context{env, progress_listener, nullptr};
     if (progress_listener != nullptr) {
         jclass listener_class = env->GetObjectClass(progress_listener);
@@ -2035,6 +2193,25 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             env->ExceptionClear();
         }
     }
+    if (engine->has_cached_prompt_identity &&
+        !local_llm::prompt_cache_identity_matches(
+            engine->cached_prompt_identity, requested_cache_identity)) {
+        const auto& cached = engine->cached_prompt_identity;
+        LOGI("Prompt cache identity mismatch: model=%d,prompt=%d,sampler=%d,context=%d; clearing cached token/KV prefix",
+             cached.model_signature != requested_cache_identity.model_signature ? 1 : 0,
+             cached.prompt_signature != requested_cache_identity.prompt_signature ? 1 : 0,
+             cached.sampler_signature != requested_cache_identity.sampler_signature ? 1 : 0,
+             cached.context_signature != requested_cache_identity.context_signature ? 1 : 0);
+        engine->cached_tokens.clear();
+        engine->current_position = 0;
+        engine->clear_prompt_cache_identity();
+    } else if (!engine->has_cached_prompt_identity &&
+               (!engine->cached_tokens.empty() || engine->current_position != 0)) {
+        LOGW("Prompt cache contains state without a verified identity; clearing cached token/KV prefix");
+        engine->cached_tokens.clear();
+        engine->current_position = 0;
+    }
+
     const bool memory_is_hybrid = llama_model_is_hybrid(engine->model) ||
                                   llama_model_is_recurrent(engine->model);
     size_t reused_tokens = 0;
@@ -2049,6 +2226,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
             llama_memory_clear(memory, false);
             engine->cached_tokens.clear();
             engine->current_position = 0;
+            engine->clear_prompt_cache_identity();
         } else {
             reused_tokens = local_llm::reusable_prefix_length(engine->cached_tokens, tokens);
             if (reused_tokens > 0) {
@@ -2098,6 +2276,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         llama_memory_clear(llama_get_memory(engine->context), false);
         engine->cached_tokens.clear();
         engine->current_position = 0;
+        engine->clear_prompt_cache_identity();
         LOGI("Prompt prefill cancelled cooperatively after %d of %d evaluated tokens",
              engine->last_prompt_tokens, evaluated_prompt_tokens);
         return 6; // dedicated cancellation result; not a decode error
@@ -2106,6 +2285,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         llama_memory_clear(llama_get_memory(engine->context), false);
         engine->cached_tokens.clear();
         engine->current_position = 0;
+        engine->clear_prompt_cache_identity();
         LOGE("Prompt decoding failed with code %d", dec_res);
         return 4;
     }
@@ -2113,6 +2293,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     engine->cached_tokens.insert(engine->cached_tokens.end(),
                                   tokens_to_evaluate.begin(), tokens_to_evaluate.end());
     engine->current_position += evaluated_prompt_tokens;
+    engine->cached_prompt_identity = requested_cache_identity;
+    engine->has_cached_prompt_identity = true;
     LOGI("Prompt stage metrics: template_ms=%lld, tokenization_ms=%lld, "
          "decode_ms=%lld, prompt_tokens=%d, reused_tokens=%zu, evaluated_tokens=%d, batch_size=%d, backend=%s",
          static_cast<long long>(template_duration_ms),
@@ -2308,6 +2490,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->cached_tokens.clear();
         engine->current_position = 0;
         engine->system_prompt_position = 0;
+        engine->clear_prompt_cache_identity();
         engine->last_finish_reason = 2; // CANCELLED
         engine->generation_finished = true;
         return finish_native_generation(env, engine);
@@ -2318,6 +2501,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGenerateNextTo
         engine->cached_tokens.clear();
         engine->current_position = 0;
         engine->system_prompt_position = 0;
+        engine->clear_prompt_cache_identity();
         engine->last_finish_reason = 3; // ERROR
         engine->generation_finished = true;
         return finish_native_generation(env, engine);
