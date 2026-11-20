@@ -51,7 +51,7 @@ abstract class ConfigurationSmokeViewModel(
     val configSmokeReport: StateFlow<String?> = _configSmokeReport.asStateFlow()
 
     private val _configurationSmokeProgress = MutableStateFlow<ConfigurationSmokeProgress?>(null)
-    val configurationSmokeProgress: StateFlow<ConfigurationSmokeProgress?> =
+    internal val configurationSmokeProgress: StateFlow<ConfigurationSmokeProgress?> =
         _configurationSmokeProgress.asStateFlow()
 
     private var configurationSmokeJob: Job? = null
