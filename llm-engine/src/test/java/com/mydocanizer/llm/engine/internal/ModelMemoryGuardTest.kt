@@ -71,4 +71,105 @@ class ModelMemoryGuardTest {
         assertTrue(plan.pressureWarning)
         assertFalse(plan.hardLimitExceeded)
     }
+    @Test
+    fun estimatesKvAndRuntimeReserveWithoutClaimingMeasuredPeakMemory() {
+        val modelBytes = 4_096L
+        val expectedKvBytes = 128L * 1024L * 256L
+        val plan = ModelMemoryGuard.plan(modelBytes, 256, 4_096L * mib, 8_192L * mib)
+
+        assertEquals(expectedKvBytes, plan.estimatedKvBytes)
+        assertEquals(modelBytes + expectedKvBytes + 256L * mib, plan.requiredBytes)
+        assertEquals(4_096L * mib, plan.availableBytes)
+        assertEquals(8_192L * mib, plan.totalBytes)
+        assertFalse(plan.pressureWarning)
+    }
+
+    @Test
+    fun scalesKvEstimateWithModelFileSizeAboveMinimumPerToken() {
+        val modelBytes = 2_000L * mib
+        val estimatedKvBytesPerToken = modelBytes / 10_000L
+        assertTrue(estimatedKvBytesPerToken > 128L * 1024L)
+
+        val plan = ModelMemoryGuard.plan(modelBytes, 1024, 8_192L * mib, 8_192L * mib)
+
+        assertEquals(estimatedKvBytesPerToken * 1024L, plan.estimatedKvBytes)
+        assertEquals(modelBytes + plan.estimatedKvBytes + 256L * mib, plan.requiredBytes)
+        assertEquals(1024, plan.effectiveContextTokens)
+    }
+
+    @Test
+    fun reducesToMinimumContextButKeepsAvailableMemoryPressureAsWarning() {
+        val modelBytes = 1_024L * mib
+        val availableBytes = 1_024L * mib
+        val plan = ModelMemoryGuard.plan(modelBytes, 4096, availableBytes, 8_192L * mib)
+
+        assertEquals(ModelMemoryGuard.MIN_CONTEXT_TOKENS, plan.effectiveContextTokens)
+        assertEquals(modelBytes + 32L * mib + 256L * mib, plan.requiredBytes)
+        assertTrue(plan.requiredBytes > availableBytes)
+        assertTrue(plan.contextReduced)
+        assertTrue(plan.pressureWarning)
+        assertFalse(plan.hardLimitExceeded)
+    }
+
+    @Test
+    fun acceptsEstimateExactlyAt85PercentHardLimit() {
+        val modelBytes = 18L * mib
+        val expectedRequiredBytes = 306L * mib
+        val plan = ModelMemoryGuard.plan(
+            modelBytes, ModelMemoryGuard.MIN_CONTEXT_TOKENS, expectedRequiredBytes, 360L * mib
+        )
+
+        assertEquals(expectedRequiredBytes, plan.requiredBytes)
+        assertEquals(expectedRequiredBytes, plan.hardLimitBytes)
+        assertFalse(plan.hardLimitExceeded)
+        assertFalse(plan.pressureWarning)
+    }
+
+    @Test
+    fun requiresOverrideOneByteAbove85PercentHardLimit() {
+        val modelBytes = 18L * mib + 1L
+        try {
+            ModelMemoryGuard.plan(modelBytes, ModelMemoryGuard.MIN_CONTEXT_TOKENS, Long.MAX_VALUE, 360L * mib)
+            throw AssertionError("Expected one byte above the hard limit to require an override")
+        } catch (expected: InsufficientModelMemoryException) {
+            assertTrue(expected.message.orEmpty().startsWith(ModelMemoryGuard.OVERRIDE_REQUIRED_MARKER))
+        }
+    }
+
+    @Test
+    fun availableMemoryBoundaryIsSoftAtMinimumContext() {
+        val modelBytes = 4_096L
+        val requiredBytes = modelBytes + 32L * mib + 256L * mib
+
+        val exactFit = ModelMemoryGuard.plan(modelBytes, 256, requiredBytes, 8_192L * mib)
+        val oneByteShort = ModelMemoryGuard.plan(modelBytes, 256, requiredBytes - 1L, 8_192L * mib)
+
+        assertFalse(exactFit.pressureWarning)
+        assertEquals(256, oneByteShort.effectiveContextTokens)
+        assertTrue(oneByteShort.pressureWarning)
+        assertFalse(oneByteShort.hardLimitExceeded)
+    }
+
+    @Test
+    fun rejectsContextBelowMinimumBeforeBuildingAnEstimate() {
+        try {
+            ModelMemoryGuard.plan(1_024L, ModelMemoryGuard.MIN_CONTEXT_TOKENS - 1, 1_024L * mib, 4_096L * mib)
+            throw AssertionError("Expected context below the minimum to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("at least ${ModelMemoryGuard.MIN_CONTEXT_TOKENS}"))
+        }
+    }
+
+    @Test
+    fun rejectsUnknownOrNonPositiveModelFileSize() {
+        listOf(0L, -1L).forEach { modelBytes ->
+            try {
+                ModelMemoryGuard.plan(modelBytes, 256, 1_024L * mib, 4_096L * mib)
+                throw AssertionError("Expected modelBytes=$modelBytes to be rejected")
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message.orEmpty().contains("Model file size"))
+            }
+        }
+    }
+
 }

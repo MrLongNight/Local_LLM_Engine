@@ -14,6 +14,12 @@ internal object ModelMemoryGuard {
     private const val MIB = 1024L * 1024L
     const val OVERRIDE_REQUIRED_MARKER = "MEMORY_GUARD_OVERRIDE_REQUIRED:"
 
+    /**
+     * Admission-plan values are estimates, not measured peak memory. In particular,
+     * [estimatedKvBytes] and [requiredBytes] do not represent measured process PSS,
+     * native heap or graphics allocations. Available and total bytes are the system-memory
+     * snapshot supplied to this plan.
+     */
     data class Plan(
         val effectiveContextTokens: Int, val modelBytes: Long, val estimatedKvBytes: Long,
         val requiredBytes: Long, val availableBytes: Long, val totalBytes: Long,
