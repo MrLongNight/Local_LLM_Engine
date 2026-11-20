@@ -76,14 +76,14 @@ collect_device_diagnostics() {
             : > "$diagnostics_dir/app-diagnostics-pull.stderr"
             app_captured=true
             last_app_attempt="Captured engine logs for app PID(s) ${app_pids}."
-            printf '%s %s\n' "$(date u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt" \
+            printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt" \
               >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
           else
             last_app_attempt="run-as returned without a valid engine-log completion marker for app PID(s) ${app_pids}."
             if [[ "$app_captured" != true ]]; then
               cp "$app_err" "$diagnostics_dir/run-as-target.stderr" 2>/dev/null || true
               {
-                printf '%s %s\n' "$(date u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt"
+                printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt"
                 sed -n '1,20p' "$app_clean_tmp"
               } >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
             fi
@@ -93,7 +93,7 @@ collect_device_diagnostics() {
           if [[ "$app_captured" != true ]]; then
             cp "$app_err" "$diagnostics_dir/run-as-target.stderr" 2>/dev/null || true
             {
-              printf '%s %s\n' "$(date u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt"
+              printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$last_app_attempt"
               sed -n '1,20p' "$app_tmp" 2>/dev/null || true
               sed -n '1,20p' "$app_err" 2>/dev/null || true
             } >> "$diagnostics_dir/app-diagnostics-capture-attempts.txt"
@@ -165,11 +165,11 @@ collect_device_diagnostics &
 collector_pid=$!
 
 test_status=0
-if gradle --no-daemo :llm-engine:connectedDebugAndroidTest; then
+if gradle --no-daemon :llm-engine:connectedDebugAndroidTest; then
   test_status=0
 else
   test_status=$?
-ifi
+fi
 printf '%s\n' "$test_status" > "$diagnostics_dir/gradle-exit-code.txt"
 
 : > "$collector_stop_file"
