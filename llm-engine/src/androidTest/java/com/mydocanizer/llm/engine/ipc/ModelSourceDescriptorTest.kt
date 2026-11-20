@@ -421,7 +421,24 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
             val recoveredBinding = bindInferenceService(appContext)
             replacementBinding = recoveredBinding
             assertEquals(replacementPid, recoveredBinding.pid)
-            assertEquals("A cancelled load must not be restored as a loaded model", "READY", recoveredBinding.service.status)
+            // onCreate() and the one-way initialize() Binder call both schedule
+            // engine initialization asynchronously. A newly connected replacement can
+            // therefore report UNINITIALIZED briefly even though reconnect is healthy.
+            val readyDeadline = SystemClock.elapsedRealtime() + SERVICE_RECOVERY_TIMEOUT_MS
+            var replacementStatus = runCatching { recoveredBinding.service.status }
+                .getOrDefault("DISCONNECTED")
+            while (replacementStatus != "READY" &&
+                SystemClock.elapsedRealtime() < readyDeadline
+            ) {
+                SystemClock.sleep(PROCESS_POLL_INTERVAL_MS)
+                replacementStatus = runCatching { recoveredBinding.service.status }
+                    .getOrDefault("DISCONNECTED")
+            }
+            assertEquals(
+                "A cancelled load must reconnect to an initialized service without restoring a model",
+                "READY",
+                replacementStatus
+            )
             awaitDescriptorCount(replacementPid, modelFiles, expectedCount = serviceBaseline)
             awaitDescriptorCount(clientPid, modelFiles, expectedCount = clientBaseline)
             assertEquals(null, client.currentModel.value)
