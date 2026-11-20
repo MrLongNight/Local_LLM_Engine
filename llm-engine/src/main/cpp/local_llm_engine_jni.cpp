@@ -664,6 +664,8 @@ public:
             engine_->context == nullptr) {
             return;
         }
+        engine_->last_finish_reason = 3;
+        engine_->generation_finished = true;
         if (!engine_->clear_prompt_cache_state(
                 llama_get_memory(engine_->context), "native_exception")) {
             engine_->last_finish_reason = 3;
