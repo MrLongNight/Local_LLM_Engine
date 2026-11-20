@@ -42,11 +42,11 @@ internal fun FilePickerActions(
                                 strokeWidth = 2.dp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Öffne Originaldatei...")
+                            Text("Importiere GGUF-Datei...")
                         } else {
                             Icon(imageVector = Icons.Default.FileOpen, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("GGUF-Datei direkt öffnen")
+                            Text("Ein GGUF-Modell importieren")
                         }
                     }
 
