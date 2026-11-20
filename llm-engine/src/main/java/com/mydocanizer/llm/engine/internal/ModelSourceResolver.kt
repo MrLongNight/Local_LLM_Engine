@@ -2,6 +2,7 @@ package com.mydocanizer.llm.engine.internal
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
@@ -45,12 +46,13 @@ internal object ModelSourceResolver {
             when (source) {
                 is ModelSource.FilePath -> {
                     val file = source.file
-                    if (PROC_SELF_FD_PATH.matches(source.path)) {
+                    val directDescriptorPath = PROC_SELF_FD_PATH.matchEntire(source.path)
+                    if (directDescriptorPath != null) {
                         // /proc/self/fd/N is a process-local descriptor path, not a
                         // conventional filesystem path. File.isFile/canRead() are not
                         // reliable for Binder-transferred SAF descriptors on Android.
-                        // Validate the actual descriptor with fstat/lseek/pread/mmap
-                        // and keep the original descriptor open for llama.cpp.
+                        // Validate the exact numeric FD that JNI will duplicate, and prove
+                        // that the borrowed FileDescriptor describes the same file.
                         val descriptor = source.descriptor
                             ?: throw IllegalArgumentException(
                                 "Direct SAF source is missing its borrowed file descriptor; refusing to reopen or copy it"
@@ -59,6 +61,14 @@ internal object ModelSourceResolver {
                             ?: throw IllegalArgumentException(
                                 "Direct SAF source is missing its descriptor number; refusing to reopen or copy it"
                             )
+                        val pathDescriptorNumber = directDescriptorPath.groupValues[1].toIntOrNull()
+                            ?: throw IllegalArgumentException(
+                                "Direct SAF source has an invalid /proc/self/fd path; refusing to reopen or copy it"
+                            )
+                        require(pathDescriptorNumber == descriptorNumber) {
+                            "Direct SAF path fd=$pathDescriptorNumber does not match native descriptor number " +
+                                "fd=$descriptorNumber; refusing to validate one descriptor and load another."
+                        }
                         validateSeekableMmapDescriptor(descriptor, descriptorNumber)
                     } else {
                         require(file.isFile && file.canRead()) {
@@ -274,15 +284,54 @@ internal object ModelSourceResolver {
         descriptor: FileDescriptor,
         descriptorNumber: Int
     ) {
-        val stat = try {
-            Os.fstat(descriptor)
+        require(descriptor.valid()) {
+            "Borrowed SAF descriptor is already closed; refusing to validate or load it"
+        }
+        val nativeDescriptor = try {
+            // JNI receives this integer FD, so probe a dup of that exact descriptor
+            // rather than assuming the separately supplied FileDescriptor is identical.
+            ParcelFileDescriptor.fromFd(descriptorNumber)
         } catch (error: Exception) {
             throw IllegalArgumentException(
-                "SAF descriptor $descriptorNumber is not valid in :inference",
+                "Native SAF descriptor fd=$descriptorNumber is not open in :inference",
                 error
             )
         }
 
+        nativeDescriptor.use { duplicatedNativeDescriptor ->
+            val borrowedStat = try {
+                Os.fstat(descriptor)
+            } catch (error: Exception) {
+                throw IllegalArgumentException(
+                    "Borrowed SAF descriptor is not valid in :inference",
+                    error
+                )
+            }
+            val nativeFileDescriptor = duplicatedNativeDescriptor.fileDescriptor
+            val nativeStat = try {
+                Os.fstat(nativeFileDescriptor)
+            } catch (error: Exception) {
+                throw IllegalArgumentException(
+                    "Native SAF descriptor fd=$descriptorNumber is not valid in :inference",
+                    error
+                )
+            }
+            require(
+                borrowedStat.st_dev == nativeStat.st_dev &&
+                    borrowedStat.st_ino == nativeStat.st_ino
+            ) {
+                "Borrowed SAF descriptor and native descriptor fd=$descriptorNumber refer to different files; " +
+                    "refusing to validate one file and load another."
+            }
+            validateSeekableMmapCapabilities(nativeFileDescriptor, descriptorNumber, nativeStat)
+        }
+    }
+
+    private fun validateSeekableMmapCapabilities(
+        descriptor: FileDescriptor,
+        descriptorNumber: Int,
+        stat: android.system.StructStat
+    ) {
         val fileType = stat.st_mode and OsConstants.S_IFMT
         if (fileType != OsConstants.S_IFREG) {
             val sourceType = when (fileType) {
@@ -327,7 +376,7 @@ internal object ModelSourceResolver {
             "Invalid GGUF file on SAF descriptor $descriptorNumber: expected GGUF magic bytes at offset 0"
         }
 
-        // Probe mmap on the exact descriptor that JNI will duplicate and pass to llama.cpp.
+        // Probe mmap on a dup of the exact descriptor that JNI will duplicate and pass to llama.cpp.
         val probeLength = minOf(stat.st_size, 4096L)
         val mapping = try {
             Os.mmap(

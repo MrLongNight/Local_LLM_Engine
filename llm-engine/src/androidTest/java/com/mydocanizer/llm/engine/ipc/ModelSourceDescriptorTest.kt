@@ -428,6 +428,78 @@ class ModelSourceDescriptorTest : InferenceServiceProcessTestBase() {
         }
     }
 
+    @Test
+    fun directDescriptorPathMustMatchNativeFdNumber() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val firstFile = File(context.cacheDir, "direct-fd-path-first-${System.nanoTime()}.gguf")
+        val secondFile = File(context.cacheDir, "direct-fd-path-second-${System.nanoTime()}.gguf")
+        firstFile.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x00, 0x01, 0x02, 0x03))
+        secondFile.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x04, 0x05, 0x06, 0x07))
+        val first = ParcelFileDescriptor.open(firstFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        val second = ParcelFileDescriptor.open(secondFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val error = runCatching {
+                ModelSourceResolver.resolveToFile(
+                    context,
+                    ModelSource.FilePath(
+                        path = "/proc/self/fd/${first.fd}",
+                        descriptor = first.fileDescriptor,
+                        descriptorFd = second.fd
+                    )
+                )
+            }.exceptionOrNull()
+
+            assertTrue("A proc path that names a different native FD must be rejected", error is IllegalArgumentException)
+            assertTrue(
+                "The diagnostic must identify the path/native FD mismatch",
+                error?.message.orEmpty().contains("does not match native descriptor number")
+            )
+            assertTrue("The caller retains ownership of the first descriptor", first.fileDescriptor.valid())
+            assertTrue("The caller retains ownership of the second descriptor", second.fileDescriptor.valid())
+        } finally {
+            first.close()
+            second.close()
+            firstFile.delete()
+            secondFile.delete()
+        }
+    }
+
+    @Test
+    fun borrowedDescriptorMustMatchNativeFdTarget() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val firstFile = File(context.cacheDir, "direct-fd-object-first-${System.nanoTime()}.gguf")
+        val secondFile = File(context.cacheDir, "direct-fd-object-second-${System.nanoTime()}.gguf")
+        firstFile.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x00, 0x01, 0x02, 0x03))
+        secondFile.writeBytes(byteArrayOf(0x47, 0x47, 0x55, 0x46, 0x04, 0x05, 0x06, 0x07))
+        val first = ParcelFileDescriptor.open(firstFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        val second = ParcelFileDescriptor.open(secondFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val error = runCatching {
+                ModelSourceResolver.resolveToFile(
+                    context,
+                    ModelSource.FilePath(
+                        path = "/proc/self/fd/${second.fd}",
+                        descriptor = first.fileDescriptor,
+                        descriptorFd = second.fd
+                    )
+                )
+            }.exceptionOrNull()
+
+            assertTrue("A borrowed FileDescriptor for a different file must be rejected", error is IllegalArgumentException)
+            assertTrue(
+                "The diagnostic must identify the borrowed/native descriptor target mismatch",
+                error?.message.orEmpty().contains("refer to different files")
+            )
+            assertTrue("The caller retains ownership of the first descriptor", first.fileDescriptor.valid())
+            assertTrue("The caller retains ownership of the second descriptor", second.fileDescriptor.valid())
+        } finally {
+            first.close()
+            second.close()
+            firstFile.delete()
+            secondFile.delete()
+        }
+    }
+
     private fun descriptorCountFor(pid: Int, files: List<File>): Int =
         files.sumOf { file ->
             val fdDirectory = File("/proc/$pid/fd")
