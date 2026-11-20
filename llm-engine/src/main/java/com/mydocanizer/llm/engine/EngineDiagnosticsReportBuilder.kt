@@ -345,6 +345,120 @@ internal object EngineDiagnosticsReportBuilder {
         }
     }
 
+    private fun nonNegativeMetricValue(line: String?, key: String, unit: String = ""): String {
+        val value = line?.let { field(it, key)?.toLongOrNull() }?.takeIf { it >= 0L } ?: return "n/a"
+        return if (unit.isEmpty()) value.toString() else "$value$unit"
+    }
+
+    /**
+     * Shows exactly the newest run with a Kotlin phase event. Native phase totals are
+     * joined by runId and, when both sides provide it, PID. Graph rows are joined by
+     * runId. Missing or mismatched evidence stays explicitly unavailable; it is never
+     * inferred from a different run or from a requested backend.
+     */
+    private fun buildSingleRunPhaseSummary(
+        kotlinLines: List<String>,
+        nativeLines: List<String>
+    ): List<String> {
+        val phaseLine = kotlinLines.lastOrNull { eventName(it) == "INFERENCE_PHASE_METRICS" }
+            ?: return listOf("Kein INFERENCE_PHASE_METRICS-Ereignis vorhanden; kein Einzel-Lauf auswählbar.")
+
+        val runId = field(phaseLine, "runId")?.takeIf { it.isNotBlank() }
+        val pid = field(phaseLine, "pid")?.takeIf { it.isNotBlank() }
+        val backend = field(phaseLine, "backend")?.takeIf { it.isNotBlank() }
+        val nativeCandidates = if (runId == null) emptyList() else nativeLines.filter {
+            it.contains("LOCAL_LLM_INFERENCE_PHASE_TOTALS - ") && field(it, "runId") == runId
+        }
+        val nativeTotals = nativeCandidates.lastOrNull { line ->
+            val nativePid = field(line, "pid")
+            pid == null || nativePid == null || nativePid == pid
+        }
+        val nativePidMismatch = nativeCandidates.lastOrNull { line ->
+            val nativePid = field(line, "pid")
+            pid != null && nativePid != null && nativePid != pid
+        }
+        val graphCandidates = if (runId == null) emptyList() else nativeLines.filter {
+            it.contains("LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION") && field(it, "runId") == runId
+        }
+        val graphRows = graphCandidates.filter { line ->
+            val graphPid = field(line, "pid")
+            pid == null || graphPid == null || graphPid == pid
+        }
+        val graphPidMismatch = graphCandidates.lastOrNull { line ->
+            val graphPid = field(line, "pid")
+            pid != null && graphPid != null && graphPid != pid
+        }
+
+        return buildList {
+            add("runId=${runId ?: "UNAVAILABLE"} pid=${pid ?: "UNAVAILABLE"} backend=${backend ?: "UNAVAILABLE"}")
+            add(
+                "Kotlin: status=${field(phaseLine, "status") ?: "n/a"} " +
+                    "finishReason=${field(phaseLine, "finishReason") ?: "n/a"} " +
+                    "generatedTokens=${nonNegativeMetricValue(phaseLine, "generatedTokens")} " +
+                    "prefill=${nonNegativeMetricValue(phaseLine, "prefillUs", "us")} " +
+                    "TTFT=${nonNegativeMetricValue(phaseLine, "ttftUs", "us")} " +
+                    "decode=${nonNegativeMetricValue(phaseLine, "decodeUs", "us")}"
+            )
+            when {
+                nativeTotals != null -> {
+                    add(
+                        "Native: backend=${field(nativeTotals, "backend") ?: "n/a"} " +
+                            "promptDecode=${nonNegativeMetricValue(nativeTotals, "promptDecodeUs", "us")} " +
+                            "promptSubmit=${nonNegativeMetricValue(nativeTotals, "promptDecodeSubmitUs", "us")} " +
+                            "promptSyncWait=${nonNegativeMetricValue(nativeTotals, "promptBackendSyncWaitUs", "us")} " +
+                            "decodeWall=${nonNegativeMetricValue(nativeTotals, "decodeWallUs", "us")} " +
+                            "decodeCalls=${nonNegativeMetricValue(nativeTotals, "decodeCalls")} " +
+                            "decodeSubmit=${nonNegativeMetricValue(nativeTotals, "decodeSubmitUs", "us")} " +
+                            "decodeSyncWait=${nonNegativeMetricValue(nativeTotals, "decodeBackendSyncWaitUs", "us")}"
+                    )
+                    add(
+                        "Native Vulkan/readback: queueSubmit=${nonNegativeMetricValue(nativeTotals, "vkQueueSubmitUs", "us")} " +
+                            "fenceWait=${nonNegativeMetricValue(nativeTotals, "vkFenceWaitUs", "us")} " +
+                            "logitsMap=${nonNegativeMetricValue(nativeTotals, "logitsReadbackMapUs", "us")} " +
+                            "mapAllocations=${nonNegativeMetricValue(nativeTotals, "logitsReadbackMapAllocations")} " +
+                            "logitsCopy=${nonNegativeMetricValue(nativeTotals, "logitsReadbackCopyUs", "us")} " +
+                            "logitsSync=${nonNegativeMetricValue(nativeTotals, "logitsReadbackSyncUs", "us")} " +
+                            "sample=${nonNegativeMetricValue(nativeTotals, "sampleUs", "us")} " +
+                            "sampleCalls=${nonNegativeMetricValue(nativeTotals, "sampleCalls")} " +
+                            "tokensGenerated=${nonNegativeMetricValue(nativeTotals, "tokensGenerated")} " +
+                            "graphSplits=${nonNegativeMetricValue(nativeTotals, "graphSplits")}"
+                    )
+                }
+                nativePidMismatch != null -> add(
+                    "Native totals: UNAVAILABLE (PID mismatch: Kotlin=${pid ?: "n/a"}, " +
+                        "native=${field(nativePidMismatch, "pid") ?: "n/a"})"
+                )
+                runId == null -> add("Native totals: UNAVAILABLE (Kotlin phase event has no runId)")
+                else -> add("Native totals: UNAVAILABLE (no run-correlated LOCAL_LLM_INFERENCE_PHASE_TOTALS)")
+            }
+            when {
+                graphRows.isNotEmpty() -> {
+                    graphRows.takeLast(8).forEachIndexed { index, line ->
+                        add(
+                            "Graph[$index]: graphNodes=${nonNegativeMetricValue(line, "graphNodes")} " +
+                                "graphSplits=${nonNegativeMetricValue(line, "graphSplits")} " +
+                                "cpuNodes=${nonNegativeMetricValue(line, "cpuNodes")} " +
+                                "vulkanNodes=${nonNegativeMetricValue(line, "vulkanNodes")} " +
+                                "otherNodes=${nonNegativeMetricValue(line, "otherNodes")} " +
+                                "unassignedNodes=${nonNegativeMetricValue(line, "unassignedNodes")} " +
+                                "backendIdsChanged=${nonNegativeMetricValue(line, "backendIdsChanged")} " +
+                                "graphSizeChanged=${nonNegativeMetricValue(line, "graphSizeChanged")}"
+                        )
+                    }
+                    if (graphRows.size > 8) {
+                        add("Graph distribution: ${graphRows.size - 8} ältere Zeile(n) ausgelassen; letzte 8 angezeigt")
+                    }
+                }
+                graphPidMismatch != null -> add(
+                    "Graph distribution: UNAVAILABLE (PID mismatch: Kotlin=${pid ?: "n/a"}, " +
+                        "native=${field(graphPidMismatch, "pid") ?: "n/a"})"
+                )
+                runId == null -> add("Graph distribution: UNAVAILABLE (Kotlin phase event has no runId)")
+                else -> add("Graph distribution: UNAVAILABLE (no run-correlated LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION)")
+            }
+        }
+    }
+
     internal fun buildCompactReport(lines: List<String>): String {
         // Stable timestamp sorting preserves the original order of multi-part text
         // events that share the same millisecond timestamp.
@@ -541,6 +655,7 @@ internal object EngineDiagnosticsReportBuilder {
             .distinct()
             .sorted()
             .map { readableEventLine(it, 620) }
+        val singleRunPhaseSummary = buildSingleRunPhaseSummary(kotlinLines, nativeLines)
 
         val nativeKeywords = listOf(
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
@@ -952,6 +1067,9 @@ internal object EngineDiagnosticsReportBuilder {
                 appendLine("Keine abgeschlossenen Backend-/Inferenz-Messwerte gefunden.")
             }
             performanceEvents.forEach(::appendLine)
+            appendLine()
+            appendLine("[4a] EINZEL-LAUF – KORRELATION DER INFERENZPHASEN")
+            singleRunPhaseSummary.forEach(::appendLine)
             appendLine()
             appendLine("[5] WICHTIGE EREIGNISSE / FEHLER")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")

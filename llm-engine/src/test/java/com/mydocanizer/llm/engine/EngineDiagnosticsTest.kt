@@ -42,6 +42,84 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun singleRunPhaseSummaryUsesLatestRunAndOnlyItsCorrelatedEvidence() {
+        val lines = listOf(
+            "2026-11-20 19:00:00.000 [INFO] [inference] INFERENCE_PHASE_METRICS - " +
+                "runId=older-run,pid=701,backend=CPU,prefillUs=100,ttftUs=150,decodeUs=200," +
+                "finishReason=STOP,status=COMPLETED,generatedTokens=3",
+            "2026-11-20 19:00:00.001 [NATIVE] LocalLlmEngineNative LOCAL_LLM_INFERENCE_PHASE_TOTALS - " +
+                "runId=older-run,pid=701,backend=CPU,decodeWallUs=200,decodeCalls=3",
+            "2026-11-20 19:00:00.002 [NATIVE] llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - " +
+                "runId=older-run,graphNodes=10,graphSplits=1,cpuNodes=10,vulkanNodes=0",
+            "2026-11-20 19:00:10.000 [INFO] [inference] INFERENCE_PHASE_METRICS - " +
+                "runId=latest-run,pid=702,backend=Vulkan,prefillUs=1200000,ttftUs=1450000," +
+                "decodeUs=3200000,finishReason=STOP,status=COMPLETED,generatedTokens=32",
+            "2026-11-20 19:00:10.001 [NATIVE] LocalLlmEngineNative LOCAL_LLM_INFERENCE_PHASE_TOTALS - " +
+                "runId=latest-run,pid=702,backend=Vulkan,promptDecodeUs=1100000," +
+                "promptDecodeSubmitUs=900000,promptBackendSyncWaitUs=200000," +
+                "decodeWallUs=3200000,decodeCalls=32,decodeSubmitUs=90000," +
+                "decodeBackendSyncWaitUs=2800000,vkQueueSubmitUs=7000,vkFenceWaitUs=2400000," +
+                "logitsReadbackMapUs=0,logitsReadbackMapAllocations=0,logitsReadbackCopyUs=1200," +
+                "logitsReadbackSyncUs=900,sampleUs=5000,sampleCalls=33,tokensGenerated=32,graphSplits=4",
+            "2026-11-20 19:00:10.002 [NATIVE] llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - " +
+                "runId=latest-run,graphNodes=120,graphSplits=4,cpuNodes=8,vulkanNodes=112," +
+                "otherNodes=0,unassignedNodes=0,backendIdsChanged=0,graphSizeChanged=1",
+            "2026-11-20 19:00:10.003 [NATIVE] llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - " +
+                "runId=unrelated-run,graphNodes=99,graphSplits=2,cpuNodes=99,vulkanNodes=0"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+        val summary = report.substringAfter("[4a] EINZEL-LAUF – KORRELATION DER INFERENZPHASEN")
+            .substringBefore("[5] WICHTIGE EREIGNISSE / FEHLER")
+
+        assertTrue(summary.contains("runId=latest-run pid=702 backend=Vulkan"))
+        assertTrue(summary.contains("prefill=1200000us"))
+        assertTrue(summary.contains("TTFT=1450000us"))
+        assertTrue(summary.contains("decode=3200000us"))
+        assertTrue(summary.contains("decodeSyncWait=2800000us"))
+        assertTrue(summary.contains("queueSubmit=7000us"))
+        assertTrue(summary.contains("fenceWait=2400000us"))
+        assertTrue(summary.contains("cpuNodes=8 vulkanNodes=112"))
+        assertFalse(summary.contains("older-run"))
+        assertFalse(summary.contains("unrelated-run"))
+    }
+
+    @Test
+    fun singleRunPhaseSummaryMarksMissingAndMismatchedEvidenceUnavailable() {
+        val lines = listOf(
+            "2026-11-20 19:00:00.000 [INFO] [inference] INFERENCE_PHASE_METRICS - " +
+                "runId=partial-run,pid=701,backend=CPU,prefillUs=-1,ttftUs=-1,decodeUs=-1," +
+                "finishReason=ERROR,status=FAILED,generatedTokens=0",
+            "2026-11-20 19:00:00.001 [NATIVE] LocalLlmEngineNative LOCAL_LLM_INFERENCE_PHASE_TOTALS - " +
+                "runId=partial-run,pid=999,backend=CPU,decodeWallUs=123"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+        val summary = report.substringAfter("[4a] EINZEL-LAUF – KORRELATION DER INFERENZPHASEN")
+            .substringBefore("[5] WICHTIGE EREIGNISSE / FEHLER")
+
+        assertTrue(summary.contains("prefill=n/a"))
+        assertTrue(summary.contains("TTFT=n/a"))
+        assertTrue(summary.contains("decode=n/a"))
+        assertTrue(summary.contains("Native totals: UNAVAILABLE (PID mismatch: Kotlin=701, native=999)"))
+        assertTrue(summary.contains("Graph distribution: UNAVAILABLE"))
+    }
+
+    @Test
+    fun singleRunPhaseSummaryExplainsWhenNoInferencePhaseEventExists() {
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(
+                "2026-11-20 19:00:00.001 [NATIVE] LocalLlmEngineNative LOCAL_LLM_INFERENCE_PHASE_TOTALS - " +
+                    "runId=orphan-run,pid=701,backend=CPU,decodeWallUs=123"
+            )
+        )
+        val summary = report.substringAfter("[4a] EINZEL-LAUF – KORRELATION DER INFERENZPHASEN")
+            .substringBefore("[5] WICHTIGE EREIGNISSE / FEHLER")
+
+        assertTrue(summary.contains("Kein INFERENCE_PHASE_METRICS-Ereignis vorhanden"))
+    }
+
+    @Test
     fun extractedNativeMetricParserKeepsCurrentAndLegacySyncFieldsDistinct() {
         val currentLine = nativeMetric(
             index = 3, decodeUs = 900L, pid = 42, runId = "current-run", backend = "Vulkan"
