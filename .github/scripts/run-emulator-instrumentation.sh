@@ -91,15 +91,15 @@ collect_device_diagnostics() {
 
   if [[ "$app_captured" != true ]]; then
     if [[ ! -s "$run-as-target.stderr" ]]; then
-      printf 'No engine-*.log files were readable while target package %s was installed.\\n' \
+      printf 'No engine-*.log files were readable while target package %s was installed.\n' \
         "$target_package" > "$diagnostics_dir/app-diagnostics-pull.stderr"
     else
-      printf 'App-private diagnostics could not be captured while target package %s was installed.\\n' \
+      printf 'App-private diagnostics could not be captured while target package %s was installed.\n' \
         "$target_package" > "$diagnostics_dir/app-diagnostics-pull.stderr"
     fi
   fi
-  if [[ "$exit_info_captured" != true && ! -s "$exit-info-pull.stderr" ]]; then
-    printf 'ActivityManager exit-info was not captured while target package %s was installed.\\n' \
+  if [[ "$exit_info_captured" != true && ! -s "$diagnostics_dir/exit-info-pull.stderr" ]]; then
+    printf 'ActivityManager exit-info was not captured while target package %s was installed.\n' \
       "$target_package" > "$diagnostics_dir/exit-info-pull.stderr"
   fi
   if [[ "$process_list_captured" != true ]]; then
