@@ -25,13 +25,13 @@ internal fun FilePickerSection(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "GGUF-Datei direkt öffnen (SAF)",
+                        text = "GGUF-Modelle importieren (SAF)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Wähle eine lokale .gguf Modelldatei über das sichere Android Storage Access Framework (SAF). Keine Internetverbindung und keine Webkataloge.",
+                        text = "Wähle eine einzelne GGUF-Datei, mehrere Dateien oder einen ganzen Ordner. Alle Auswahlarten verwenden denselben Import in die private Modellbibliothek.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -40,12 +40,12 @@ internal fun FilePickerSection(
 
                     Column {
                         Text(
-                            text = "Direkter Zugriff auf Originaldatei",
+                            text = "Einheitlicher Modellimport",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            text = "Die Engine öffnet die ausgewählte Originaldatei direkt über einen Android-Dateideskriptor im isolierten Inferenzprozess. Es wird keine zweite GGUF-Datei angelegt oder umbenannt; die Originaldatei bleibt am gewählten Speicherort.",
+                            text = "Einzel- und Mehrfachauswahl werden identisch verarbeitet: GGUF-Prüfung, SHA-256-Ermittlung, inhaltsbasierte Ablage und Anzeige in der Modellliste. Das Original bleibt unverändert am Quellort.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
