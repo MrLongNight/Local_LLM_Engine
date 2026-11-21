@@ -148,7 +148,7 @@ abstract class ConfigurationSmokeViewModel(
             EngineDiagnostics.info(
                 "config_test",
                 "CONFIG_SMOKE_MODEL_SHA_REJECTED",
-                "status=MODEL_SHA_UNAVAILABLE,reason=${modelAssessment.reason}," +
+                "status=${modelAssessment.status},reason=${modelAssessment.reason}," +
                     "model=${model.name},bytes=${model.sizeBytes},shaStatus=${modelAssessment.shaStatus}"
             )
             rejectSmokeRun(
@@ -213,8 +213,8 @@ abstract class ConfigurationSmokeViewModel(
                 "config_test",
                 "CONFIG_SMOKE_STARTED",
                 "testMode=" + testMode +
-                    ",modelShaStatus=" + modelAssessment.status +
-                    ",modelShaReason=" + modelAssessment.reason +
+                    ",modelShaAssessment=" + modelAssessment.status +
+                    ",modelShaAssessmentReason=" + modelAssessment.reason +
                     ",modelShaStatus=" + modelAssessment.shaStatus +
                     ",d0BaselineEligible=" + d0BaselineEligible +
                     ",model=" + model.name + ",bytes=" + model.sizeBytes +
@@ -419,7 +419,7 @@ abstract class ConfigurationSmokeViewModel(
                                 ",backend=" + backend + ",status=" +
                                 (if (outputGatePassed) "PASS" else "FAIL") +
                                 ",testMode=" + testMode +
-                                ",modelShaStatus=" + modelAssessment.status +
+                                ",modelShaAssessment=" + modelAssessment.status +
                                 ",d0BaselineEligible=" + d0BaselineEligible +
                                 ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
                                 ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
