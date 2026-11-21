@@ -309,7 +309,7 @@ jobs:
           )
           PY
 
-      - name: Verify app version and build number
+      - name: Verify app version in generated config and final APK
         shell: bash
         env:
           EXPECTED_BUILD_NUMBER: ${{ github.run_number }}
@@ -317,10 +317,37 @@ jobs:
           set -euo pipefail
           expected_version="1.0.${EXPECTED_BUILD_NUMBER}"
           app_build_config="$(find app/build/generated -type f -name BuildConfig.java -print -quit)"
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          apk_analyzer="$(find "$ANDROID_HOME/cmdline-tools" -type f -name apkanalyzer -print -quit)"
           test -n "$app_build_config"
+          test -n "$apk_analyzer"
+          test -s "$apk"
           grep -Fq "VERSION_CODE = ${EXPECTED_BUILD_NUMBER};" "$app_build_config"
           grep -Fq "VERSION_NAME = \"$expected_version\";" "$app_build_config"
-          echo "Verified app version $expected_version and build number ${EXPECTED_BUILD_NUMBER} in $app_build_config"
+
+          # Verify the packaged APK, not just Gradle's generated source. This catches
+          # stale/mismatched package outputs before the artifact can be published.
+          actual_code="$("$apk_analyzer" manifest version-code "$apk")"
+          actual_name="$("$apk_analyzer" manifest version-name "$apk")"
+          actual_id="$("$apk_analyzer" manifest application-id "$apk")"
+          test "$actual_code" = "$EXPECTED_BUILD_NUMBER"
+          test "$actual_name" = "$expected_version"
+          test "$actual_id" = "com.aistudio.localllm.mdoanx.dmmv"
+
+          named_apk="app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${EXPECTED_BUILD_NUMBER}.apk"
+          cp "$apk" "$named_apk"
+          sha256sum "$named_apk" > "$named_apk.sha256"
+          {
+            echo "build_number=$EXPECTED_BUILD_NUMBER"
+            echo "version_name=$actual_name"
+            echo "version_code=$actual_code"
+            echo "application_id=$actual_id"
+            echo "commit_sha=$(git rev-parse HEAD)"
+            echo "apk_sha256=$(sha256sum "$named_apk" | cut -d ' ' -f 1)"
+          } > "$named_apk.txt"
+
+          echo "Verified final APK: version=$actual_name, versionCode=$actual_code, applicationId=$actual_id"
+          echo "Published filename: $named_apk"
 
       - name: Verify instrumentation test APK exists
         shell: bash
@@ -648,7 +675,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Local-LMM-Engine-debug-diagnostics-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk
+            app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk.sha256
+            app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk.txt
           if-no-files-found: error
           retention-days: 14
 
