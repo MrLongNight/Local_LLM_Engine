@@ -1655,7 +1655,7 @@ internal class InferenceClient(
                 val count = processKillCount.incrementAndGet()
                 EngineDiagnostics.info(
                     "ipc_client", "PROCESS_KILL_REQUESTED",
-                    "reason=$reason,pid=$targetPid,processKillRequests=$count,cooperativeCancels=${cooperativeCancelCount.get()}"
+                    "reason=$reason,targetPid=$targetPid,processKillRequests=$count,cooperativeCancels=${cooperativeCancelCount.get()}"
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "Remote inference process may already have exited", e)
@@ -1684,13 +1684,17 @@ internal class InferenceClient(
 
                 if (isAlive) {
                     Log.w(TAG, "Inference PID=$targetPid survived self-termination grace period; issuing client-side kill")
-                    EngineDiagnostics.info("ipc_client", "HARD_KILL", "Client-side kill for inference PID=$targetPid")
+                    EngineDiagnostics.info(
+                        "ipc_client",
+                        "HARD_KILL",
+                        "source=client_side_fallback,targetPid=$targetPid"
+                    )
                     try {
                         Process.killProcess(targetPid)
                         val count = processKillCount.incrementAndGet()
                         EngineDiagnostics.info(
                             "ipc_client", "PROCESS_KILL_REQUESTED",
-                            "reason=client_side_fallback,pid=$targetPid,processKillRequests=$count,cooperativeCancels=${cooperativeCancelCount.get()}"
+                            "reason=client_side_fallback,targetPid=$targetPid,processKillRequests=$count,cooperativeCancels=${cooperativeCancelCount.get()}"
                         )
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed client-side kill of inference PID=$targetPid", e)

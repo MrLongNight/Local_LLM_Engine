@@ -130,6 +130,8 @@ internal object EngineDiagnosticsReportBuilder {
             "PROCESS_EXIT_INFO_UNAVAILABLE",
             "PROCESS_KILLED",
             "KILL_PROCESS_REQUESTED",
+            "HARD_KILL",
+            "PROCESS_KILL_REQUESTED",
             "PROCESS_ABORT_REQUESTED",
             "PROCESS_ABORT_CONFIRMED",
             "PROCESS_ABORT_UNCONFIRMED",
@@ -200,6 +202,8 @@ internal object EngineDiagnosticsReportBuilder {
         "PROCESS_EXIT_INFO_UNAVAILABLE",
         "PROCESS_KILLED",
         "KILL_PROCESS_REQUESTED",
+        "HARD_KILL",
+        "PROCESS_KILL_REQUESTED",
         "PROCESS_ABORT_REQUESTED",
         "PROCESS_ABORT_CONFIRMED",
         "PROCESS_ABORT_UNCONFIRMED",
@@ -237,7 +241,11 @@ internal object EngineDiagnosticsReportBuilder {
         "processState",
         "importance",
         "processName",
-        "killedByAm"
+        "killedByAm",
+        "targetPid",
+        "source",
+        "processKillRequests",
+        "cooperativeCancels"
     )
 
     private fun isProcessLifecycleEvent(line: String): Boolean {
@@ -291,6 +299,8 @@ internal object EngineDiagnosticsReportBuilder {
         "MODEL_NATIVE_RUNTIME_READY" -> "Native Laufzeit bereit"
         "INFERENCE_TIMEOUT" -> "Zeitüberschreitung bei der Inferenz"
         "PROCESS_ABORT_CONFIRMED" -> "Inference-Prozess wurde beendet"
+        "HARD_KILL" -> "Clientseitige harte Prozessbeendigung"
+        "PROCESS_KILL_REQUESTED" -> "Prozess-Kill angefordert"
         "CORRECTNESS_GATE_RESULT" -> "Korrektheitsprüfung"
         "BACKEND_ACCEPTANCE_RESULT" -> "Backend-Abnahmetest abgeschlossen"
         "BACKEND_BENCHMARK_RESULT" -> "Backend-Benchmark abgeschlossen"
