@@ -1,4 +1,38 @@
+# Upstream llama.cpp pins KleidiAI through a GitHub Release asset. That endpoint
+# returned HTTP 403 in APK CI (release-assets download), although git clone from
+# github.com is available. Declare the same upstream release tag through Git before
+# adding llama.cpp; FetchContent's first declaration wins over the later upstream
+# URL declaration. Verify the resolved commit so the workaround cannot drift.
+include(FetchContent)
+FetchContent_Declare(kleidiai
+    GIT_REPOSITORY https://github.com/ARM-software/kleidiai.git
+    GIT_TAG v1.32.0
+    GIT_SHALLOW TRUE
+    GIT_PROGRESS TRUE
+)
+
 add_subdirectory(${LLAMA_SRC} build-llama)
+
+FetchContent_GetProperties(kleidiai
+    SOURCE_DIR _local_llm_kleidiai_source_dir
+    POPULATED _local_llm_kleidiai_populated
+)
+if(NOT _local_llm_kleidiai_populated OR NOT EXISTS "${_local_llm_kleidiai_source_dir}/CMakeLists.txt")
+    message(FATAL_ERROR "LocalLLM: pinned KleidiAI v1.32.0 source was not populated.")
+endif()
+execute_process(
+    COMMAND git -C "${_local_llm_kleidiai_source_dir}" rev-parse HEAD
+    RESULT_VARIABLE _local_llm_kleidiai_git_result
+    OUTPUT_VARIABLE _local_llm_kleidiai_commit
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT _local_llm_kleidiai_git_result EQUAL 0 OR
+   NOT _local_llm_kleidiai_commit STREQUAL "e181183111ac0c8bc66b63a573357e693fd73cfd")
+    message(FATAL_ERROR
+        "LocalLLM: expected KleidiAI v1.32.0 commit e181183111ac0c8bc66b63a573357e693fd73cfd, "
+        "got '${_local_llm_kleidiai_commit}'.")
+endif()
+message(STATUS "LocalLLM: verified KleidiAI v1.32.0 at ${_local_llm_kleidiai_commit}")
 
 # Replace only the compiled source path; the pinned upstream submodule remains pristine.
 if(NOT LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP OR NOT EXISTS "${LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP}")
