@@ -35,11 +35,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.BuildConfig
 import com.example.ui.EngineViewModel
 import com.example.ui.chat.ChatScreen
 import com.example.ui.modelimport.ModelImportScreen
 import com.example.ui.settings.SettingsScreen
 import com.mydocanizer.llm.engine.EngineDiagnostics
+
+internal fun formatAppVersion(versionName: String, versionCode: Int): String =
+    "v$versionName · Build $versionCode"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,15 +73,26 @@ fun MainScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Text(
-                        text = when (currentTab) {
-                            AppTab.CHAT -> "Local LLM Engine"
-                            AppTab.IMPORT -> "Modell-Import"
-                            AppTab.SETTINGS -> "Einstellungen"
-                        },
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = when (currentTab) {
+                                AppTab.CHAT -> "Local LLM Engine"
+                                AppTab.IMPORT -> "Modell-Import"
+                                AppTab.SETTINGS -> "Einstellungen"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            text = formatAppVersion(
+                                versionName = BuildConfig.VERSION_NAME,
+                                versionCode = BuildConfig.VERSION_CODE
+                            ),
+                            modifier = Modifier.testTag("top_app_bar_version"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 },
                 actions = {
                     if (currentTab == AppTab.CHAT) {
