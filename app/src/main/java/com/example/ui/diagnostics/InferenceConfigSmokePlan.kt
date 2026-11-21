@@ -13,92 +13,36 @@ import com.mydocanizer.llm.engine.VulkanMatvecWorkgroup
  * deterministic sampling; only backend-specific GPU offload differs.
  */
 internal object InferenceConfigSmokePlan {
-    internal data class D0ReferenceAssessment(
+    internal data class D0ModelAssessment(
         val status: String,
         val reason: String,
         val shaStatus: String,
-        val isReferenceModel: Boolean,
         val baselineEligible: Boolean
     )
 
     /**
-     * D0 is tied to the documented Qwen3-4B-Instruct-2507 Q4_K_M file.
-     * Missing SHA permits a functional reference run, but not a comparable baseline.
+     * D0 accepts the currently loaded model without checking its name, architecture,
+     * parameter count or quantization. A valid SHA proves that all three reloads use
+     * exactly the same model bytes.
      */
-    internal fun assessD0ReferenceModel(model: ModelInfo): D0ReferenceAssessment {
-        val fileIdentity = (model.name + " " + model.path).lowercase()
-        val identityCandidates = listOf(
-            model.name,
-            model.path.substringAfterLast('/'),
-            model.description
-        )
-        val quantizationText = listOf(model.name, model.path.substringAfterLast('/'), model.description)
-            .joinToString(" ")
-            .lowercase()
-        val compactQuantizationMarkers = Regex("""\bq\d+_k_[a-z0-9]+\b""")
-            .findAll(quantizationText)
-            .map { it.value }
-            .toList()
-        val ggmlQuantizationMarkers = Regex("""\b(q\d+_k)\s*-\s*(medium|small)\b""")
-            .findAll(quantizationText)
-            .map { match ->
-                val suffix = if (match.groupValues[2] == "medium") "m" else "s"
-                "${match.groupValues[1]}_$suffix"
-            }
-            .toList()
-        val quantizationMarkers = compactQuantizationMarkers + ggmlQuantizationMarkers
-        val checks = listOf(
-            "architecture_qwen3" to model.architecture.equals("qwen3", ignoreCase = true),
-            "parameter_count_3_5b_to_4_5b" to
-                (model.parameterCount in 3_500_000_000L..4_500_000_000L),
-            "reference_file_qwen3_4b_instruct_2507" to
-                identityCandidates.any(::matchesD0ReferenceIdentity),
-            "quantization_q4_k_m" to
-                (fileIdentity.contains("q4_k_m") &&
-                    quantizationMarkers.isNotEmpty() &&
-                    quantizationMarkers.all { it == "q4_k_m" })
-        )
-        val failed = checks.filterNot { it.second }.map { it.first }
+    internal fun assessD0ModelSha(model: ModelInfo): D0ModelAssessment {
         val sha = model.sha256?.trim()
         val shaStatus = when {
             sha.isNullOrEmpty() -> "UNAVAILABLE"
             sha.matches(Regex("[0-9a-fA-F]{64}")) -> "AVAILABLE"
             else -> "INVALID"
         }
-        val identityMatch = failed.isEmpty() && shaStatus != "INVALID"
-        val status = when {
-            !identityMatch -> "REFERENCE_MODEL_MISMATCH"
-            shaStatus == "AVAILABLE" -> "REFERENCE_MODEL_MATCH_SHA_AVAILABLE"
-            else -> "REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE"
+        val status = when (shaStatus) {
+            "AVAILABLE" -> "MODEL_SHA_AVAILABLE"
+            "UNAVAILABLE" -> "MODEL_SHA_UNAVAILABLE"
+            else -> "MODEL_SHA_INVALID"
         }
-        val reason = buildList {
-            addAll(failed)
-            if (shaStatus == "INVALID") add("sha256_invalid")
-            if (shaStatus == "UNAVAILABLE") add("sha256_unavailable")
-        }.joinToString("|").ifBlank { "all_reference_metadata_matched" }
-        return D0ReferenceAssessment(
-            status = status,
-            reason = reason,
-            shaStatus = shaStatus,
-            isReferenceModel = identityMatch,
-            baselineEligible = identityMatch && shaStatus == "AVAILABLE"
-        )
-    }
-    /**
-     * Accepts canonical upstream names and normalized owner-selected aliases such as
-     * 04.0B_Qwen3-2507_Instruct_... while keeping all four family markers in one
-     * filename/metadata candidate. Architecture, parameter count and quantization
-     * remain independent mandatory checks.
-     */
-    private fun matchesD0ReferenceIdentity(candidate: String): Boolean {
-        val normalized = candidate.lowercase()
-            .replace(Regex("""(?<![a-z0-9])0?4(?:[.,]0)?b(?![a-z0-9])"""), "4b")
-            .replace(Regex("""[^a-z0-9]+"""), " ")
-            .trim()
-        val tokens = normalized.split(Regex("""\s+"""))
-            .filter { it.isNotBlank() }
-            .toSet()
-        return listOf("qwen3", "4b", "instruct", "2507").all(tokens::contains)
+        val reason = when (shaStatus) {
+            "AVAILABLE" -> "sha256_available"
+            "UNAVAILABLE" -> "sha256_unavailable"
+            else -> "sha256_invalid"
+        }
+        return D0ModelAssessment(status, reason, shaStatus, shaStatus == "AVAILABLE")
     }
 
     const val MEASURED_TOKENS = 96
@@ -226,7 +170,7 @@ internal object InferenceConfigSmokePlan {
     }
 
     /** A D0 reload must prove the exact imported model bytes again. */
-    internal fun matchesD0ReferenceModelIdentity(requested: ModelInfo, loaded: ModelInfo): Boolean {
+    internal fun matchesD0ModelBytes(requested: ModelInfo, loaded: ModelInfo): Boolean {
         val requestedSha = requested.sha256?.trim()
             ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
             ?: return false

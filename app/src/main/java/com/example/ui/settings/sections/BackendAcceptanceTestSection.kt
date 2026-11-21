@@ -24,6 +24,21 @@ import com.example.ui.diagnostics.ConfigurationSmokeProgress
 import com.example.ui.diagnostics.ConfigurationSmokeRunStatus
 import com.mydocanizer.llm.engine.ModelInfo
 
+internal fun backendAcceptanceBlockReason(
+    hasCurrentModel: Boolean,
+    isBenchmarking: Boolean,
+    isConfigSmokeTesting: Boolean,
+    isGenerating: Boolean,
+    isImporting: Boolean
+): String? = when {
+    isConfigSmokeTesting -> "Der D0-Test läuft bereits."
+    isBenchmarking -> "Ein anderer Benchmark läuft noch. D0 startet danach."
+    isGenerating -> "Eine Inferenz läuft noch. D0 startet nach deren Abschluss."
+    isImporting -> "Ein Modellimport läuft noch. D0 startet nach dessen Abschluss."
+    !hasCurrentModel -> "Zuerst ein GGUF-Modell laden."
+    else -> null
+}
+
 @Composable
 internal fun BackendAcceptanceTestSection(
     currentModel: ModelInfo?,
@@ -34,6 +49,14 @@ internal fun BackendAcceptanceTestSection(
     isImporting: Boolean,
     viewModel: EngineViewModel
 ) {
+    val blockReason = backendAcceptanceBlockReason(
+        hasCurrentModel = currentModel != null,
+        isBenchmarking = isBenchmarking,
+        isConfigSmokeTesting = isConfigSmokeTesting,
+        isGenerating = isGenerating,
+        isImporting = isImporting
+    )
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -43,20 +66,20 @@ internal fun BackendAcceptanceTestSection(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "D0 führt drei CPU-only-Läufe mit Qwen3-4B-Instruct-2507 Q4_K_M aus (GPU-Layer=0, Vulkan wird nicht gestartet). Eine gültige SHA-256 ist Pflicht: Das Modell vorher in die private Modellbibliothek importieren; direkte externe SAF-Deskriptoren liefern keinen verifizierten Hash. Der zweite Test ist ein separater CPU/Vulkan-Kandidatenvergleich.",
+                text = "D0 führt drei CPU-only-Läufe mit dem aktuell geladenen GGUF aus (GPU-Layer=0, Vulkan wird nicht gestartet). Name, Architektur, Parameterzahl und Quantisierung des Modells sind keine Startbedingung. Eine gültige SHA-256 sichert nur dieselben Modellbytes über alle drei Reloads; das Modell vorher in die private Modellbibliothek importieren. Der zweite Test ist ein separater CPU/Vulkan-Kandidatenvergleich.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(10.dp))
             Button(
                 onClick = { viewModel.runConfigurationSmokeTest() },
-                enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                enabled = blockReason == null,
                 modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
             ) {
                 Text(
                     when {
                         isConfigSmokeTesting -> "D0-Test läuft…"
-                        isBenchmarking -> "Anderer Test läuft…"
+                        blockReason != null -> "D0 derzeit nicht startbar"
                         else -> "D0: drei CPU-only-Referenzläufe starten"
                     }
                 )
@@ -64,21 +87,22 @@ internal fun BackendAcceptanceTestSection(
             Spacer(modifier = Modifier.height(8.dp))
             Button(
                 onClick = { viewModel.runGeneralConfigurationSmokeTest() },
-                enabled = currentModel != null && !isBenchmarking && !isGenerating && !isImporting,
+                enabled = blockReason == null,
                 modifier = Modifier.fillMaxWidth().testTag("backend_general_smoke_button")
             ) {
                 Text(
                     when {
-                        isConfigSmokeTesting -> "Modelltest läuft…"
-                        isBenchmarking -> "Anderer Test läuft…"
+                        isConfigSmokeTesting -> "D0-Test läuft…"
+                        blockReason != null -> "Vergleich derzeit nicht startbar"
                         else -> "Separaten CPU/Vulkan-Kandidatenvergleich starten"
                     }
                 )
             }
-            if (currentModel == null) {
+            if (blockReason != null && !isConfigSmokeTesting) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Zuerst ein GGUF-Modell laden. Danach wird der passende Test aktiv.",
+                    blockReason,
+                    modifier = Modifier.testTag("backend_acceptance_block_reason"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

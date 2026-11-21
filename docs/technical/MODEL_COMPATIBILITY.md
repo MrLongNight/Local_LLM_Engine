@@ -90,7 +90,7 @@ The overlay comment records repeated runtime-verified Mali-G57 measurements for 
 
 Use **Settings → D0-CPU-Referenz und Backendvergleich → D0: drei CPU-only-Referenzläufe starten** for the Gate-A reference. The D0 action runs exactly three separate CPU inference profiles. It does not create or load a Vulkan candidate profile. The separate CPU/Vulkan candidate action is reserved for the paired D1a parity check; do not use it as the D0 CPU baseline.
 
-### Fixed model and identity
+### Model choice and byte identity
 
 - **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF).
 - **Filename aliases:** User-standardized names are supported. D0 matches the Qwen3 / 4B / Instruct / 2507 identity in one normalized filename or GGUF-description candidate (including the `04.0B_Qwen3-2507_Instruct_...` form), while architecture, 3.5–4.5 billion parameter count and Q4_K_M remain separate mandatory checks. A renamed filename cannot override conflicting GGUF metadata.

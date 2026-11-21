@@ -82,6 +82,11 @@ abstract class ConfigurationSmokeViewModel(
     }
 
     private fun rejectSmokeRun(message: String) {
+        EngineDiagnostics.info(
+            "config_test",
+            "CONFIG_SMOKE_START_REJECTED",
+            "reason=" + message.replace(',', ';').lines().joinToString(" ").take(320)
+        )
         _configSmokeReport.value = message
         _errorMessage.value = message
         _configurationSmokeProgress.value = ConfigurationSmokeProgress(
@@ -178,7 +183,7 @@ abstract class ConfigurationSmokeViewModel(
             phase = ConfigurationSmokePhase.PREPARING,
             currentStep = 1,
             message = if (requireD0Reference) {
-                "Modellidentität und SHA-256 bestätigt. Drei CPU-only-Referenzläufe werden vorbereitet; Vulkan bleibt aus."
+                "Modell-SHA-256 bestätigt. Drei CPU-only-Läufe werden vorbereitet; Vulkan bleibt aus."
             } else {
                 "Modellkandidat erkannt. CPU- und Vulkan-Profile werden vorbereitet…"
             }

@@ -15,148 +15,45 @@ import org.junit.Test
 
 class InferenceConfigSmokePlanTest {
     @Test
-    fun acceptsOnlyTheFixedQwen3FourBInstruct2507Q4KmReferenceForD0() {
-        val matching = InferenceConfigSmokePlan.assessD0ReferenceModel(
+    fun d0AcceptsTheLoadedModelWithoutCheckingItsNameArchitectureSizeOrQuantization() {
+        val result = InferenceConfigSmokePlan.assessD0ModelSha(
             ModelInfo(
-                name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-                path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-                sizeBytes = 2_500_000_000L,
-                parameterCount = 4_020_000_000L,
-                architecture = "qwen3",
-                description = "Q4_K_M",
+                name = "Llama-3.2-1B-Instruct-Q5_K_M.gguf",
+                path = "/models/Llama-3.2-1B-Instruct-Q5_K_M.gguf",
+                sizeBytes = 1_234_567_890L,
+                parameterCount = 1_234_000_000L,
+                architecture = "llama",
+                description = "Q5_K_M",
                 sha256 = "a".repeat(64)
             )
         )
-        assertEquals("REFERENCE_MODEL_MATCH_SHA_AVAILABLE", matching.status)
-        assertTrue(matching.isReferenceModel)
-        assertTrue(matching.baselineEligible)
-        assertEquals("AVAILABLE", matching.shaStatus)
-
-        val wrongFamily = InferenceConfigSmokePlan.assessD0ReferenceModel(
-            ModelInfo(
-                name = "Qwen3-1.7B-Q4_K_M.gguf",
-                path = "/models/Qwen3-1.7B-Q4_K_M.gguf",
-                sizeBytes = 1_700_000_000L,
-                parameterCount = 1_700_000_000L,
-                architecture = "qwen3",
-                description = "Q4_K_M"
-            )
-        )
-        assertEquals("REFERENCE_MODEL_MISMATCH", wrongFamily.status)
-        assertFalse(wrongFamily.isReferenceModel)
-        assertFalse(wrongFamily.baselineEligible)
-        assertTrue(wrongFamily.reason.contains("reference_file_qwen3_4b_instruct_2507"))
+        assertEquals("MODEL_SHA_AVAILABLE", result.status)
+        assertEquals("AVAILABLE", result.shaStatus)
+        assertTrue(result.baselineEligible)
     }
 
     @Test
-    fun acceptsOwnerStandardizedQwen3FourBInstruct2507FilenameWithoutPromotingMissingShaToBaseline() {
-        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
-            ModelInfo(
-                name = "2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e-" +
-                    "04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf",
-                path = "content://provider/document/42",
-                sizeBytes = 2_491_329_904L,
-                parameterCount = 4_022_468_096L,
-                architecture = "qwen3",
-                description = "Qwen3 4B Instruct 2507 | qwen3 4B Q4_K - Medium",
-                sha256 = null
-            )
-        )
-
-        assertEquals("REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE", result.status)
-        assertTrue(result.isReferenceModel)
-        assertFalse(result.baselineEligible)
-        assertEquals("UNAVAILABLE", result.shaStatus)
-        assertEquals("sha256_unavailable", result.reason)
-    }
-
-    @Test
-    fun rejectsOwnerStandardizedFourBBaseModelAsD0InstructReference() {
-        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
-            ModelInfo(
-                name = "04.0B_Qwen3-2507_Base_256k_Q4_K_M.gguf",
-                path = "content://provider/document/43",
-                sizeBytes = 2_491_329_904L,
-                parameterCount = 4_022_468_096L,
-                architecture = "qwen3",
-                description = "Qwen3 4B Base 2507 | qwen3 4B Q4_K - Medium",
-                sha256 = "c".repeat(64)
-            )
-        )
-
-        assertEquals("REFERENCE_MODEL_MISMATCH", result.status)
-        assertFalse(result.isReferenceModel)
-        assertFalse(result.baselineEligible)
-        assertTrue(result.reason.contains("reference_file_qwen3_4b_instruct_2507"))
-    }
-
-    @Test
-    fun requiresArchitectureParameterCountAndQ4KmMetadataForD0() {
+    fun d0RequiresOnlyAValidShaForReproducibleModelBytes() {
         val base = ModelInfo(
-            name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-            path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            name = "Any-Loaded-Model.gguf",
+            path = "/models/Any-Loaded-Model.gguf",
             sizeBytes = 2_500_000_000L,
-            parameterCount = 4_020_000_000L,
-            architecture = "qwen3",
-            description = "Q4_K_M",
+            parameterCount = 999_000_000L,
+            architecture = "any_architecture",
+            description = "Any quantization",
             sha256 = "b".repeat(64)
         )
-        assertFalse(
-            InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(architecture = "qwen2")).isReferenceModel
-        )
-        assertFalse(
-            InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(parameterCount = 1_700_000_000L)).isReferenceModel
-        )
-        assertTrue(
-            InferenceConfigSmokePlan.assessD0ReferenceModel(
-                base.copy(description = "Q4_K - Medium")
-            ).isReferenceModel
-        )
-        assertFalse(
-            InferenceConfigSmokePlan.assessD0ReferenceModel(
-                base.copy(description = "Q5_K - Medium")
-            ).isReferenceModel
-        )
-        assertFalse(
-            InferenceConfigSmokePlan.assessD0ReferenceModel(base.copy(description = "Q5_K_M")).isReferenceModel
-        )
-    }
-
-    @Test
-    fun missingShaAllowsFunctionalReferenceCheckButDisqualifiesComparableD0Baseline() {
-        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
-            ModelInfo(
-                name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-                path = "content://provider/document/42",
-                sizeBytes = 2_500_000_000L,
-                parameterCount = 4_020_000_000L,
-                architecture = "qwen3",
-                description = "Q4_K_M",
-                sha256 = null
-            )
-        )
-        assertEquals("REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE", result.status)
-        assertTrue(result.isReferenceModel)
-        assertFalse(result.baselineEligible)
-        assertEquals("UNAVAILABLE", result.shaStatus)
-    }
-
-    @Test
-    fun malformedShaDisqualifiesD0ReferenceIdentity() {
-        val result = InferenceConfigSmokePlan.assessD0ReferenceModel(
-            ModelInfo(
-                name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-                path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-                sizeBytes = 2_500_000_000L,
-                parameterCount = 4_020_000_000L,
-                architecture = "qwen3",
-                description = "Q4_K_M",
-                sha256 = "not-a-sha"
-            )
-        )
-        assertEquals("REFERENCE_MODEL_MISMATCH", result.status)
-        assertEquals("INVALID", result.shaStatus)
-        assertFalse(result.isReferenceModel)
+        val valid = InferenceConfigSmokePlan.assessD0ModelSha(base)
+        assertEquals("MODEL_SHA_AVAILABLE", valid.status)
+        assertTrue(valid.baselineEligible)
+        val missing = InferenceConfigSmokePlan.assessD0ModelSha(base.copy(sha256 = null))
+        assertEquals("MODEL_SHA_UNAVAILABLE", missing.status)
+        assertFalse(missing.baselineEligible)
+        assertEquals("sha256_unavailable", missing.reason)
+        val malformed = InferenceConfigSmokePlan.assessD0ModelSha(base.copy(sha256 = "not-a-sha"))
+        assertEquals("MODEL_SHA_INVALID", malformed.status)
+        assertEquals("INVALID", malformed.shaStatus)
+        assertFalse(malformed.baselineEligible)
     }
 
     @Test
@@ -208,28 +105,28 @@ class InferenceConfigSmokePlanTest {
             sha256 = "a".repeat(64)
         )
         assertTrue(
-            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(
+            InferenceConfigSmokePlan.matchesD0ModelBytes(
                 reference,
                 reference.copy(path = "/reloaded/model.gguf")
             )
         )
         assertFalse(
-            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(
+            InferenceConfigSmokePlan.matchesD0ModelBytes(
                 reference,
                 reference.copy(sha256 = "b".repeat(64))
             )
         )
         assertFalse(
-            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(
+            InferenceConfigSmokePlan.matchesD0ModelBytes(
                 reference,
                 reference.copy(sizeBytes = reference.sizeBytes + 1)
             )
         )
         assertFalse(
-            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(reference, reference.copy(sha256 = null))
+            InferenceConfigSmokePlan.matchesD0ModelBytes(reference, reference.copy(sha256 = null))
         )
         assertFalse(
-            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(reference.copy(sha256 = null), reference)
+            InferenceConfigSmokePlan.matchesD0ModelBytes(reference.copy(sha256 = null), reference)
         )
     }
 

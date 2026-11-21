@@ -3,6 +3,15 @@ plugins {
   alias(libs.plugins.kotlin.compose)
 }
 
+val appBaseVersionName = providers.gradleProperty("appVersionName").orElse("1.0").get()
+val appBuildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER")
+  .orElse(providers.gradleProperty("appBuildNumber"))
+  .orElse("1")
+  .get()
+  .toIntOrNull()
+  ?.takeIf { it in 1..2_100_000_000 }
+  ?: error("App build number must be a positive Android versionCode (1..2100000000)")
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -12,8 +21,8 @@ android {
     applicationId = "com.aistudio.localllm.mdoanx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = appBuildNumber
+    versionName = "$appBaseVersionName.$appBuildNumber"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk {

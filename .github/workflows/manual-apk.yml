@@ -291,6 +291,19 @@ jobs:
           )
           PY
 
+      - name: Verify app version and build number
+        shell: bash
+        env:
+          EXPECTED_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          expected_version="1.0.${EXPECTED_BUILD_NUMBER}"
+          app_build_config="$(find app/build/generated -type f -name BuildConfig.java -print -quit)"
+          test -n "$app_build_config"
+          grep -Fq "VERSION_CODE = ${EXPECTED_BUILD_NUMBER};" "$app_build_config"
+          grep -Fq "VERSION_NAME = \"$expected_version\";" "$app_build_config"
+          echo "Verified app version $expected_version and build number ${EXPECTED_BUILD_NUMBER} in $app_build_config"
+
       - name: Verify instrumentation test APK exists
         shell: bash
         run: |
