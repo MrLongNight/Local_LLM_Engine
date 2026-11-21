@@ -974,4 +974,29 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("Konfigurationstest nicht gestartet"))
     }
 
+
+    @Test
+    fun compactExportRetainsProcessExitAndDisconnectEventsBeyondGeneralEventTail() {
+        val processEvents = listOf(
+            "2026-11-21 19:05:13.000 [INFO] [ipc_client] SERVICE_DISCONNECTED - " +
+                "disconnectedPid=26257,reason=binder_died",
+            "2026-11-21 19:05:13.010 [INFO] [ipc_client] PROCESS_EXIT_INFO - " +
+                "pid=26257,callback=SERVICE_DISCONNECTED,reason=LOW_MEMORY,description=low memory"
+        )
+        val laterModelEvents = (1..36).map { index ->
+            "2026-11-21 19:06:%02d.000 [INFO] [engine] MODEL_LOAD_PROGRESS - ".format(index) +
+                "percent=$index,pid=28000"
+        }
+
+        val report = EngineDiagnostics.buildCompactReportForTest(processEvents + laterModelEvents)
+        val processSection = report.substringAfter("[5a] PROZESS- UND SERVICE-LEBENSZYKLUS")
+            .substringBefore("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
+
+        assertTrue(processSection.contains("SERVICE_DISCONNECTED"))
+        assertTrue(processSection.contains("disconnectedPid=26257"))
+        assertTrue(processSection.contains("PROCESS_EXIT_INFO"))
+        assertTrue(processSection.contains("reason=LOW_MEMORY"))
+        assertTrue(report.contains("MODEL_LOAD_PROGRESS"))
+    }
+
 }
