@@ -21,6 +21,7 @@ import com.mydocanizer.llm.engine.InferenceResult
 import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.internal.LocalLlmEngineImpl
 import com.mydocanizer.llm.engine.internal.ModelMemoryGuard
+import com.mydocanizer.llm.engine.internal.InsufficientModelMemoryException
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
@@ -337,6 +338,13 @@ class InferenceService : Service() {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (t: Throwable) {
+                    if (t is InsufficientModelMemoryException) {
+                        EngineDiagnostics.info(
+                            "memory",
+                            "MODEL_LOAD_MEMORY_REJECTED",
+                            t.diagnosticDetails()
+                        )
+                    }
                     Log.e(TAG, "Unhandled exception in loadModel", t)
                     EngineDiagnostics.error("ipc", "MODEL_LOAD_EXCEPTION", t)
                     callback?.onModelLoadFailed(t.message ?: t.javaClass.simpleName)

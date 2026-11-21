@@ -56,6 +56,35 @@ class ModelMemoryGuardTest {
     }
 
     @Test
+    fun hardLimitRejectionExposesEffectiveContextAndStableReasonForLargeModel() {
+        val modelBytes = 5_000L * mib
+        val requestedContext = 4096
+
+        try {
+            ModelMemoryGuard.plan(
+                modelBytes = modelBytes,
+                requestedContextTokens = requestedContext,
+                availableBytes = 4_000L * mib,
+                totalBytes = 6_000L * mib
+            )
+            throw AssertionError("Expected large model to be rejected after minimum-context reduction")
+        } catch (expected: InsufficientModelMemoryException) {
+            assertEquals(InsufficientModelMemoryException.REASON_TOTAL_RAM_HARD_LIMIT, expected.reasonCode)
+            assertEquals(modelBytes, expected.modelBytes)
+            assertEquals(requestedContext, expected.requestedContextTokens)
+            assertEquals(ModelMemoryGuard.MIN_CONTEXT_TOKENS, expected.effectiveContextTokens)
+            assertTrue(expected.requiredBytes > expected.hardLimitBytes)
+
+            val details = expected.diagnosticDetails()
+            assertTrue(details.contains("reason=TOTAL_RAM_HARD_LIMIT"))
+            assertTrue(details.contains("requestedContext=4096"))
+            assertTrue(details.contains("effectiveContext=256"))
+            assertTrue(details.contains("requiredBytes=${expected.requiredBytes}"))
+            assertTrue(details.contains("hardLimitBytes=${expected.hardLimitBytes}"))
+        }
+    }
+
+    @Test
     fun explicitOverrideAllowsARequestAboveTheHardLimit() {
         val plan = ModelMemoryGuard.plan(
             5_000L * mib, 256, 4_000L * mib, 6_000L * mib, allowHardLimitOverride = true

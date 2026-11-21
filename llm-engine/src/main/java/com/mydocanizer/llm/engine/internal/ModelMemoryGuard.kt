@@ -57,11 +57,14 @@ internal object ModelMemoryGuard {
         val hardLimitExceeded = required > hardLimitBytes
         if (hardLimitExceeded && !allowHardLimitOverride) {
             throw InsufficientModelMemoryException(
-                "$OVERRIDE_REQUIRED_MARKER " +
-                    "Geschätzter Bedarf=${required / MIB} MiB liegt auch mit Kontext $contextTokens " +
-                    "über 85% des Gesamtspeichers (${hardLimitBytes / MIB} MiB). " +
-                    "Modell=${modelBytes / MIB} MiB, KV-Cache=${kvEstimate / MIB} MiB, " +
-                    "Gesamtspeicher=${totalBytes / MIB} MiB. Bestätige „Trotzdem laden“, um fortzufahren."
+                modelBytes = modelBytes,
+                requestedContextTokens = requestedContextTokens,
+                effectiveContextTokens = contextTokens,
+                estimatedKvBytes = kvEstimate,
+                requiredBytes = required,
+                availableBytes = availableBytes,
+                totalBytes = totalBytes,
+                hardLimitBytes = hardLimitBytes
             )
         }
 
@@ -93,4 +96,37 @@ internal object ModelMemoryGuard {
         if (a > Long.MAX_VALUE - b) Long.MAX_VALUE else a + b
 }
 
-internal class InsufficientModelMemoryException(message: String) : IllegalStateException(message)
+internal class InsufficientModelMemoryException(
+    val modelBytes: Long,
+    val requestedContextTokens: Int,
+    val effectiveContextTokens: Int,
+    val estimatedKvBytes: Long,
+    val requiredBytes: Long,
+    val availableBytes: Long,
+    val totalBytes: Long,
+    val hardLimitBytes: Long
+) : IllegalStateException(
+    buildString {
+        append("${ModelMemoryGuard.OVERRIDE_REQUIRED_MARKER} ")
+        append("Geschätzter Bedarf=${requiredBytes / (1024L * 1024L)} MiB liegt auch mit Kontext ")
+        append("$effectiveContextTokens über 85% des Gesamtspeichers ")
+        append("(${hardLimitBytes / (1024L * 1024L)} MiB). ")
+        append("Modell=${modelBytes / (1024L * 1024L)} MiB, ")
+        append("KV-Cache=${estimatedKvBytes / (1024L * 1024L)} MiB, ")
+        append("Gesamtspeicher=${totalBytes / (1024L * 1024L)} MiB. ")
+        append("Bestätige „Trotzdem laden“, um fortzufahren.")
+    }
+) {
+    val reasonCode: String
+        get() = REASON_TOTAL_RAM_HARD_LIMIT
+
+    fun diagnosticDetails(): String =
+        "reason=$reasonCode,modelBytes=$modelBytes,requestedContext=$requestedContextTokens," +
+            "effectiveContext=$effectiveContextTokens,kvEstimateBytes=$estimatedKvBytes," +
+            "requiredBytes=$requiredBytes,availableBytes=$availableBytes," +
+            "totalBytes=$totalBytes,hardLimitBytes=$hardLimitBytes"
+
+    companion object {
+        const val REASON_TOTAL_RAM_HARD_LIMIT = "TOTAL_RAM_HARD_LIMIT"
+    }
+}
