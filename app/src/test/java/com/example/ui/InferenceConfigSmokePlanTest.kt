@@ -256,20 +256,22 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
-    fun fixedPromptAndExpectedOutputAreStableAndNormalizeOnlyOuterWhitespace() {
-        assertEquals(
-            "ERGEBNIS=155\nFOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32",
-            InferenceConfigSmokePlan.EXPECTED_OUTPUT
-        )
+    fun fixedPromptAndExpectedOutputAreShortAndNormalizeOnlyOuterWhitespace() {
+        assertEquals("ERGEBNIS=155", InferenceConfigSmokePlan.EXPECTED_OUTPUT)
+        assertEquals(96, InferenceConfigSmokePlan.MEASURED_TOKENS)
         assertEquals(
             InferenceConfigSmokePlan.EXPECTED_OUTPUT,
             InferenceConfigSmokePlan.normalizeOutput("\r\n" + InferenceConfigSmokePlan.EXPECTED_OUTPUT + "\r\n")
         )
         assertNotEquals(
             InferenceConfigSmokePlan.EXPECTED_OUTPUT,
-            InferenceConfigSmokePlan.normalizeOutput("ERGEBNIS=155\nFOLGE=1, 2,3,4")
+            InferenceConfigSmokePlan.normalizeOutput("ERGEBNIS=154")
         )
-        assertEquals(true, InferenceConfigSmokePlan.USER_PROMPT.contains("8 * 24 - 37"))
+        assertTrue(InferenceConfigSmokePlan.USER_PROMPT.contains("8 * 24 - 37"))
+        assertTrue(InferenceConfigSmokePlan.USER_PROMPT.contains("ERGEBNIS=<Zahl>"))
+        assertTrue(InferenceConfigSmokePlan.USER_PROMPT.length <= 80)
+        assertFalse(InferenceConfigSmokePlan.USER_PROMPT.contains("155"))
+        assertFalse(InferenceConfigSmokePlan.USER_PROMPT.contains("FOLGE"))
     }
 
     @Test

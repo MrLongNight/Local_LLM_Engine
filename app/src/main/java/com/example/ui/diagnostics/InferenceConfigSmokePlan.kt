@@ -55,13 +55,9 @@ internal object InferenceConfigSmokePlan {
     const val COOLDOWN_MS = 0L
 
     const val USER_PROMPT =
-        "Berechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. " +
-            "In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. " +
-            "Keine Einleitung, keine Erklärung und kein weiterer Text."
+        "Berechne 8 * 24 - 37. Gib ausschließlich ERGEBNIS=<Zahl> aus."
 
-    const val EXPECTED_OUTPUT =
-        "ERGEBNIS=155\n" +
-            "FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32"
+    const val EXPECTED_OUTPUT = "ERGEBNIS=155"
 
     fun normalizeOutput(output: String): String =
         output.replace("\r\n", "\n").replace('\r', '\n').trim()
