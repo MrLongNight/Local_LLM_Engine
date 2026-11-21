@@ -286,7 +286,7 @@ class InferenceCancellationTest : InferenceServiceProcessTestBase() {
                     "A successful cooperative cancel must not request process termination",
                     cancellationLog.any { line ->
                         line.contains("[ipc_client] COOPERATIVE_CANCEL_ESCALATED") ||
-                            (line.contains("[ipc_client] PROCESS_KILL_REQUESTED") && line.contains("pid=$originalPid"))
+                            (line.contains("[ipc_client] PROCESS_KILL_REQUESTED") && line.contains("targetPid=$originalPid"))
                     }
                 )
     
