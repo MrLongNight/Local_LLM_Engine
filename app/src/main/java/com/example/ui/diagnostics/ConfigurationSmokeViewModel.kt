@@ -104,7 +104,20 @@ abstract class ConfigurationSmokeViewModel(
     fun runGeneralConfigurationSmokeTest() = startConfigurationSmokeTest(requireD0Reference = false)
 
     private fun startConfigurationSmokeTest(requireD0Reference: Boolean) {
-        if (_isConfigSmokeTesting.value) return
+        EngineDiagnostics.info(
+            "config_test",
+            "CONFIG_SMOKE_START_REQUESTED",
+            "mode=" + (if (requireD0Reference) "D0_CPU_REFERENCE_3_RUNS" else "GENERAL_CPU_VULKAN_PAIR") +
+                ",configSmokeRunning=" + _isConfigSmokeTesting.value +
+                ",benchmarking=" + _isBenchmarking.value +
+                ",generating=" + _isGenerating.value +
+                ",importing=" + _isImporting.value +
+                ",modelLoaded=" + (currentModel.value != null)
+        )
+        if (_isConfigSmokeTesting.value) {
+            EngineDiagnostics.info("config_test", "CONFIG_SMOKE_START_BLOCKED", "reason=ALREADY_RUNNING")
+            return
+        }
         if (_isBenchmarking.value) {
             rejectSmokeRun("Ein anderer Benchmark läuft bereits. Bitte warten, bis dieser abgeschlossen ist.")
             return
@@ -122,32 +135,21 @@ abstract class ConfigurationSmokeViewModel(
         publishSmokeProgress(
             phase = ConfigurationSmokePhase.PREPARING,
             currentStep = 1,
-            message = "Prüfe Modellidentität und bereite CPU-/Vulkan-Vergleich vor…"
+            message = if (requireD0Reference) {
+                "Prüfe die SHA-256 des geladenen GGUF für drei byte-identische CPU-Läufe…"
+            } else {
+                "Bereite den separaten CPU-/Vulkan-Vergleich vor…"
+            }
         )
-        val referenceAssessment = InferenceConfigSmokePlan.assessD0ReferenceModel(model)
+        val modelAssessment = InferenceConfigSmokePlan.assessD0ModelSha(model)
         val testMode = if (requireD0Reference) "D0_CPU_REFERENCE_3_RUNS" else "GENERAL_MODEL_AGNOSTIC_CPU_VULKAN_PAIR"
-        val d0BaselineEligible = requireD0Reference && referenceAssessment.baselineEligible
-        if (requireD0Reference && !referenceAssessment.isReferenceModel) {
-            val reason = referenceAssessment.reason
+        val d0BaselineEligible = requireD0Reference && modelAssessment.baselineEligible
+        if (requireD0Reference && !modelAssessment.baselineEligible) {
             EngineDiagnostics.info(
                 "config_test",
-                "CONFIG_SMOKE_REFERENCE_REJECTED",
-                "status=REFERENCE_MODEL_MISMATCH,reason=$reason,model=${model.name}," +
-                    "architecture=${model.architecture},parameters=${model.parameterCount}," +
-                    "shaStatus=${referenceAssessment.shaStatus}"
-            )
-            rejectSmokeRun(
-                "D0 nicht gestartet: falsches Referenzmodell ($reason). " +
-                    "Bitte Qwen3-4B-Instruct-2507 Q4_K_M laden. Andere Modelle nur über den allgemeinen CPU/Vulkan-Test prüfen."
-            )
-            return
-        }
-        if (requireD0Reference && !referenceAssessment.baselineEligible) {
-            EngineDiagnostics.info(
-                "config_test",
-                "CONFIG_SMOKE_REFERENCE_REJECTED",
-                "status=REFERENCE_MODEL_SHA_UNAVAILABLE,reason=${referenceAssessment.reason}," +
-                    "model=${model.name},bytes=${model.sizeBytes},shaStatus=${referenceAssessment.shaStatus}"
+                "CONFIG_SMOKE_MODEL_SHA_REJECTED",
+                "status=MODEL_SHA_UNAVAILABLE,reason=${modelAssessment.reason}," +
+                    "model=${model.name},bytes=${model.sizeBytes},shaStatus=${modelAssessment.shaStatus}"
             )
             rejectSmokeRun(
                 "D0 nicht gestartet: Für die CPU-Baseline ist eine gültige SHA-256 erforderlich. " +
@@ -211,9 +213,9 @@ abstract class ConfigurationSmokeViewModel(
                 "config_test",
                 "CONFIG_SMOKE_STARTED",
                 "testMode=" + testMode +
-                    ",referenceModelStatus=" + referenceAssessment.status +
-                    ",referenceReason=" + referenceAssessment.reason +
-                    ",referenceShaStatus=" + referenceAssessment.shaStatus +
+                    ",modelShaStatus=" + modelAssessment.status +
+                    ",modelShaReason=" + modelAssessment.reason +
+                    ",modelShaStatus=" + modelAssessment.shaStatus +
                     ",d0BaselineEligible=" + d0BaselineEligible +
                     ",model=" + model.name + ",bytes=" + model.sizeBytes +
                     ",modelSha256=" + (model.sha256 ?: "unavailable") +
@@ -316,7 +318,7 @@ abstract class ConfigurationSmokeViewModel(
 
                         val loaded = loadResult.getOrThrow()
                         val sameModelIdentity = if (requireD0Reference) {
-                            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(model, loaded)
+                            InferenceConfigSmokePlan.matchesD0ModelBytes(model, loaded)
                         } else {
                             loaded.sizeBytes == model.sizeBytes &&
                                 (model.sha256.isNullOrBlank() ||
@@ -417,7 +419,7 @@ abstract class ConfigurationSmokeViewModel(
                                 ",backend=" + backend + ",status=" +
                                 (if (outputGatePassed) "PASS" else "FAIL") +
                                 ",testMode=" + testMode +
-                                ",referenceModelStatus=" + referenceAssessment.status +
+                                ",modelShaStatus=" + modelAssessment.status +
                                 ",d0BaselineEligible=" + d0BaselineEligible +
                                 ",modelBytes=" + loaded.sizeBytes + ",modelSha256=" + (loaded.sha256 ?: "unavailable") +
                                 ",modelShaStatus=" + shaStatus + ",gpuLayersRequested=" + cfg.gpuLayers +
@@ -756,9 +758,9 @@ abstract class ConfigurationSmokeViewModel(
                 _configSmokeReport.value = buildString {
                     appendLine("Automatischer In-App-Konfigurationstest")
                     appendLine("Testmodus: " + testMode)
-                    appendLine("D0-Referenzstatus: " + referenceAssessment.status +
-                        " (" + referenceAssessment.reason + ")")
-                    appendLine("D0-SHA-256: " + referenceAssessment.shaStatus)
+                    appendLine("D0-Modell-SHA-Status: " + modelAssessment.status +
+                        " (" + modelAssessment.reason + ")")
+                    appendLine("D0-SHA-256: " + modelAssessment.shaStatus)
                     appendLine("D0-Baseline vergleichbar: " + if (d0BaselineEligible) "JA" else "NEIN")
                     appendLine("Modell: " + model.name + " (" + model.sizeMb.toInt() + " MB)")
                     appendLine("Backend-Ergebnisse: " + confirmedBackends.joinToString(", ").ifBlank { "keines bestätigt" })

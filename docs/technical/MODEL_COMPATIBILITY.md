@@ -92,9 +92,9 @@ Use **Settings → D0-CPU-Referenz und Backendvergleich → D0: drei CPU-only-Re
 
 ### Model choice and byte identity
 
-- **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF).
-- **Filename aliases:** User-standardized names are supported. D0 matches the Qwen3 / 4B / Instruct / 2507 identity in one normalized filename or GGUF-description candidate (including the `04.0B_Qwen3-2507_Instruct_...` form), while architecture, 3.5–4.5 billion parameter count and Q4_K_M remain separate mandatory checks. A renamed filename cannot override conflicting GGUF metadata.
-- **SHA-256 is mandatory for D0:** Import the exact GGUF into the app-private model library before running D0. External SAF descriptors do not receive a SHA inferred from their display name; if the model's SHA is unavailable, the D0 action refuses to start. All three reloads must report the same valid 64-hex SHA-256 and exact file byte count.
+- **Intended comparison model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF). The app does not gate D0 by model name, architecture, parameter count or quantization; it runs the currently loaded GGUF and records its metadata.
+- **Model selection:** D0 does not reject a loaded model based on its filename, family, architecture, parameter count or quantization. For direct comparison with D1a, load the intended Qwen3 reference model; D0 logs the actual model identity so results from different GGUFs are not mixed.
+- **SHA-256 is mandatory for reproducibility, not model selection:** Import the chosen GGUF into the app-private model library before running D0. External SAF descriptors do not receive a SHA inferred from their display name; if SHA is unavailable or malformed, D0 refuses to start. All three reloads must report the same valid 64-hex SHA-256 and exact file byte count.
 - Start with the imported model loaded and no inference running. Each D0 profile reloads the same source and verifies its byte count and SHA-256 before inference. The user's original engine configuration is restored after the three CPU runs.
 - The built-in test uses the fixed prompt and expected output below. Do not replace it with previous chat history or a different prompt when collecting the regression baseline.
 
@@ -139,7 +139,7 @@ Interior whitespace or any other text is a mismatch. The 96-token ceiling is int
 
 ### D0 pass criteria — CPU-only
 
-1. The exact model file is Qwen3-4B-Instruct-2507 / `qwen3` / Q4_K_M; record its filename, actual byte count and verified SHA-256. Every one of the three runs must use that same identity.
+1. Record the currently loaded model's filename, architecture, quantization, actual byte count and verified SHA-256. Model family/architecture/parameter count/quantization are not start gates; every one of the three runs must use the same exact model bytes. Use Qwen3-4B-Instruct-2507 Q4_K_M when collecting results intended for direct comparison with D1a.
 2. All three model loads complete with effective context 256. Each inference ends with `STOP`, `OUTPUT_GATE=PASS` and the exact two-line output above. `MAX_TOKENS`, cancel, error, partial output or any text mismatch fails that CPU run.
 3. Run-correlated diagnostics must prove CPU was the actual execution backend and GPU offload was zero (`gpuLayers=0`, CPU graph distribution, zero Vulkan graph nodes). Requested CPU preference alone is insufficient.
 4. Save all three native Run-IDs and capture model-load time, prompt-token count, prefill, TTFT, generated-token count, decode tokens/s and total generation time, process PSS, available system RAM, memory-guard decisions and Android thermal status.
