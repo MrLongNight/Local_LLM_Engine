@@ -1,9 +1,12 @@
 package com.example.ui.navigation
 
+import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.core.content.pm.PackageInfoCompat
+import androidx.test.core.app.ApplicationProvider
 import com.example.BuildConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
 import org.junit.Assert.assertEquals
@@ -21,16 +24,19 @@ class MainScreenTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun `app version label includes actual app version and CI build number`() {
+    fun `app version label formats installed package version and CI build number`() {
         assertEquals(
             "v1.0.642 · Build 642",
-            formatAppVersion(versionName = "1.0.642", versionCode = 642)
+            formatAppVersion(versionName = "1.0.642", versionCode = 642L)
         )
     }
 
     @Test
     fun currentAppBuildInfoCanBeRecordedImmediatelyBeforeDiagnosticsExport() {
-        recordCurrentAppBuildInfo()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
+        recordCurrentAppBuildInfo(context)
 
         val latestEntry = EngineDiagnostics.getLogs().lastOrNull().orEmpty()
         assertTrue(
@@ -39,15 +45,19 @@ class MainScreenTest {
                 "APP_BUILD_INFO - schemaVersion=1"
             ) &&
                 latestEntry.contains(
-                    "versionName=${BuildConfig.VERSION_NAME},versionCode=${BuildConfig.VERSION_CODE}," +
-                        "buildType=${BuildConfig.BUILD_TYPE},applicationId=${BuildConfig.APPLICATION_ID}," +
+                    "versionName=${packageInfo.versionName},versionCode=$versionCode," +
+                        "buildType=${BuildConfig.BUILD_TYPE},applicationId=${context.packageName}," +
                         "debug=${BuildConfig.DEBUG}"
                 )
         )
     }
 
     @Test
-    fun topBarVersionComposableRendersBuildConfigVersionAndCode() {
+    fun topBarVersionComposableRendersInstalledPackageVersionAndCode() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
+
         composeRule.setContent {
             MaterialTheme {
                 AppVersionLabel()
@@ -55,6 +65,6 @@ class MainScreenTest {
         }
 
         composeRule.onNodeWithTag("top_app_bar_version")
-            .assertTextEquals("v${BuildConfig.VERSION_NAME} · Build ${BuildConfig.VERSION_CODE}")
+            .assertTextEquals("v${packageInfo.versionName} · Build $versionCode")
     }
 }
