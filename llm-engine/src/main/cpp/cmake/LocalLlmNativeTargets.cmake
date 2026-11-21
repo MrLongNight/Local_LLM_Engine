@@ -17,22 +17,29 @@ FetchContent_GetProperties(kleidiai
     SOURCE_DIR _local_llm_kleidiai_source_dir
     POPULATED _local_llm_kleidiai_populated
 )
-if(NOT _local_llm_kleidiai_populated OR NOT EXISTS "${_local_llm_kleidiai_source_dir}/CMakeLists.txt")
-    message(FATAL_ERROR "LocalLLM: pinned KleidiAI v1.32.0 source was not populated.")
+# llama.cpp only fetches KleidiAI for supported ARM targets. Other ABIs (for
+# example x86_64) correctly leave this dependency unpopulated.
+if(_local_llm_kleidiai_populated)
+    if(NOT EXISTS "${_local_llm_kleidiai_source_dir}/CMakeLists.txt")
+        message(FATAL_ERROR "LocalLLM: populated KleidiAI source has no CMakeLists.txt.")
+    endif()
+    execute_process(
+        COMMAND git -C "${_local_llm_kleidiai_source_dir}" rev-parse HEAD
+        RESULT_VARIABLE _local_llm_kleidiai_git_result
+        OUTPUT_VARIABLE _local_llm_kleidiai_commit
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    # The v1.32.0 annotated tag resolves to this commit in the fetched Git tree.
+    if(NOT _local_llm_kleidiai_git_result EQUAL 0 OR
+       NOT _local_llm_kleidiai_commit STREQUAL "c80157210987eedaab2509638ef5e15950c53a8c")
+        message(FATAL_ERROR
+            "LocalLLM: expected KleidiAI v1.32.0 commit c80157210987eedaab2509638ef5e15950c53a8c, "
+            "got '${_local_llm_kleidiai_commit}'.")
+    endif()
+    message(STATUS "LocalLLM: verified KleidiAI v1.32.0 at ${_local_llm_kleidiai_commit}")
+else()
+    message(STATUS "LocalLLM: KleidiAI is not used for this ABI; no source fetch required.")
 endif()
-execute_process(
-    COMMAND git -C "${_local_llm_kleidiai_source_dir}" rev-parse HEAD
-    RESULT_VARIABLE _local_llm_kleidiai_git_result
-    OUTPUT_VARIABLE _local_llm_kleidiai_commit
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-if(NOT _local_llm_kleidiai_git_result EQUAL 0 OR
-   NOT _local_llm_kleidiai_commit STREQUAL "e181183111ac0c8bc66b63a573357e693fd73cfd")
-    message(FATAL_ERROR
-        "LocalLLM: expected KleidiAI v1.32.0 commit e181183111ac0c8bc66b63a573357e693fd73cfd, "
-        "got '${_local_llm_kleidiai_commit}'.")
-endif()
-message(STATUS "LocalLLM: verified KleidiAI v1.32.0 at ${_local_llm_kleidiai_commit}")
 
 # Replace only the compiled source path; the pinned upstream submodule remains pristine.
 if(NOT LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP OR NOT EXISTS "${LOCAL_LLM_PATCHED_LLAMA_CONTEXT_CPP}")
