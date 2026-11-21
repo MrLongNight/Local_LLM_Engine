@@ -24,6 +24,14 @@ on:
         required: false
         type: boolean
         default: false
+      mali_fence_wait_strategy:
+        description: "TEMPORARY P1-01d Mali A/B selector; SPIN requires the profiler above"
+        required: false
+        type: choice
+        options:
+          - BLOCK
+          - SPIN
+        default: BLOCK
 
 permissions:
   contents: read
@@ -228,16 +236,26 @@ jobs:
         shell: bash
         env:
           ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
+          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || 'BLOCK' }}
         run: |
           set -euo pipefail
           # Standard Debug APK is the full local diagnostic build: raw traces are
           # bounded and stored app-private; Release builds keep them disabled.
+          case "${MALI_FENCE_WAIT_STRATEGY}" in
+            BLOCK|SPIN) ;;
+            *) echo "::error::mali_fence_wait_strategy must be BLOCK or SPIN."; exit 1 ;;
+          esac
+          if [[ "${MALI_FENCE_WAIT_STRATEGY}" == "SPIN" && "${ENABLE_VULKAN_PERF_PROFILER}" != "true" ]]; then
+            echo "::error::TEMPORARY SPIN mode requires enable_vulkan_perf_profiler=true."
+            exit 1
+          fi
           gradle_args=()
           if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
-            echo "Building separate Vulkan per-operation profiler APK."
+            echo "Building separate Vulkan per-operation profiler APK (Mali fence wait: ${MALI_FENCE_WAIT_STRATEGY})."
             gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
+            gradle_args+=("-PlocalLlmMaliFenceWaitStrategy=${MALI_FENCE_WAIT_STRATEGY}")
           else
-            echo "Building standard Debug APK with bounded full text/token diagnostics."
+            echo "Building standard Debug APK with bounded full text/token diagnostics and BLOCK fence wait."
           fi
           gradle --no-daemon "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
 
@@ -314,6 +332,8 @@ jobs:
 
       - name: Verify native Debug optimization flags
         shell: bash
+        env:
+          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || 'BLOCK' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -399,8 +419,8 @@ jobs:
                           "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK",
                       "Forced MMVQ selection":
                           "LOCAL_LLM_VULKAN_MMVQ_FORCE",
-                      "Mali blocking Vulkan fence wait":
-                          "LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT"
+                      "Temporary Mali fence-wait A/B selector":
+                          "LOCAL_LLM_MALI_FENCE_WAIT_TEMPORARY_AB"
                   }
                   for vulkan_entry in vulkan_sources:
                       vulkan_file = vulkan_entry.get("file", "")
@@ -416,6 +436,22 @@ jobs:
                                   f"arm64-v8a compiled Vulkan source {vulkan_file} "
                                   f"is missing compatibility fix: {description}"
                               )
+
+                      expected_mali_wait_strategy = os.environ.get(
+                          "MALI_FENCE_WAIT_STRATEGY", "BLOCK"
+                      ).strip().upper()
+                      if expected_mali_wait_strategy not in {"BLOCK", "SPIN"}:
+                          raise SystemExit(
+                              f"Unsupported expected Mali fence-wait strategy: {expected_mali_wait_strategy}"
+                          )
+                      selected_strategy_marker = (
+                          f"LOCAL_LLM_MALI_FENCE_WAIT_SELECTED_{expected_mali_wait_strategy}"
+                      )
+                      if selected_strategy_marker not in compiled_vulkan_source:
+                          raise SystemExit(
+                              f"arm64-v8a compiled Vulkan source {vulkan_file} "
+                              f"does not contain selected strategy {expected_mali_wait_strategy}"
+                          )
 
                       command = vulkan_entry.get("command")
                       vulkan_args = shlex.split(command) if command else vulkan_entry.get("arguments", [])

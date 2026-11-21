@@ -10,6 +10,17 @@ val localLlmVulkanPerfProfiler = providers.gradleProperty("localLlmVulkanPerfPro
     .map { it.equals("true", ignoreCase = true) }
     .getOrElse(false)
 
+// TEMPORARY P1-01d Mali fence-wait A/B selector. SPIN is diagnostic-only.
+val localLlmMaliFenceWaitStrategy = providers.gradleProperty("localLlmMaliFenceWaitStrategy")
+    .map { it.trim().uppercase() }
+    .getOrElse("BLOCK")
+if (localLlmMaliFenceWaitStrategy != "BLOCK" && localLlmMaliFenceWaitStrategy != "SPIN") {
+    throw GradleException("localLlmMaliFenceWaitStrategy must be BLOCK or SPIN")
+}
+if (localLlmMaliFenceWaitStrategy == "SPIN" && !localLlmVulkanPerfProfiler) {
+    throw GradleException("TEMPORARY Mali SPIN strategy requires -PlocalLlmVulkanPerfProfiler=true")
+}
+
 val localLlmSyntheticTokenDiagnostics = providers.gradleProperty("localLlmSyntheticTokenDiagnostics")
     .map { raw ->
         when (raw.trim().lowercase()) {
@@ -43,7 +54,9 @@ android {
                 cmake {
                     arguments += listOf(
                         "-DLOCAL_LLM_ENABLE_TEST_HOOKS=ON",
-                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=${if (localLlmSyntheticTokenDiagnostics) "ON" else "OFF"}"
+                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=${if (localLlmSyntheticTokenDiagnostics) "ON" else "OFF"}",
+                        "-DLOCAL_LLM_VULKAN_PERF_PROFILER_ENABLED=${if (localLlmVulkanPerfProfiler) "ON" else "OFF"}",
+                        "-DLOCAL_LLM_MALI_FENCE_WAIT_STRATEGY=$localLlmMaliFenceWaitStrategy"
                     )
                 }
             }
@@ -55,7 +68,9 @@ android {
                 cmake {
                     arguments += listOf(
                         "-DLOCAL_LLM_ENABLE_TEST_HOOKS=OFF",
-                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=OFF"
+                        "-DLOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS=OFF",
+                        "-DLOCAL_LLM_VULKAN_PERF_PROFILER_ENABLED=OFF",
+                        "-DLOCAL_LLM_MALI_FENCE_WAIT_STRATEGY=BLOCK"
                     )
                 }
             }

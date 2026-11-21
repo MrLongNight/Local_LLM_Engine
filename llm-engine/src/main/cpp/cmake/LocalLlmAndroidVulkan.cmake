@@ -2,6 +2,29 @@
 # build-directory copy of ggml-vulkan.cpp with the small loader/extension
 # compatibility adjustments required by Android API 24+ and Mali drivers.
 function(local_llm_prepare_android_vulkan source_dir)
+    # TEMPORARY P1-01d A/B control. The default remains the existing blocking wait.
+    if(NOT DEFINED LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY OR
+       "${LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY}" STREQUAL "")
+        set(LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY "BLOCK")
+    endif()
+    string(TOUPPER "${LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY}" _local_llm_mali_fence_wait_strategy)
+    if(NOT _local_llm_mali_fence_wait_strategy STREQUAL "BLOCK" AND
+       NOT _local_llm_mali_fence_wait_strategy STREQUAL "SPIN")
+        message(FATAL_ERROR
+            "LocalLLM: LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY must be BLOCK or SPIN.")
+    endif()
+    set(LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY "${_local_llm_mali_fence_wait_strategy}")
+    if(LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY STREQUAL "SPIN")
+        if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+            message(FATAL_ERROR "LocalLLM: temporary Mali SPIN fence wait is Debug-only.")
+        endif()
+        if(NOT LOCAL_LLM_VULKAN_PERF_PROFILER_ENABLED)
+            message(FATAL_ERROR "LocalLLM: temporary Mali SPIN fence wait requires the Vulkan per-operation profiler.")
+        endif()
+    endif()
+    message(STATUS
+        "LocalLLM: TEMPORARY Mali fence wait strategy=${LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY}")
+
     set(_vulkan_source "${source_dir}/ggml/src/ggml-vulkan/ggml-vulkan.cpp")
     if(NOT EXISTS "${_vulkan_source}")
         message(FATAL_ERROR "LocalLLM: upstream ggml-vulkan.cpp is missing: ${_vulkan_source}")
@@ -809,39 +832,59 @@ static void ggml_vk_get_physical_device_features2(
     if(_mali_fence_wait_position LESS 0)
         message(FATAL_ERROR "LocalLLM: upstream Vulkan fence-wait anchor changed; review the Mali wait strategy.")
     endif()
-    set(_mali_fence_wait_replacement [=[
-    const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
-    const auto local_llm_fence_wait_start = local_llm_sync_timing
-        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    // Mali-G57 shares system memory with the CPU. Repeatedly polling the final
-    // fence can keep a CPU core busy for the full GPU decode interval.
-    if (ctx->device->vendor_id == 0x13B5) {
-        static std::atomic<bool> local_llm_mali_fence_wait_logged{false};
-        if (!local_llm_mali_fence_wait_logged.exchange(true, std::memory_order_relaxed)) {
-            GGML_LOG_INFO(
-                "ggml_vulkan: LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT - device=%s,mode=waitForFences\n",
-                ctx->device->name.c_str());
-        }
+    if(LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY STREQUAL "SPIN")
+        set(_mali_fence_wait_mode "SPIN_POLL")
+        set(_mali_fence_wait_strategy_impl [=[
+        // LOCAL_LLM_MALI_FENCE_WAIT_SELECTED_SPIN
+        local_llm_poll_fence = true;
+]=])
+    else()
+        set(_mali_fence_wait_mode "BLOCK")
+        set(_mali_fence_wait_strategy_impl [=[
+        // LOCAL_LLM_MALI_FENCE_WAIT_SELECTED_BLOCK
+        GGML_LOG_INFO(
+            "ggml_vulkan: LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT - device=%s,mode=waitForFences\\n",
+            ctx->device->name.c_str());
         VK_CHECK(
             ctx->device->device.waitForFences({ ctx->fence }, true, UINT64_MAX),
             "Mali blocking fence wait",
             ctx->device);
+]=])
+    endif()
+
+    set(_mali_fence_wait_replacement [=[
+    const bool local_llm_sync_timing = local_llm_vulkan_logits_readback_timing_active();
+    const auto local_llm_fence_wait_start = local_llm_sync_timing
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    // LOCAL_LLM_MALI_FENCE_WAIT_TEMPORARY_AB
+    bool local_llm_poll_fence = false;
+    if (ctx->device->vendor_id == 0x13B5) {
+        static std::atomic<bool> local_llm_mali_fence_wait_logged{false};
+        if (!local_llm_mali_fence_wait_logged.exchange(true, std::memory_order_relaxed)) {
+            GGML_LOG_INFO(
+                "ggml_vulkan: LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY - device=%s,mode=@LOCAL_LLM_MALI_FENCE_WAIT_MODE@\\n",
+                ctx->device->name.c_str());
+        }
+        @LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY_IMPL@
     } else {
         // Preserve upstream low-latency polling for every non-Mali GPU.
+        local_llm_poll_fence = true;
+    }
+    if (local_llm_poll_fence) {
         vk::Result result;
         for (;;) {
             try {
                 result = ctx->device->device.getFenceStatus(ctx->fence);
             } catch (vk::DeviceLostError &) {
                 ggml_vk_print_device_lost_info(ctx->device);
-                GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\n", __FILE__, __LINE__);
+                GGML_LOG_ERROR("ggml_vulkan: getFenceStatus at %s:%d\\n", __FILE__, __LINE__);
                 throw;
             }
             if (result == vk::Result::eSuccess) {
                 break;
             }
             if (result != vk::Result::eNotReady) {
-                GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\n", to_string(result).c_str(), __FILE__, __LINE__);
+                GGML_LOG_ERROR("ggml_vulkan: error %s at %s:%d\\n", to_string(result).c_str(), __FILE__, __LINE__);
                 throw vk::SystemError(vk::make_error_code(result), "ggml_vulkan: getFenceStatus");
             }
             for (uint32_t i = 0; i < 100; ++i) {
@@ -865,6 +908,10 @@ static void ggml_vk_get_physical_device_features2(
                 std::chrono::steady_clock::now() - local_llm_fence_wait_start).count()));
     }
 ]=])
+    string(REPLACE "@LOCAL_LLM_MALI_FENCE_WAIT_MODE@" "${_mali_fence_wait_mode}"
+        _mali_fence_wait_replacement "${_mali_fence_wait_replacement}")
+    string(REPLACE "@LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY_IMPL@" "${_mali_fence_wait_strategy_impl}"
+        _mali_fence_wait_replacement "${_mali_fence_wait_replacement}")
     string(REPLACE "${_mali_fence_wait_anchor}" "${_mali_fence_wait_replacement}" _vulkan_contents "${_vulkan_contents}")
 
     # Measure the serialized-submission fence wait too; this path bypasses
