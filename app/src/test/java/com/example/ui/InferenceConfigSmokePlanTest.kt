@@ -84,7 +84,7 @@ class InferenceConfigSmokePlanTest {
             topK = 40,
             minP = 0.1f
         )
-        val profiles = InferenceConfigSmokePlan.createD0CpuReferenceProfiles(base, 8)
+        val profiles = InferenceConfigSmokePlan.createD0CpuReferenceProfiles(base, recommendedThreads = 4)
 
         assertEquals(3, profiles.size)
         assertEquals(
@@ -104,7 +104,7 @@ class InferenceConfigSmokePlanTest {
         assertEquals(profiles[0].config, profiles[2].config)
         assertEquals(
             "D0 CPU profile must use the exact same EngineConfig as the paired runner's CPU profile",
-            InferenceConfigSmokePlan.create(base, 8).first().config,
+            InferenceConfigSmokePlan.create(base, recommendedThreads = 4).first().config,
             profiles.first().config
         )
         assertEquals(BackendPreference.AUTO, base.backendPreference)
@@ -178,7 +178,7 @@ class InferenceConfigSmokePlanTest {
         )
         val profiles = InferenceConfigSmokePlan.create(
             base,
-            availableProcessors = 8
+            recommendedThreads = 4
         )
 
         assertEquals(2, profiles.size)
@@ -201,9 +201,9 @@ class InferenceConfigSmokePlanTest {
         assertEquals(cpu.config.microBatchSize, vulkan.config.microBatchSize)
         assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(cpu.config, "CPU backend"))
         assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(vulkan.config, "Vulkan selected"))
-        assertEquals(6, cpu.config.threads)
+        assertEquals(4, cpu.config.threads)
         assertEquals(cpu.config.threads, vulkan.config.threads)
-        assertEquals(6, cpu.config.effectiveBatchThreads)
+        assertEquals(4, cpu.config.effectiveBatchThreads)
         assertEquals(cpu.config.effectiveBatchThreads, vulkan.config.effectiveBatchThreads)
         assertEquals(20, cpu.config.topK)
         assertEquals(cpu.config.topK, vulkan.config.topK)
@@ -231,15 +231,28 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
-    fun capsWorkerThreadsToAvailableCpuCores() {
-        val profiles = InferenceConfigSmokePlan.create(
-            EngineConfig(),
-            availableProcessors = 2
+    fun smokeProfilesUseTheEngineRecommendedThreadsForBothBackends() {
+        val base = EngineConfig(threads = 2)
+        val d0Profiles = InferenceConfigSmokePlan.createD0CpuReferenceProfiles(
+            base,
+            recommendedThreads = 4
         )
-        assertEquals(2, profiles[0].config.threads)
-        assertEquals(2, profiles[1].config.threads)
-        assertEquals(2, profiles[0].config.effectiveBatchThreads)
-        assertEquals(2, profiles[1].config.effectiveBatchThreads)
+        val pairedProfiles = InferenceConfigSmokePlan.create(
+            base,
+            recommendedThreads = 4
+        )
+
+        assertTrue(d0Profiles.all { it.config.threads == 4 })
+        assertTrue(d0Profiles.all { it.config.effectiveBatchThreads == 4 })
+        assertEquals(4, pairedProfiles[0].config.threads)
+        assertEquals(4, pairedProfiles[1].config.threads)
+        assertEquals(4, pairedProfiles[0].config.effectiveBatchThreads)
+        assertEquals(4, pairedProfiles[1].config.effectiveBatchThreads)
+        assertEquals(d0Profiles.first().config, pairedProfiles.first().config)
+
+        val twoThreadRecommendation = InferenceConfigSmokePlan.create(base, recommendedThreads = 2)
+        assertEquals(2, twoThreadRecommendation[0].config.threads)
+        assertEquals(2, twoThreadRecommendation[1].config.threads)
     }
 
     @Test

@@ -164,17 +164,26 @@ abstract class ConfigurationSmokeViewModel(
         } else {
             ModelSource.FilePath(model.path)
         }
+        val availableProcessors = Runtime.getRuntime().availableProcessors()
+        val recommendedCpuThreads = backendInfo.value.recommendedThreads.coerceAtLeast(1)
         val profiles = if (requireD0Reference) {
             InferenceConfigSmokePlan.createD0CpuReferenceProfiles(
                 originalConfig,
-                Runtime.getRuntime().availableProcessors()
+                recommendedCpuThreads
             )
         } else {
             InferenceConfigSmokePlan.create(
                 originalConfig,
-                Runtime.getRuntime().availableProcessors()
+                recommendedCpuThreads
             )
         }
+        EngineDiagnostics.info(
+            "config_test",
+            "CONFIG_SMOKE_THREAD_POLICY",
+            "availableProcessors=$availableProcessors,recommendedThreads=$recommendedCpuThreads," +
+                "selectedThreads=${profiles.firstOrNull()?.config?.threads ?: "unavailable"}," +
+                "profileCount=${profiles.size}"
+        )
         if (profiles.isEmpty()) {
             rejectSmokeRun("Kein Inferenz-Testprofil verfügbar.")
             return

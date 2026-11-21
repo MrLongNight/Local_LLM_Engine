@@ -122,9 +122,9 @@ internal object InferenceConfigSmokePlan {
     /** Three independent CPU profiles; D0 deliberately never creates a Vulkan profile. */
     fun createD0CpuReferenceProfiles(
         base: EngineConfig,
-        availableProcessors: Int
+        recommendedThreads: Int
     ): List<Profile> {
-        val common = fixedSmokeConfig(base, availableProcessors)
+        val common = fixedSmokeConfig(base, recommendedThreads)
         return (1..D0_CPU_REFERENCE_RUNS).map { run ->
             Profile(
                 id = "cpu-reference-$run",
@@ -136,7 +136,7 @@ internal object InferenceConfigSmokePlan {
     }
 
     /** Paired runner reserved for D1a and explicitly requested CPU/Vulkan comparisons. */
-    fun create(base: EngineConfig, availableProcessors: Int): List<Profile> {
+    fun create(base: EngineConfig, recommendedThreads: Int): List<Profile> {
         val common = fixedSmokeConfig(base, availableProcessors)
         return listOf(
             Profile(
@@ -154,7 +154,7 @@ internal object InferenceConfigSmokePlan {
         )
     }
 
-    private fun fixedSmokeConfig(base: EngineConfig, availableProcessors: Int): EngineConfig {
+    private fun fixedSmokeConfig(base: EngineConfig, recommendedThreads: Int): EngineConfig {
         val threadCount = availableProcessors.coerceAtLeast(1).coerceAtMost(6)
         return base.copy(
             contextSize = 256,
