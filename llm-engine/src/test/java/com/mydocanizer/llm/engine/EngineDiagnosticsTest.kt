@@ -914,6 +914,21 @@ class EngineDiagnosticsTest {
 
 
     @Test
+    fun compactExportRetainsSmokeThreadRecommendation() {
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(
+                "2026-11-21 16:00:00.000 [INFO] [config_test] CONFIG_SMOKE_THREAD_POLICY - " +
+                    "availableProcessors=6,recommendedThreads=4,selectedThreads=4,profileCount=3"
+            )
+        )
+
+        assertTrue(report.contains("CPU-Threadempfehlung des Konfigurationstests"))
+        assertTrue(report.contains("availableProcessors=6"))
+        assertTrue(report.contains("recommendedThreads=4"))
+        assertTrue(report.contains("selectedThreads=4"))
+    }
+
+    @Test
     fun compactExportRetainsD0ButtonStateClickAndStartDecision() {
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(

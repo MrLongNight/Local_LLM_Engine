@@ -152,6 +152,7 @@ internal object EngineDiagnosticsReportBuilder {
             "CONFIG_SMOKE_START_REJECTED",
             "CONFIG_SMOKE_MODEL_SOURCE_REJECTED",
             "CONFIG_SMOKE_STARTED",
+            "CONFIG_SMOKE_THREAD_POLICY",
             "CONFIG_SMOKE_PROFILE_STARTED",
             "CONFIG_SMOKE_PROFILE_RESULT",
             "CONFIG_SMOKE_PROFILE_RECOVERY_STARTED",
@@ -199,6 +200,7 @@ internal object EngineDiagnosticsReportBuilder {
         "CONFIG_SMOKE_START_REJECTED" -> "Konfigurationstest nicht gestartet"
         "CONFIG_SMOKE_MODEL_SOURCE_REJECTED" -> "D0-Modellquelle abgelehnt"
         "CONFIG_SMOKE_STARTED" -> "Konfigurationstest gestartet"
+        "CONFIG_SMOKE_THREAD_POLICY" -> "CPU-Threadempfehlung des Konfigurationstests"
         "CONFIG_SMOKE_PROFILE_STARTED" -> "Backend-Profil gestartet"
         "CONFIG_SMOKE_PROFILE_RESULT" -> "Backend-Profil abgeschlossen"
         "CONFIG_SMOKE_PROFILE_RECOVERY_STARTED" -> "Service-Recovery vor Folgeprofil gestartet"
