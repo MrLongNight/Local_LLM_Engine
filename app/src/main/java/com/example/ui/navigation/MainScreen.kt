@@ -45,6 +45,15 @@ import com.mydocanizer.llm.engine.EngineDiagnostics
 internal fun formatAppVersion(versionName: String, versionCode: Int): String =
     "v$versionName · Build $versionCode"
 
+internal fun recordCurrentAppBuildInfo() {
+    EngineDiagnostics.info(
+        "app",
+        "APP_BUILD_INFO",
+        "versionName=${BuildConfig.VERSION_NAME},versionCode=${BuildConfig.VERSION_CODE}," +
+            "buildType=${BuildConfig.BUILD_TYPE},applicationId=${BuildConfig.APPLICATION_ID},debug=${BuildConfig.DEBUG}"
+    )
+}
+
 @Composable
 internal fun AppVersionLabel() {
     Text(
@@ -68,16 +77,19 @@ fun MainScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val diagnosticsExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain"),
-        onResult = { uri -> if (uri != null) viewModel.exportDiagnostics(uri) }
+        onResult = {
+            uri ->
+            if (uri != null) {
+                // App-private diagnostic files survive APK updates. Refresh the
+                // identity now so this export cannot inherit an older startup record.
+                recordCurrentAppBuildInfo()
+                viewModel.exportDiagnostics(uri)
+            }
+        }
     )
 
     LaunchedEffect(Unit) {
-        EngineDiagnostics.info(
-            "app",
-            "APP_BUILD_INFO",
-            "versionName=${BuildConfig.VERSION_NAME},versionCode=${BuildConfig.VERSION_CODE}," +
-                "buildType=${BuildConfig.BUILD_TYPE},applicationId=${BuildConfig.APPLICATION_ID},debug=${BuildConfig.DEBUG}"
-        )
+        recordCurrentAppBuildInfo()
     }
 
     LaunchedEffect(currentTab) {
