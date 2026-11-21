@@ -3,6 +3,7 @@ package com.example.ui
 import com.example.ui.diagnostics.InferenceConfigSmokePlan
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.FinishReason
 import com.mydocanizer.llm.engine.FlashAttentionMode
 import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ModelInfo
@@ -274,6 +275,37 @@ class InferenceConfigSmokePlanTest {
         assertFalse(InferenceConfigSmokePlan.USER_PROMPT.contains("FOLGE"))
     }
 
+    @Test
+    fun smokeOutputGateRequiresExactAnswerNaturalStopAndMinimumTokens() {
+        assertTrue(
+            InferenceConfigSmokePlan.passesSmokeOutputGate(
+                "ERGEBNIS=155\r\n",
+                FinishReason.STOP,
+                tokensGenerated = 4
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.passesSmokeOutputGate(
+                "ERGEBNIS=154",
+                FinishReason.STOP,
+                tokensGenerated = 4
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.passesSmokeOutputGate(
+                "ERGEBNIS=155",
+                FinishReason.MAX_TOKENS,
+                tokensGenerated = 96
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.passesSmokeOutputGate(
+                "ERGEBNIS=155",
+                FinishReason.STOP,
+                tokensGenerated = 3
+            )
+        )
+    }
     @Test
     fun evaluatesNumericParityEvenWhenAnOutputGateFails() {
         var parityEvaluationCount = 0

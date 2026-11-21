@@ -2,6 +2,7 @@ package com.example.ui.diagnostics
 
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.FinishReason
 import com.mydocanizer.llm.engine.FlashAttentionMode
 import com.mydocanizer.llm.engine.GdnPolicy
 import com.mydocanizer.llm.engine.ModelInfo
@@ -61,6 +62,16 @@ internal object InferenceConfigSmokePlan {
 
     fun normalizeOutput(output: String): String =
         output.replace("\r\n", "\n").replace('\r', '\n').trim()
+
+    /** Exact answer and a natural STOP are both required; token-limit truncation never passes. */
+    internal fun passesSmokeOutputGate(
+        output: String,
+        finishReason: FinishReason,
+        tokensGenerated: Int
+    ): Boolean =
+        normalizeOutput(output) == EXPECTED_OUTPUT &&
+            finishReason == FinishReason.STOP &&
+            tokensGenerated >= 4
 
     internal data class PairedGateSummary(
         val outputGateStatus: String,

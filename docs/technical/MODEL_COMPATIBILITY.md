@@ -109,7 +109,7 @@ All three D0 profiles use the same settings:
 | Context | 256 |
 | Batch | 128 |
 | Micro-batch | 64 |
-| Threads | min(6, available CPU cores) |
+| Threads | Engine-recommended performance-core count (smoke planner clamps the recommendation to 1–6) |
 | Batch threads | same as threads |
 | Temperature | 0 / greedy |
 | Top-K | 20 |
@@ -125,17 +125,16 @@ The D0 runner temporarily overrides the user's current context/batch/thread/samp
 The app sends this exact user prompt independently on all three CPU runs and on each backend in the separate D1a pair:
 
 ~~~text
-Berechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. Keine Einleitung, keine Erklärung und kein weiterer Text.
+Berechne 8 * 24 - 37. Gib ausschließlich ERGEBNIS=<Zahl> aus.
 ~~~
 
 Expected output after normalizing CRLF/CR to LF and trimming only leading/trailing whitespace:
 
 ~~~text
 ERGEBNIS=155
-FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
 ~~~
 
-Interior whitespace or any other text is a mismatch. The 96-token ceiling is intentionally above the expected sequence length so each run must end naturally with `STOP`, not `MAX_TOKENS`.
+The single-line expected response keeps arithmetic correctness separate from long-form generation and comfortably inside the unchanged 96-token ceiling. Any different value or additional text is a mismatch. A valid result must finish naturally with `STOP`; `MAX_TOKENS` remains a failure, not a pass.
 
 ### D0 pass criteria — CPU-only
 

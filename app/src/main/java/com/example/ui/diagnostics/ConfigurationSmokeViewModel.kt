@@ -396,8 +396,12 @@ abstract class ConfigurationSmokeViewModel(
                                 profile.expectedBackend,
                                 expectsQ4kDecodeTrace
                             ) || q4kFallbackValidation.status == Q4kPipelineFallbackPolicy.Status.VALID
-                        val outputGatePassed = outputMatches && completedNormally &&
-                            sample.result.tokensGenerated >= 4 && q4kPathGatePassed
+                        val outputGatePassed =
+                            InferenceConfigSmokePlan.passesSmokeOutputGate(
+                                sample.result.text,
+                                sample.result.finishReason,
+                                sample.result.tokensGenerated
+                            ) && q4kPathGatePassed
                         profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
                         val report = String.format(
                             java.util.Locale.US,
@@ -1052,12 +1056,19 @@ abstract class ConfigurationSmokeViewModel(
                 ",exactOutput=" + (InferenceConfigSmokePlan.normalizeOutput(result.text) == expectedOutput) +
                 ",text=" + result.text
         )
-        if (!InferenceConfigSmokePlan.normalizeOutput(result.text).startsWith("ERGEBNIS=155\n")) {
-            EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_CHECK_FAILED", "expectedFirstLine=ERGEBNIS=155")
+        if (InferenceConfigSmokePlan.normalizeOutput(result.text) != expectedOutput) {
+            EngineDiagnostics.info(
+                "config_test",
+                "CONFIG_SMOKE_OUTPUT_CHECK_FAILED",
+                "expectedOutput=" + expectedOutput + ",actualOutput=" +
+                    InferenceConfigSmokePlan.normalizeOutput(result.text)
+            )
         }
-        val outputGatePassed = result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP &&
-            InferenceConfigSmokePlan.normalizeOutput(result.text) == expectedOutput &&
-            result.tokensGenerated >= 4
+        val outputGatePassed = InferenceConfigSmokePlan.passesSmokeOutputGate(
+            result.text,
+            result.finishReason,
+            result.tokensGenerated
+        )
         publishSmokeProgress(
             phase = inferencePhase,
             currentStep = inferenceStep,
