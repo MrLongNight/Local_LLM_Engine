@@ -36,10 +36,13 @@ class MainScreenTest {
         assertTrue(
             latestEntry,
             latestEntry.contains(
-                "[app] APP_BUILD_INFO - versionName=${BuildConfig.VERSION_NAME}," +
-                    "versionCode=${BuildConfig.VERSION_CODE},buildType=${BuildConfig.BUILD_TYPE}," +
-                    "applicationId=${BuildConfig.APPLICATION_ID},debug=${BuildConfig.DEBUG}"
-            )
+                "APP_BUILD_INFO - schemaVersion=1"
+            ) &&
+                latestEntry.contains(
+                    "versionName=${BuildConfig.VERSION_NAME},versionCode=${BuildConfig.VERSION_CODE}," +
+                        "buildType=${BuildConfig.BUILD_TYPE},applicationId=${BuildConfig.APPLICATION_ID}," +
+                        "debug=${BuildConfig.DEBUG}"
+                )
         )
     }
 
