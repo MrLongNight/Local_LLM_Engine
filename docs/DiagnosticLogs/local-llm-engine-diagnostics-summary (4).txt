@@ -1,0 +1,549 @@
+LOCAL LLM ENGINE – DIAGNOSEBERICHT
+============================================================
+Erstellt: Sat Nov 21 15:33:27 GMT+01:00 2026
+Export-Schema: 2
+Build: variant=DEBUG,textDiagnostics=true,vulkanProfiler=false
+Datenbasis: 1279 Logeinträge · 192 RAM-Messpunkte
+Export: kompakt, nach Themen gruppiert, mit begrenzten run-korrelierten Text-/Token-Traces im Debug-Diagnosemodus
+------------------------------------------------------------
+Zeitraum: 2026-11-21 15:29:25.275 bis 2026-11-21 15:33:26.861
+gdnPolicy=n/a (no GDN policy event; architecture=qwen3)
+graphBackend=graphSplits=1,graphNodes=74,cpuNodes=0(0.0%),vulkanNodes=72(97.3%),otherNodes=0(0.0%)
+Gate-Status:
+UNAVAILABLE=1
+CONFIG_SMOKE_PASS=0
+CONFIG_SMOKE_FAIL=3
+OUTPUT_GATE_TRUNCATED=1
+
+[GENERIERTE LLM-AUSGABEN / EXPLIZITE TESTTEXTE / TOKEN-SELECTION]
+2026-11-21 15:31:16.805 [INFO] [config_test] CONFIG_SMOKE_TEST_INPUT - schemaVersion=1,eventId=17940-34,pid=17940,correlationType=none,correlationId=none,part=1/1,text=stage=vulkan-candidate:measured,prompt=Berechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. Keine Einleitung, keine Erklärung und kein weiterer Text.,expectedOutput=ERGEBNIS=155\nFOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
+2026-11-21 15:32:10.756 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-107,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=1,selectedId=640,top5=640:37.40738|26492:23.88156|92497:23.06766|4321:22.59037|9376:22.14901
+2026-11-21 15:32:11.287 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-112,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=2,selectedId=38,top5=38:37.83730|5381:24.45989|16128:22.04039|37114:21.58328|25167:21.54449
+2026-11-21 15:32:11.818 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-114,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=3,selectedId=8264,top5=8264:28.27564|9376:16.81887|3256:16.47807|1867:16.40820|49142:14.57094
+2026-11-21 15:32:12.347 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-117,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=4,selectedId=45,top5=45:43.28045|25151:27.81518|76958:23.26786|14912:23.05775|77:22.72407
+2026-11-21 15:32:12.880 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-119,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=5,selectedId=1637,top5=1637:40.78417|46805:23.73653|3424:23.10524|3846:22.67858|27629:22.12728
+2026-11-21 15:32:13.413 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-121,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=6,selectedId=28,top5=28:60.17783|10829:34.84847|428:32.82511|14209:31.02273|28364:30.48328
+2026-11-21 15:32:13.943 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-122,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=7,selectedId=16,top5=16:48.15742|23:31.84658|17:30.46264|24:30.13546|22:27.57056
+2026-11-21 15:32:14.473 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-124,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=8,selectedId=19,top5=19:54.92432|20:48.21421|21:48.17393|18:48.04804|17:46.85039
+2026-11-21 15:32:19.242 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-131,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=17,selectedId=17,top5=17:60.71343|16:29.11786|18:28.13490|24918:25.28241|15:24.49296
+2026-11-21 15:32:27.704 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-143,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=33,selectedId=16,top5=16:58.21553|15:25.09541|24:23.17303|148271:22.81061|23:21.68089
+2026-11-21 15:32:36.171 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-154,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=49,selectedId=20,top5=20:56.74513|21:30.01306|19:28.14191|22:26.42187|43497:25.92183
+2026-11-21 15:32:44.651 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-165,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=65,selectedId=11,top5=11:56.74587|13:24.31699|345:22.11409|3837:20.55737|1154:18.59315
+2026-11-21 15:32:53.165 [INFO] [inference] TOKEN_SELECTION_TRACE - schemaVersion=1,eventId=18418-176,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,backend=Vulkan,step=81,selectedId=17,top5=17:58.77575|24918:26.12535|18:25.59304|16:24.07637|31807:22.63366
+2026-11-21 15:33:01.195 [INFO] [inference] INFERENCE_OUTPUT - schemaVersion=1,eventId=18418-188,pid=18418,correlationType=runId,correlationId=db61e9f9-c379-4c33-947d-b55e7582bf30,runId=db61e9f9-c379-4c33-947d-b55e7582bf30,finishReason=MAX_TOKENS,tokensGenerated=96,part=1/1,text=ERGEBNIS=143  \nFOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,3
+2026-11-21 15:33:01.276 [INFO] [config_test] CONFIG_SMOKE_TEST_OUTPUT - schemaVersion=1,eventId=17940-43,pid=17940,correlationType=none,correlationId=none,part=1/1,text=stage=vulkan-candidate:measured,finishReason=MAX_TOKENS,tokens=96,expectedOutput=ERGEBNIS=155\nFOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,exactOutput=false,text=ERGEBNIS=143  \nFOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,3
+
+[NATIVE PROMPT-/TEMPLATE-/TOKEN-TRACES]
+2026-11-21 15:31:16.952 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=INPUT_MESSAGES,part=1/1,text=--- message 0 role=user ---\nBerechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. Keine Einleitung, keine Erklärung und kein weiterer Text.\n
+2026-11-21 15:31:16.952 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=SAMPLING_PARAMETERS,temperature=0.000000,topP=1.000000,topK=20,minP=0.050000,repeatPenalty=1.000000,frequencyPenalty=0.000000,presencePenalty=0.000000,penaltyLastN=64,dryMultiplier=0.000000,typicalP=1.000000,xtcProbability=0.000000,xtcThreshold=0.100000,topNSigma=-1.000000,vocabSize=151936,samplerChain=logits -> temp-ext -> greedy 
+2026-11-21 15:31:16.957 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=PROMPT_TOKEN_IDS,part=1/1,text=151644 872 198 33 485 331 811 220 23 353 220 17 19 481 220 18 22 13 28379 68876 40462 9919 22837 9421 25 758 9919 457 220 16 26492 38 8264 45 1637 38698 61286 2125 95181 78796 285 14276 758 9919 457 220 17 434 1930 10777 28 16 11 17 11 18 11 19 11 20 11 21 11 22 11 23 11 24 11 16 15 11 16 16 11 16 17 11 16 18 11 16 19 11 16 20 11 16 21 11 16 22 11 16 23 11 16 24 11 17 15 11 17 16 11 17 17 11 17 18 11 17 19 11 17 20 11 17 21 11 17 22 11 17 23 11 17 24 11 18 15 11 18 16 11 18 17 13 6569 482 18069 74462 11 31357 9740 77131 2185 2030 48803 30632 261 2918 13 151645 198 151644 77091 198
+2026-11-21 15:31:16.957 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=RENDERED_PROMPT,part=1/1,text=<|im_start|>user\nBerechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. Keine Einleitung, keine Erklärung und kein weiterer Text.<|im_end|>\n<|im_start|>assistant\n
+2026-11-21 15:32:10.749 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=1,tokenId=640,part=1/1,text=ER
+2026-11-21 15:32:11.287 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=2,tokenId=38,part=1/1,text=G
+2026-11-21 15:32:11.818 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=3,tokenId=8264,part=1/1,text=EB
+2026-11-21 15:32:12.347 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=4,tokenId=45,part=1/1,text=N
+2026-11-21 15:32:12.879 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=5,tokenId=1637,part=1/1,text=IS
+2026-11-21 15:32:13.413 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=6,tokenId=28,part=1/1,text==
+2026-11-21 15:32:13.942 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=7,tokenId=16,part=1/1,text=1
+2026-11-21 15:32:14.473 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=8,tokenId=19,part=1/1,text=4
+2026-11-21 15:32:44.121 [NATIVE] LOCAL_LLM_TEXT_TRACE - runId=db61e9f9-c379-4c33-947d-b55e7582bf30,kind=TOKEN_PIECE,step=64,tokenId=15,part=1/1,text=0
+
+[INFERENZ-KONTEXT / TEMPLATE / TOKENIZER / SAMPLER]
+2026-11-21 15:29:26.202  NATIVE  2026-11-21 15:29:26.202 [INFO] [engine] MODEL_LOAD_STARTED
+    • fileBytes=2497280736, directDescriptorFd=123, backendPreference=VULKAN, threads=2, batchThreads=2, batch=128, microBatchRequested=0, context=256, gpuLayers=99
+2026-11-21 15:29:51.409  NATIVE  2026-11-21 15:29:51.409 [INFO] [engine] MODEL_NATIVE_RUNTIME_READY
+    • durationMs=25176, backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37), threads=2, batchThreads=2, batch=128, microBatchRequested=0, context=256, gpuLayers=99
+2026-11-21 15:29:51.443  NATIVE  2026-11-21 15:29:51.443 [INFO] [engine] MODEL_SHA256_SKIPPED_DIRECT_SOURCE
+    • Begründung: avoid_second_full_file_read  [reason=avoid_second_full_file_read]
+    • fileBytes=2497280736
+2026-11-21 15:29:51.450  NATIVE  2026-11-21 15:29:51.450 [INFO] [engine] MODEL_IDENTITY
+    • Modell: 123  [model=123]
+    • sizeBytes=2491323904
+    • architecture=qwen3
+    • parameterCount=4022468096
+    • trainedContext=262144
+    • description=Qwen3 4B Instruct 2507 | qwen3 4B Q4_K - Medium
+    • sha256=unavailable
+    • sha256Status=SKIPPED_DIRECT_DESCRIPTOR
+2026-11-21 15:30:23.521  NATIVE  2026-11-21 15:30:23.521 [INFO] [engine] MODEL_LOAD_STARTED
+    • fileBytes=2497280736, directDescriptorFd=132, backendPreference=CPU, threads=6, batchThreads=6, batch=128, microBatchRequested=64, context=256, gpuLayers=0
+2026-11-21 15:30:56.260  NATIVE  2026-11-21 15:30:56.260 [INFO] [engine] MODEL_LOAD_STARTED
+    • fileBytes=2497280736, directDescriptorFd=124, backendPreference=VULKAN, threads=6, batchThreads=6, batch=128, microBatchRequested=64, context=256, gpuLayers=99
+2026-11-21 15:31:16.728  NATIVE  2026-11-21 15:31:16.728 [INFO] [engine] MODEL_NATIVE_RUNTIME_READY
+    • durationMs=20454, backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37), threads=6, batchThreads=6, batch=128, microBatchRequested=64, context=256, gpuLayers=99
+2026-11-21 15:31:16.764  NATIVE  2026-11-21 15:31:16.764 [INFO] [engine] MODEL_SHA256_SKIPPED_DIRECT_SOURCE
+    • Begründung: avoid_second_full_file_read  [reason=avoid_second_full_file_read]
+    • fileBytes=2497280736
+2026-11-21 15:31:16.778  NATIVE  2026-11-21 15:31:16.778 [INFO] [engine] MODEL_IDENTITY
+    • Modell: 124  [model=124]
+    • sizeBytes=2491323904
+    • architecture=qwen3
+    • parameterCount=4022468096
+    • trainedContext=262144
+    • description=Qwen3 4B Instruct 2507 | qwen3 4B Q4_K - Medium
+    • sha256=unavailable
+    • sha256Status=SKIPPED_DIRECT_DESCRIPTOR
+2026-11-21 15:31:16.949  NATIVE  2026-11-21 15:31:16.949 [INFO] [inference] INFERENCE_RUN_CONTEXT
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • Modell: 124  [model=124]
+    • modelBytes=2491323904
+    • modelSha256=unavailable
+    • architecture=qwen3
+    • Aktives Backend: Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)  [activeBackend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)]
+    • backendPreference=VULKAN
+    • Kontextgröße: 256  [contextSize=256]
+    • Batchgröße: 128  [batchSize=128]
+    • microBatchRequested=64
+    • microBatchEffective=64
+    • threads=6
+    • batchThreads=6
+    • Angeforderte GPU-Layer: 99  [gpuLayersRequested=99]
+    • flashAttention=AUTO
+    • vulkanMatvecWorkgroup=AUTO
+    • Timeout-Quelle: loaded_model_config  [timeoutSource=loaded_model_config]
+    • Timeout IPC-Bindung (ms): 10000  [timeoutServiceBindMs=10000]
+    • Timeout Modellladen (ms): 180000  [timeoutModelLoadMs=180000]
+    • Timeout Prefill-Stall (ms): 120000  [timeoutPrefillMs=120000]
+    • Timeout bis erstes Token (ms): 120000  [timeoutFirstTokenMs=120000]
+    • Timeout zwischen Tokens (ms): 30000  [timeoutInterTokenMs=30000]
+    • Timeout gesamte Inferenz (ms): 600000  [timeoutTotalInferenceMs=600000]
+    • Abbruch-Gnadenfrist (ms): 3000  [timeoutAbortGracePeriodMs=3000]
+    • Timeout Reconnect (ms): 15000  [timeoutReconnectMs=15000]
+2026-11-21 15:33:01.791  NATIVE  2026-11-21 15:33:01.791 [INFO] [engine] MODEL_LOAD_STARTED
+    • fileBytes=2497280736, directDescriptorFd=132, backendPreference=VULKAN, threads=2, batchThreads=2, batch=128, microBatchRequested=0, context=256, gpuLayers=99
+2026-11-21 15:33:20.220  NATIVE  2026-11-21 15:33:20.220 [INFO] [engine] MODEL_NATIVE_RUNTIME_READY
+    • durationMs=18425, backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37), threads=2, batchThreads=2, batch=128, microBatchRequested=0, context=256, gpuLayers=99
+2026-11-21 15:33:20.223  NATIVE  2026-11-21 15:33:20.223 [INFO] [engine] MODEL_SHA256_SKIPPED_DIRECT_SOURCE
+    • Begründung: avoid_second_full_file_read  [reason=avoid_second_full_file_read]
+    • fileBytes=2497280736
+2026-11-21 15:33:20.224  NATIVE  2026-11-21 15:33:20.224 [INFO] [engine] MODEL_IDENTITY
+    • Modell: 132  [model=132]
+    • sizeBytes=2491323904
+    • architecture=qwen3
+    • parameterCount=4022468096
+    • trainedContext=262144
+    • description=Qwen3 4B Instruct 2507 | qwen3 4B Q4_K - Medium
+    • sha256=unavailable
+    • sha256Status=SKIPPED_DIRECT_DESCRIPTOR
+2026-11-21 15:31:16.952  NATIVE  LOCAL_LLM_SAMPLER_PARAMETERS
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • temperature=0.000000
+    • topP=1.000000
+    • topK=20
+    • minP=0.050000
+    • repeatPenalty=1.000000
+    • frequencyPenalty=0.000000
+    • presencePenalty=0.000000
+    • penaltyLastN=64
+    • samplerChain=GREEDY
+2026-11-21 15:31:16.957  NATIVE  LOCAL_LLM_PROMPT_METADATA
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • architecture=qwen3
+    • modelName=Qwen3 4B Instruct 2507
+    • tokenizerModel=gpt2
+    • modelHybrid=0
+    • modelRecurrent=0
+    • thinkingEnabled=0
+    • explicitChatTemplate=1
+    • templateMode=JINJA
+    • usedChatTemplate=1
+    • messageCount=1
+    • vocabSize=151936
+    • addBOS=0
+    • bosId=151643
+    • addEOS=0
+    • eosId=151645
+
+[1] CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE
+Keine Matrix-Profilzeilen vorhanden.
+
+[2] VULKAN-LAUFZEIT – TREIBER, LAYER-OFFLOAD, Q4_K-/DMMV-KERNELPFAD UND SPEICHERBUDGET
+2026-11-21 15:29:26.163  NATIVE  VULKAN_PERF_PROFILER_CONFIG
+    • enabled=false
+    • scope=release
+2026-11-21 15:30:55.997  NATIVE  VULKAN_PERF_PROFILER_CONFIG
+    • enabled=false
+    • scope=release
+2026-11-21 15:29:26.167  NATIVE  ggml_vulkan: 0 = Mali-G57 (Mali-G57) | uma: 1 | rebar: 1 | fp16: 1 | bf16: 0 | fp4: 0 | warp size: 16 | shared memory: 32768 | int dot: 1 | matrix cores: none
+    • 
+2026-11-21 15:30:56.189  NATIVE  ggml_vulkan: 0 = Mali-G57 (Mali-G57) | uma: 1 | rebar: 1 | fp16: 1 | bf16: 0 | fp4: 0 | warp size: 16 | shared memory: 32768 | int dot: 1 | matrix cores: none
+    • 
+2026-11-21 15:30:58.092  NATIVE  load_tensors: offloading output layer to GPU
+    • 
+2026-11-21 15:33:03.291  NATIVE  load_tensors: offloaded 37/37 layers to GPU
+    • 
+2026-11-21 15:33:03.291  NATIVE  load_tensors: offloading output layer to GPU
+    • 
+2026-11-21 15:31:18.772  NATIVE  ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_PREFILL_PATH
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • device=Vulkan0
+    • intDot=1
+    • coopMatInt=0
+    • canQuantizeY=1
+    • selected=Q8_1_MATMUL
+    • yKernelType=q8_1
+    • batchTokens=64
+    • hidden=2560
+    • weightRows=4096
+2026-11-21 15:31:53.926  NATIVE  ggml_vulkan: LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • device=Vulkan0
+    • intDot=1
+    • q8_1Eligible=1
+    • q8_1Eligibility=eligible
+    • quantizeY=0
+    • q8_1MatvecAvailable=0
+    • q8_1QuantizeAvailable=0
+    • baseMatvecAvailable=1
+    • fallbackStage=none
+    • selected=BASE_TYPE_MMV
+    • Begründung: mali_auto_base_measured_ …[gekürzt]  [reason=mali_auto_base_measured_ …[gekürzt]]
+2026-11-21 15:31:53.925  NATIVE  ggml_vulkan: LOCAL_LLM_VULKAN_DMMV_WG_SELECTED
+    • override=AUTO
+    • selected=SUBGROUP
+    • subgroupSize=16
+2026-11-21 15:33:03.291  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_HEAP
+    • device=0
+    • heapIndex=0
+    • budgetKnown=0
+    • heapSizeBytes=7784226816
+    • freeEstimateBytes=7784226816
+2026-11-21 15:33:21.139  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET
+    • device=0
+    • name=Mali-G57
+    • integrated=1
+    • extensionSupported=0
+    • heapCount=1
+2026-11-21 15:33:21.139  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_HEAP
+    • device=0
+    • heapIndex=0
+    • budgetKnown=0
+    • heapSizeBytes=7784226816
+    • freeEstimateBytes=7784226816
+2026-11-21 15:33:26.226  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET
+    • device=0
+    • name=Mali-G57
+    • integrated=1
+    • extensionSupported=0
+    • heapCount=1
+2026-11-21 15:29:26.175  NATIVE  LOCAL_LLM_CPU_RUNTIME_FEATURES
+    • NEON=1
+    • DOTPROD=1
+    • I8MM=0
+    • FP16=0
+    • recommendedPerformanceCores=4
+2026-11-21 15:30:56.223  NATIVE  LOCAL_LLM_CPU_RUNTIME_FEATURES
+    • NEON=1
+    • DOTPROD=1
+    • I8MM=0
+    • FP16=0
+    • recommendedPerformanceCores=4
+2026-11-21 15:32:57.950  NATIVE  llama_context: LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • graphNodes=74
+    • Graph-Splits: 1  [graphSplits=1]
+    • CPU-Knoten: 0  [cpuNodes=0]
+    • Vulkan-Knoten: 72  [vulkanNodes=72]
+    • otherNodes=0
+    • unassignedNodes=2
+    • backendIdsChanged=1
+    • graphSizeChanged=1\n
+2026-11-21 15:32:57.950  NATIVE  llama_context: LOCAL_LLM_GRAPH_OP_BACKEND_DISTRIBUTION
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • graphNodes=74
+    • Graph-Splits: 1  [graphSplits=1]
+    • CPU-Knoten: 0  [cpuNodes=0]
+    • Vulkan-Knoten: 72  [vulkanNodes=72]
+    • otherNodes=0
+    • unassignedNodes=2
+    • gdnCpuNodes=0
+    • gdnVulkanNodes=0
+    • gdnOtherNodes=0
+    • gdnUnassignedNodes=0
+    • ssmScanCpuNodes=0
+    • ssmScanVulkanNodes=0,ssmScanOtherNodes …[gekürzt]
+2026-11-21 15:33:01.193  NATIVE  LOCAL_LLM_INFERENCE_PHASE_TOTALS
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • Backend: Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)  [backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)]
+    • promptDecodeUs=52991732
+    • promptDecodeSubmitUs=37164357
+    • promptBackendSyncWaitUs=15827375
+    • decodeWallUs=51242900
+    • decodeCalls=96
+    • decodeSubmitUs=993292,decode …[gekürzt]
+
+[3] VULKAN-GPU-OPERATIONSPROFIL – LETZTE 12 GRAPH-SNAPSHOTS
+Keine Vulkan-Per-Operation-Timestamps gefunden. Prüfe VULKAN_PERF_PROFILER_CONFIG und einen Vulkan-Inferenzlauf.
+
+
+[4] BACKEND- UND INFERENZ-MESSWERTE
+2026-11-21 15:32:10.758  INFO   inference  Erstes sichtbares Token empfangen [FIRST_TOKEN_RECEIVED]
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • ttftUs=53808101
+    • Backend: Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)  [backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)]
+2026-11-21 15:32:10.761  INFO   ipc_client  Erstes sichtbares Token empfangen [FIRST_TOKEN_RECEIVED]
+    • request=7ef1c4d3-06ee-437d-ae82-70b242d57679, latencyAfterPrefillMs=803
+2026-11-21 15:33:01.194  INFO   inference  Textgenerierung abgeschlossen [GENERATION_COMPLETED]
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • tokens=96, generationMs=51243
+    • decodeUs=51243833
+    • tokensPerSecond=1.8734266143668403
+    • Abschlussgrund: MAX_TOKENS, backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)  [finishReason=MAX_TOKENS, backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)]
+2026-11-21 15:33:01.195  INFO   inference  Inferenz-Phasenmessung [INFERENCE_PHASE_METRICS]
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • Backend: Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)  [backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)]
+    • prefillUs=53001313
+    • ttftUs=53808101
+    • decodeUs=51243833
+    • Abschlussgrund: MAX_TOKENS  [finishReason=MAX_TOKENS]
+    • Status: COMPLETED  [status=COMPLETED]
+    • generatedTokens=96
+2026-11-21 15:33:01.277  INFO   config_test  Config Smoke Output Check Failed [CONFIG_SMOKE_OUTPUT_CHECK_FAILED]
+    • expectedFirstLine=ERGEBNIS=155
+2026-11-21 15:33:01.315  INFO   config_test  Vulkan-Kurztest abgeschlossen [CONFIG_SMOKE_RESULT]
+    • profile=vulkan-candidate
+    • requestedBackend=VULKAN
+    • Backend: VULKAN  [backend=VULKAN]
+    • Status: FAIL  [status=FAIL]
+    • testMode=GENERAL_MODEL_AGNOSTIC_CPU_VULKAN_PAIR
+    • referenceModelStatus=REFERENCE_MODEL_MATCH_SHA_UNAVAILABLE
+    • d0BaselineEligible=false
+    • modelBytes=2491323904
+    • modelSha256=unavailable
+    • modelShaStatus=UNAVAILABLE
+    • Angeforderte GPU-Layer: 99  [gpuLayersRequested=99]
+    • Ladezeit (ms): 21278  [loadMs=21278]
+    • nThreads=6
+    • nThreadsBatch=6
+    • nBatch=128
+    • nUbatch=64
+2026-11-21 15:33:01.316  INFO   config_test  Backend-Profil abgeschlossen [CONFIG_SMOKE_PROFILE_RESULT]
+    • profile=vulkan-candidate
+    • Status: FAIL  [status=FAIL]
+    • Begründung: OUTPUT_OR_FINISH_GATE_FAILED  [reason=OUTPUT_OR_FINISH_GATE_FAILED]
+    • Ladezeit (ms): 21278  [loadMs=21278]
+    • nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30
+2026-11-21 15:33:01.317  INFO   config_test  Config Smoke Output Rejected [CONFIG_SMOKE_OUTPUT_REJECTED]
+    • profile=vulkan-candidate
+    • outputTokens=96
+    • exactOutput=false
+    • Abschlussgrund: MAX_TOKENS  [finishReason=MAX_TOKENS]
+2026-11-21 15:33:01.319  INFO   config_test  Vulkan-Kurztest abgeschlossen [CONFIG_SMOKE_RESULT]
+    • profile=paired-gates
+    • outputGateStatus=FAIL
+    • cpuOutputGateStatus=UNAVAILABLE
+    • vulkanOutputGateStatus=FAIL
+    • backendParityStatus=UNAVAILABLE
+    • Status: FAIL  [status=FAIL]
+    • cpuNativeRunId=unavailable
+    • vulkanNativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30
+2026-11-21 15:33:01.793  INFO   engine  Backend- und Geräteprüfung [NATIVE_BACKEND_PREFLIGHT]
+    • registryCount=2;backend[0]=Vulkan;device[0,0]=Vulkan0;description=Mali-G57;type=2;freeBytes=7784226816;totalBytes=7784226816;backend[1]=CPU;device[1,0]=CPU;description=CPU;type=0;freeBytes=7794630656;totalBytes=7794630656;vulkanRegistered=true
+2026-11-21 15:33:20.220  INFO   engine  Native Laufzeit bereit [MODEL_NATIVE_RUNTIME_READY]
+    • durationMs=18425, backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37), threads=2, batchThreads=2, batch=128, microBatchRequested=0, context=256, gpuLayers=99
+2026-11-21 15:33:20.239  INFO   config_test  Ursprüngliche Modellkonfiguration wiederhergestellt [CONFIG_SMOKE_RESTORED]
+    • backendPreference=VULKAN
+    • Aktives Backend: Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)  [activeBackend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)]
+
+[4a] EINZEL-LAUF – KORRELATION DER INFERENZPHASEN
+runId=db61e9f9-c379-4c33-947d-b55e7582bf30 pid=18418 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+Kotlin: status=COMPLETED finishReason=MAX_TOKENS generatedTokens=96 prefill=53001313us TTFT=53808101us decode=51243833us
+Native: backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37) promptDecode=52991732us promptSubmit=37164357us promptSyncWait=15827375us decodeWall=51242900us decodeCalls=96 decodeSubmit=993292us decodeSyncWait=48859147us
+Native Vulkan/readback: queueSubmit=246257us fenceWait=48842153us logitsMap=0us mapAllocations=0 logitsCopy=0us logitsSync=0us sample=450752us sampleCalls=96 tokensGenerated=96 graphSplits=2
+Graph[0]: graphNodes=74 graphSplits=1 cpuNodes=0 vulkanNodes=72 otherNodes=0 unassignedNodes=2 backendIdsChanged=1 graphSizeChanged=n/a
+
+[5] WICHTIGE EREIGNISSE / FEHLER
+2026-11-21 15:33:01.196  INFO   inference  Ausgabekorrektheits-Gate [OUTPUT_GATE_RESULT]
+    • runId=db61e9f9-c379-4c33-947d-b55e7582bf30
+    • stage=FINAL
+    • Status: TRUNCATED  [status=TRUNCATED]
+    • Begründung: MAX_TOKENS  [reason=MAX_TOKENS]
+    • Abschlussgrund: MAX_TOKENS  [finishReason=MAX_TOKENS]
+    • tokens=96
+    • chars=103
+2026-11-21 15:33:01.258  INFO   memory  Resource Phase [RESOURCE_PHASE]
+    • phase=MODEL_LOADED_IDLE
+2026-11-21 15:33:01.494  INFO   memory  Resource Phase [RESOURCE_PHASE]
+    • phase=MODEL_LOADING
+2026-11-21 15:33:01.783  INFO   memory  Model Load Memory Plan [MODEL_LOAD_MEMORY_PLAN]
+    • modelBytes=2497280736
+    • kvEstimateBytes=63930368
+    • requiredBytes=2829646560
+    • availableBytes=2387042304
+    • totalBytes=7794630656
+    • hardLimitBytes=6625436057
+    • requestedContext=2048
+    • effectiveContext=256
+    • contextReduced=true
+    • pressureWarning=true
+    • hardLimitExceeded=false
+    • overrideApplied=false
+    • lowMemory=false
+2026-11-21 15:33:01.791  INFO   engine  Model Load Started [MODEL_LOAD_STARTED]
+    • fileBytes=2497280736, directDescriptorFd=132, backendPreference=VULKAN, threads=2, batchThreads=2, batch=128, microBatchRequested=0, context=256, gpuLayers=99
+2026-11-21 15:33:01.794  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=1, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:04.761  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=8, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:05.151  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=10, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:06.472  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=15, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:07.555  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=20, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:09.316  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=25, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:10.360  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=30, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:11.342  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=35, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:12.470  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=40, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:13.418  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=45, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:14.686  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=50, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:16.176  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=55, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:17.885  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=60, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:20.064  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=70, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:20.180  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=80, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:20.219  INFO   engine  Model Load Progress [MODEL_LOAD_PROGRESS]
+    • percent=86, backendPreference=VULKAN, gpuLayers=99, fileBytes=2497280736
+2026-11-21 15:33:20.227  INFO   memory  Resource Phase [RESOURCE_PHASE]
+    • phase=MODEL_LOADED_IDLE
+2026-11-21 15:33:20.228  INFO   ipc  Modell geladen [MODEL_LOADED]
+    • Modell: 04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf  [model=04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf]
+    • Backend: Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)  [backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)]
+    • directDescriptor=true
+2026-11-21 15:33:26.827  INFO   diagnostics  Export Requested [EXPORT_REQUESTED]
+    • destinationScheme=content
+
+[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN
+Native Decode-Zeiten – strikt nach PID, Backend und runId getrennt:
+pid=18418 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37) runId=db61e9f9-c379-4c33-947d-b55e7582bf30 samples=16
+sample p50=4463us p90=5164us max=11490us
+decode p50=515799us p90=519969us max=771800us
+decodeSubmit p50=7912us p90=8571us max=256978us
+vkQueueSubmit p50=2869us p90=3265us max=3508us
+vkFenceWait p50=507783us p90=511197us max=517943us
+backendSyncWait p50=508186us p90=511554us max=514822us
+tokenPiece p50=9us p90=53us max=61us
+nativeStep p50=529264us p90=532846us max=793423us
+Token-Schritte (index/sampleUs/decodeUs/submitUs/vkQueueSubmitUs/vkFenceWaitUs/backendSyncWaitUs/pieceUs/totalUs):
+1/11490/771800/256978/2536/517943/514822/61/793423
+2/5164/513962/8116/3190/505417/505846/53/528219
+3/4394/515814/7474/2945/508000/508340/45/529092
+4/4298/513828/7337/2628/506092/506491/43/527037
+72/4829/516381/5638/1835/510317/510743/8/530599
+80/4517/515939/6450/2342/508949/509489/6/529264
+88/4038/515390/8571/3265/506401/506819/7/528603
+96/4217/519969/8415/3164/511197/511554/10/532846
+
+Kotlin/JNI-Wall-Zeiten – strikt nach PID, Backend und runId getrennt:
+pid=18418 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37) runId=db61e9f9-c379-4c33-947d-b55e7582bf30 samples=16
+jniWall p50=529360us p90=532982us max=793563us
+nativeStep=1 jniWallUs=793563
+nativeStep=2 jniWallUs=528269
+nativeStep=3 jniWallUs=529142
+nativeStep=4 jniWallUs=527084
+nativeStep=72 jniWallUs=530713
+nativeStep=80 jniWallUs=529360
+nativeStep=88 jniWallUs=528710
+nativeStep=96 jniWallUs=532982
+
+
+[7] RAM-ZUSAMMENFASSUNG
+18004/MODEL_LOADED_IDLE n=7 PSS_peak=2888.5MB nativePSS_peak=47.4MB nativeHeap_peak=113.4MB javaHeap_peak=2.7MB availableRAM_min=729.5MB thermal_peak=NONE thermal_states=NONEmodel=04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf ctx=256 batch=128 ubatch=64 gpuLayers=99
+18004/MODEL_LOADING n=45 PSS_peak=3529.0MB nativePSS_peak=2013.7MB nativeHeap_peak=2954.9MB javaHeap_peak=8.5MB availableRAM_min=483.7MB thermal_peak=NONE thermal_states=NONEmodel=saf-direct:04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf ctx=256 batch=128 ubatch=64 gpuLayers=0
+18004/SERVICE_STARTING n=1 PSS_peak=76.1MB nativePSS_peak=4.8MB nativeHeap_peak=6.5MB javaHeap_peak=7.8MB availableRAM_min=2033.1MB thermal_peak=NONE thermal_states=NONE
+18418/INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 n=102 PSS_peak=3248.3MB nativePSS_peak=200.0MB nativeHeap_peak=161.6MB javaHeap_peak=6.5MB availableRAM_min=594.0MB thermal_peak=NONE thermal_states=NONEmodel=04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf ctx=256 batch=128 ubatch=64 gpuLayers=99
+18418/MODEL_LOADED_IDLE n=2 PSS_peak=2939.5MB nativePSS_peak=22.8MB nativeHeap_peak=120.0MB javaHeap_peak=3.0MB availableRAM_min=1478.9MB thermal_peak=NONE thermal_states=NONEmodel=04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf ctx=256 batch=128 ubatch=64 gpuLayers=99
+18418/MODEL_LOADING n=34 PSS_peak=2896.7MB nativePSS_peak=80.5MB nativeHeap_peak=74.5MB javaHeap_peak=8.5MB availableRAM_min=928.2MB thermal_peak=NONE thermal_states=NONEmodel=saf-direct:04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf ctx=2048 batch=128 ubatch=64 gpuLayers=99
+18418/SERVICE_STARTING n=1 PSS_peak=86.2MB nativePSS_peak=4.9MB nativeHeap_peak=6.5MB javaHeap_peak=7.8MB availableRAM_min=3729.2MB thermal_peak=NONE thermal_states=NONE
+
+[8] RAM-ZEITVERLAUF
+2026-11-21 15:31:16.908 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=2888.9MB nativeHeap=112.8MB availRAM=986.4MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:31:23.620 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3248.3MB nativeHeap=127.9MB availRAM=609.7MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:31:25.721 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3247.6MB nativeHeap=128.0MB availRAM=594.0MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:31:32.020 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3243.0MB nativeHeap=126.6MB availRAM=666.1MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:31:47.778 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3246.2MB nativeHeap=130.4MB availRAM=708.8MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:32:03.525 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3193.7MB nativeHeap=132.6MB availRAM=729.3MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:32:19.267 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3090.9MB nativeHeap=135.7MB availRAM=693.0MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:32:34.984 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3092.7MB nativeHeap=137.1MB availRAM=658.1MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:32:50.744 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3094.0MB nativeHeap=139.3MB availRAM=764.2MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:33:01.257 pid=18418 INFERENCE_7ef1c4d3-06ee-437d-ae82-70b242d57679 diagnosticRunId=7ef1c4d3-06ee-437d-ae82-70b242d57679 nativeRunId=db61e9f9-c379-4c33-947d-b55e7582bf30 pss=3051.5MB nativeHeap=136.7MB availRAM=802.5MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37)
+2026-11-21 15:33:03.369 pid=18418 MODEL_LOADING pss=2896.4MB nativeHeap=72.3MB availRAM=928.2MB thermal=NONE ctx=2048 ubatch=64 gpuLayers=99 backend=loading
+2026-11-21 15:33:05.465 pid=18418 MODEL_LOADING pss=2896.7MB nativeHeap=72.6MB availRAM=1023.9MB thermal=NONE ctx=2048 ubatch=64 gpuLayers=99 backend=loading
+2026-11-21 15:33:16.965 pid=18418 MODEL_LOADING pss=2884.0MB nativeHeap=74.3MB availRAM=1604.9MB thermal=NONE ctx=2048 ubatch=64 gpuLayers=99 backend=loading
+2026-11-21 15:33:20.095 pid=18418 MODEL_LOADING pss=2867.8MB nativeHeap=64.8MB availRAM=1612.0MB thermal=NONE ctx=2048 ubatch=64 gpuLayers=99 backend=loading
+2026-11-21 15:33:21.140 pid=18418 MODEL_LOADED_IDLE pss=2939.5MB nativeHeap=119.9MB availRAM=1524.4MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37) {registryCount=2;backend[0]=Vulkan;device[0,0]=Vulkan0;description=Mali-G57;type=2;freeBytes=7784226816;totalBytes=7784226816;backend[1]=CPU;device[1,0]=CPU;description=CPU;type=0;freeBytes=7794630656
+2026-11-21 15:33:26.228 pid=18418 MODEL_LOADED_IDLE pss=2934.3MB nativeHeap=120.0MB availRAM=1478.9MB thermal=NONE ctx=256 ubatch=64 gpuLayers=99 backend=Vulkan selected (Vulkan0 / Mali-G57; requested layers 37/37) {registryCount=2;backend[0]=Vulkan;device[0,0]=Vulkan0;description=Mali-G57;type=2;freeBytes=7784226816;totalBytes=7784226816;backend[1]=CPU;device[1,0]=CPU;description=CPU;type=0;freeBytes=7794630656
+
+[DIAGNOSTIK-VOLLSTÄNDIGKEIT]
+Debug-Textdiagnostik=true; Antworttext wird run-korreliert exportiert; native Eingaben/gerenderte Prompts/Token-IDs und Stichproben der Token-Pieces erscheinen nur bei aktivierter Debug-Textdiagnostik.
+Export-Schema 2 kennzeichnet diesen Export eindeutig; ältere Exporte ohne Schema-Kennung enthalten die vollständigen Text-Traces nicht.
+
+[9] NATIVE / VULKAN – AUSGEWÄHLTE EREIGNISSE
+2026-11-21 15:29:26.163  NATIVE  VULKAN_INTEGER_DOT_SHADER_COMPILED=true
+    • 
+2026-11-21 15:29:26.163  NATIVE  VULKAN_PERF_PROFILER_CONFIG
+    • enabled=false
+    • scope=release
+2026-11-21 15:29:26.167  NATIVE  ggml_vulkan: 0 = Mali-G57 (Mali-G57) | uma: 1 | rebar: 1 | fp16: 1 | bf16: 0 | fp4: 0 | warp size: 16 | shared memory: 32768 | int dot: 1 | matrix cores: none
+    • 
+2026-11-21 15:29:26.167  NATIVE  ggml_vulkan: Found 1 Vulkan devices:
+    • 
+2026-11-21 15:29:26.173  NATIVE  LOCAL_LLM_BACKEND_INITIALIZATION_COMPLETED
+    • 
+2026-11-21 15:29:26.175  NATIVE  LOCAL_LLM_CPU_RUNTIME_FEATURES
+    • NEON=1
+    • DOTPROD=1
+    • I8MM=0
+    • FP16=0
+    • recommendedPerformanceCores=4
+2026-11-21 15:29:26.203  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET
+    • device=0
+    • name=Mali-G57
+    • integrated=1
+    • extensionSupported=0
+    • heapCount=1
+2026-11-21 15:29:26.203  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_HEAP
+    • device=0
+    • heapIndex=0
+    • budgetKnown=0
+    • heapSizeBytes=7784226816
+    • freeEstimateBytes=7784226816
+2026-11-21 15:29:26.298  NATIVE  llama_model_loader:
+    • kv  17:     qwen3.attention.layer_norm_rms_epsilon f32              = 0.000001
+2026-11-21 15:29:26.301  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET
+    • device=0
+    • name=Mali-G57
+    • integrated=1
+    • extensionSupported=0
+    • heapCount=1
+2026-11-21 15:33:20.179  NATIVE  sched_reserve: Vulkan_Host compute buffer size = 2.53 MiB
+    • 
+2026-11-21 15:33:21.139  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET
+    • device=0
+    • name=Mali-G57
+    • integrated=1
+    • extensionSupported=0
+    • heapCount=1
+2026-11-21 15:33:21.139  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_HEAP
+    • device=0
+    • heapIndex=0
+    • budgetKnown=0
+    • heapSizeBytes=7784226816
+    • freeEstimateBytes=7784226816
+2026-11-21 15:33:26.226  NATIVE  ggml_vulkan: LOCAL_LLM_MEMORY_BUDGET
+    • device=0
+    • name=Mali-G57
+    • integrated=1
+    • extensionSupported=0
+    • heapCount=1
+
+Hinweis: Im Debug-Diagnosemodus sind runId-korrelierte Eingaben, gerenderte Templates, Token-Piece-Stichproben und generierte Modellausgaben begrenzt enthalten. Release-Builds exportieren keine Rohtextdiagnostik.
