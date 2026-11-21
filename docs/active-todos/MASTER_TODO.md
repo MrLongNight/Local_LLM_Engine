@@ -31,7 +31,7 @@
 
 ## Verbindliche Ausführungsreihenfolge nach GO
 
-1. **Gate A — vor Integration:** P0-07d (CPU-only-D0-Testpfad) → P0-07e (Engine-Threadempfehlung) → P0-07f (96-Token-Smoke-Prompt) → P0-07g (Build-Identität) → D0 ausschließlich auf CPU (drei Läufe, dieselbe wiederverwendete Modellquelle, gleiche Modellgröße und optionale SHA-256) → P0-08a → D3 → P1-02c → P1-04a → P1-04e.
+1. **Gate A — vor Integration:** P0-07d (CPU-only-D0-Testpfad) → P0-07e (Engine-Threadempfehlung) → P0-07f (96-Token-Smoke-Prompt) → P0-07g (Build-Identität) → D0 ausschließlich auf CPU (drei Läufe, dieselbe wiederverwendete Modellquelle, gleiche Modellgröße und optionale SHA-256) → P0-08b (Diagnoseexport-Lifecycle-Retention) → P0-08a (CPU-Prozessabbruch diagnostizieren) → D3 → P1-02c → P1-04a → P1-04e.
 2. **Vorgezogen nach Gate A, vor Gate B:** P2-01c prüft `RemoteUrl` als Engine-Funktion und liefert die Entscheidungsgrundlage für den Nutzer.
 3. **Gate B — Engine-Features für die neue Pipeline:** P0-09a–c → P0-10a–b → P0-11a–b → P1-05c.
 4. **Integration:** INT-01–INT-06 erst nach erfolgreichem Gate A und Gate B.
@@ -99,6 +99,7 @@
 
 ### P0-08 — CPU-Pfad auf dem Zielgerät
 
+- [ ] **P0-08b** 🛠️ AGENT · CODE/TESTS/CI · M · Impact H — Den Diagnoseexport um eine eigenständige, chronologisch geordnete und separat begrenzte Prozess-/Service-Lifecycle-Sektion erweitern. Disconnect, Prozess-PID, Exit-Grund/-Beschreibung, Prozessabbruch, Reconnect und Timeout dürfen nicht durch das allgemeine 24-Ereignis-Limit verloren gehen. Regressionstests für Lifecycle-Ereignisse vor späteren Modell-Events, PID/Exit-Grund, Reconnect/Timeout sowie die separate Abschnittsgrenze ergänzen. Unit- und APK-/Emulator-CI auf identischem SHA verifizieren; erst danach P0-08a anhand eines erneuten Geräteexports abschließen.
 - [ ] **P0-08a** 🛠️ AGENT · DIAGNOSE · S · Impact H — Den im Geräteexport vom 21.11.2026 (Run `96bc2130-ddef-48ae-8fc1-70558844c63d`) dokumentierten CPU-Referenzlauf mit Service-Disconnect diagnostizieren: Prozess-Exit-Grund, PSS/RAM, Memory-Guard-Entscheidung, Timeout-Eskalation oder nativer Absturz. Nur Befund und getrennte Folgeaufgaben, keine Fixes.
 
 ### P0-09 — Grammatik-Constraint

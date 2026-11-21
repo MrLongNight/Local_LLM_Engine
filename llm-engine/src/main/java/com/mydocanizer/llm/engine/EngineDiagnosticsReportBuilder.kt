@@ -29,6 +29,7 @@ internal object EngineDiagnosticsReportBuilder {
     // Keep the export bounded while retaining the complete structured evidence.
     private const val MAX_EXPORT_BYTES = 128 * 1024
     private const val MAX_EVENT_LINES = 24
+    private const val MAX_PROCESS_LIFECYCLE_LINES = 48
     private const val MAX_NATIVE_LINES = 14
     private const val MAX_MEMORY_TIMELINE_LINES = 16
     private const val MAX_VULKAN_PROFILE_SNAPSHOTS = 12
@@ -184,6 +185,69 @@ internal object EngineDiagnosticsReportBuilder {
             event.endsWith("_ABORTED")
     }
 
+    private val processLifecycleEvents = setOf(
+        "SERVICE_CREATED",
+        "SERVICE_DESTROYED",
+        "SERVICE_DISCONNECTED",
+        "SERVICE_CONNECTED",
+        "SERVICE_RECONNECT_STARTED",
+        "SERVICE_RECONNECT_BIND_REQUESTED",
+        "SERVICE_RECONNECTED",
+        "BINDING_DIED",
+        "PROCESS_DIED",
+        "PROCESS_RESTART",
+        "PROCESS_EXIT_INFO",
+        "PROCESS_EXIT_INFO_UNAVAILABLE",
+        "PROCESS_KILLED",
+        "KILL_PROCESS_REQUESTED",
+        "PROCESS_ABORT_REQUESTED",
+        "PROCESS_ABORT_CONFIRMED",
+        "PROCESS_ABORT_UNCONFIRMED",
+        "PROCESS_ABORT_SKIPPED_REPLACEMENT",
+        "INFERENCE_STARTED",
+        "INFERENCE_COMPLETED",
+        "INFERENCE_CANCELLED",
+        "INFERENCE_TIMEOUT",
+        "INFERENCE_TIMEOUT_POLICY",
+        "CANCEL_REQUESTED",
+        "COOPERATIVE_CANCEL_ESCALATED",
+        "TIMEOUT_COOPERATIVE_CANCEL_SENT",
+        "TIMEOUT_COOPERATIVE_CANCEL_ACKNOWLEDGED",
+        "TIMEOUT_COOPERATIVE_CANCEL_ESCALATED"
+    )
+
+    private val processLifecyclePreservedFields = setOf(
+        "pid",
+        "disconnectedPid",
+        "servicePid",
+        "callback",
+        "reason",
+        "description",
+        "exitReason",
+        "status",
+        "timeoutSource",
+        "timeoutMs",
+        "timeoutDurationMs",
+        "timeoutStage",
+        "stage",
+        "runId",
+        "requestId",
+        "attempt",
+        "signal",
+        "processState",
+        "importance",
+        "processName",
+        "killedByAm"
+    )
+
+    private fun isProcessLifecycleEvent(line: String): Boolean {
+        val event = eventName(line)
+        return event in processLifecycleEvents ||
+            event.startsWith("PROCESS_ABORT_") ||
+            event.startsWith("SERVICE_RECONNECT_") ||
+            event.startsWith("TIMEOUT_COOPERATIVE_CANCEL_")
+    }
+
     private fun compactLine(line: String, maxChars: Int = 300): String =
         if (line.length <= maxChars) line else line.take(maxChars - 18) + " …[gekürzt]"
 
@@ -296,7 +360,8 @@ internal object EngineDiagnosticsReportBuilder {
         val fields = details.split(fieldSeparator)
             .filterNot { field ->
                 val key = field.substringBefore('=')
-                key in setOf("schemaVersion", "eventId", "pid", "correlationType", "correlationId")
+                key in setOf("schemaVersion", "eventId", "correlationType", "correlationId") ||
+                    (key == "pid" && key !in preserveKeys)
             }
         // Keep the ordinary compact limit, but append explicitly required diagnostics
         // that occur later in long structured records such as INFERENCE_RUN_CONTEXT.
@@ -312,14 +377,18 @@ internal object EngineDiagnosticsReportBuilder {
         }
     }
 
-    private fun readableEventLine(line: String, maxChars: Int = 560): String {
+    private fun readableEventLine(
+        line: String,
+        maxChars: Int = 560,
+        preserveKeys: Set<String> = emptySet()
+    ): String {
         val match = eventLinePattern.matchEntire(line) ?: return compactLine(line, maxChars)
         val timestamp = match.groupValues[1]
         val level = match.groupValues[2]
         val tag = match.groupValues[3]
         val event = match.groupValues[4]
         val details = match.groupValues.getOrElse(5) { "" }
-        val fields = readableFields(details)
+        val fields = readableFields(details, preserveKeys)
         return buildString {
             append(timestamp)
             append("  ")
@@ -501,6 +570,12 @@ internal object EngineDiagnosticsReportBuilder {
             .filter(::isImportantEvent)
             .takeLast(MAX_EVENT_LINES)
             .map { readableEventLine(it) }
+        // Process/service lifecycle evidence has its own bounded tail. It must not be
+        // evicted when later model-load or benchmark events fill the general 24-line tail.
+        val processLifecycleLines = kotlinLines
+            .filter(::isProcessLifecycleEvent)
+            .takeLast(MAX_PROCESS_LIFECYCLE_LINES)
+            .map { readableEventLine(it, 620, processLifecyclePreservedFields) }
         // These low-frequency metrics are essential to compare Vulkan against CPU:
         // prefill/tokenization/decode times, generated tokens, generation wall time,
         // measured tokens/s, and the backend used for each test. Prompts/responses
@@ -1101,6 +1176,12 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[5] WICHTIGE EREIGNISSE / FEHLER")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
             events.forEach(::appendLine)
+            appendLine()
+            appendLine("[5a] PROZESS- UND SERVICE-LEBENSZYKLUS")
+            if (processLifecycleLines.isEmpty()) {
+                appendLine("Keine passenden Prozess-/Service-Lifecycle-Ereignisse vorhanden.")
+            }
+            processLifecycleLines.forEach(::appendLine)
             appendLine()
             // Keep the most valuable throughput and synchronization evidence ahead
             // of the potentially unbounded number of per-PID/per-phase RAM groups.

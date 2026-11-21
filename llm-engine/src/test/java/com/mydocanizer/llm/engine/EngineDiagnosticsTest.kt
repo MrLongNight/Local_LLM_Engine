@@ -981,7 +981,15 @@ class EngineDiagnosticsTest {
             "2026-11-21 19:05:13.000 [INFO] [ipc_client] SERVICE_DISCONNECTED - " +
                 "disconnectedPid=26257,reason=binder_died",
             "2026-11-21 19:05:13.010 [INFO] [ipc_client] PROCESS_EXIT_INFO - " +
-                "pid=26257,callback=SERVICE_DISCONNECTED,reason=LOW_MEMORY,description=low memory"
+                "pid=26257,callback=SERVICE_DISCONNECTED,reason=LOW_MEMORY,description=low memory",
+            "2026-11-21 19:05:13.020 [INFO] [ipc_client] SERVICE_RECONNECT_STARTED - " +
+                "attempt=1,pid=26257",
+            "2026-11-21 19:05:13.030 [INFO] [ipc_client] SERVICE_RECONNECTED - " +
+                "attempt=1,pid=28001",
+            "2026-11-21 19:05:13.040 [WARN] [inference] INFERENCE_TIMEOUT - " +
+                "runId=cpu-run,timeoutSource=FIRST_TOKEN,timeoutMs=600000,pid=26257",
+            "2026-11-21 19:05:13.050 [INFO] [ipc_client] TIMEOUT_COOPERATIVE_CANCEL_ESCALATED - " +
+                "runId=cpu-run,reason=service_unresponsive,pid=26257"
         )
         val laterModelEvents = (1..36).map { index ->
             "2026-11-21 19:06:%02d.000 [INFO] [engine] MODEL_LOAD_PROGRESS - ".format(index) +
@@ -995,8 +1003,35 @@ class EngineDiagnosticsTest {
         assertTrue(processSection.contains("SERVICE_DISCONNECTED"))
         assertTrue(processSection.contains("disconnectedPid=26257"))
         assertTrue(processSection.contains("PROCESS_EXIT_INFO"))
+        assertTrue(processSection.contains("pid=26257"))
         assertTrue(processSection.contains("reason=LOW_MEMORY"))
+        assertTrue(processSection.contains("description=low memory"))
+        assertTrue(processSection.contains("SERVICE_RECONNECT_STARTED"))
+        assertTrue(processSection.contains("SERVICE_RECONNECTED"))
+        assertTrue(processSection.contains("INFERENCE_TIMEOUT"))
+        assertTrue(processSection.contains("timeoutSource=FIRST_TOKEN"))
+        assertTrue(processSection.contains("TIMEOUT_COOPERATIVE_CANCEL_ESCALATED"))
         assertTrue(report.contains("MODEL_LOAD_PROGRESS"))
+    }
+
+    @Test
+    fun compactExportBoundsProcessLifecycleEventsAndKeepsNewestEvidence() {
+        val processEvents = (1..60).map { index ->
+            "2026-11-21 19:07:00.000 [INFO] [ipc_client] PROCESS_EXIT_INFO - " +
+                "pid=${1000 + index},reason=REASON_$index"
+        }
+
+        val report = EngineDiagnostics.buildCompactReportForTest(processEvents)
+        val processSection = report.substringAfter("[5a] PROZESS- UND SERVICE-LEBENSZYKLUS")
+            .substringBefore("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
+        val retainedExitRows = processSection.lineSequence()
+            .filter { it.contains("[PROCESS_EXIT_INFO]") }
+            .toList()
+
+        assertEquals(48, retainedExitRows.size)
+        assertFalse(processSection.contains("pid=1001"))
+        assertTrue(processSection.contains("pid=1060"))
+        assertTrue(processSection.contains("reason=REASON_60"))
     }
 
 }
