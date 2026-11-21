@@ -94,6 +94,8 @@ internal object NativeEngineHandle {
         flashAttentionMode: Int,
         vulkanDmmvWorkgroup: Int,
         gdnPolicy: Int,
+        kvCacheTypeK: Int,
+        kvCacheTypeV: Int,
         progressCallback: NativeModelLoadProgressCallback
     ): Int
 

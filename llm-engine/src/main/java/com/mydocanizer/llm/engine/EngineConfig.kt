@@ -27,6 +27,19 @@ enum class VulkanMatvecWorkgroup(val nativeId: Int, val label: String) {
     }
 }
 
+/** llama.cpp KV-cache storage types supported by this engine. */
+enum class KvCacheType(val nativeId: Int) {
+    F16(1),
+    Q8_0(8);
+
+    companion object {
+        fun fromName(name: String?): KvCacheType = entries.firstOrNull { it.name == name } ?: F16
+    }
+}
+
+private fun readKvCacheType(parcel: Parcel): KvCacheType =
+    if (parcel.dataAvail() > 0) KvCacheType.fromName(parcel.readString()) else KvCacheType.F16
+
 /** Explicit Flash Attention policy passed to llama_context_params. */
 enum class ReloadAfterAbort {
     /** Leave the model unloaded after process recovery; reload on the next inference request. */
@@ -132,7 +145,11 @@ data class EngineConfig(
     /** Explicit one-load acknowledgement for a model exceeding the 85% total-RAM guard. */
     val memoryGuardOverride: Boolean = false,
     /** Architecture-aware fused/unfused Gated Delta Net execution policy. */
-    val gdnPolicy: GdnPolicy = GdnPolicy.ARCH_DEFAULT
+    val gdnPolicy: GdnPolicy = GdnPolicy.ARCH_DEFAULT,
+    /** K-cache type; Q8_0 is supported by the pinned llama.cpp revision. */
+    val kvCacheTypeK: KvCacheType = KvCacheType.F16,
+    /** V-cache type; Q8_0 requires Flash Attention (AUTO enables it upstream). */
+    val kvCacheTypeV: KvCacheType = KvCacheType.F16
 ) : Parcelable {
     /**
      * Effective llama.cpp thread count for prompt/batch processing.
@@ -197,7 +214,9 @@ data class EngineConfig(
         topK = if (parcel.dataAvail() > 0) parcel.readInt() else 20,
         minP = if (parcel.dataAvail() > 0) parcel.readFloat() else 0.05f,
         memoryGuardOverride = if (parcel.dataAvail() > 0) parcel.readInt() != 0 else false,
-        gdnPolicy = if (parcel.dataAvail() > 0) GdnPolicy.fromName(parcel.readString()) else GdnPolicy.ARCH_DEFAULT
+        gdnPolicy = if (parcel.dataAvail() > 0) GdnPolicy.fromName(parcel.readString()) else GdnPolicy.ARCH_DEFAULT,
+        kvCacheTypeK = readKvCacheType(parcel),
+        kvCacheTypeV = readKvCacheType(parcel)
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -219,6 +238,8 @@ data class EngineConfig(
         parcel.writeFloat(minP)
         parcel.writeInt(if (memoryGuardOverride) 1 else 0)
         parcel.writeString(gdnPolicy.name)
+        parcel.writeString(kvCacheTypeK.name)
+        parcel.writeString(kvCacheTypeV.name)
     }
 
     override fun describeContents(): Int = 0

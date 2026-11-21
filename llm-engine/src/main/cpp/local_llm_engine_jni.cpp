@@ -1471,6 +1471,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         jint flash_attention_mode,
         jint vulkan_dmmv_workgroup,
         jint gdn_policy,
+        jint kv_cache_type_k,
+        jint kv_cache_type_v,
         jobject progress_listener) try {
     auto* engine = fromHandle(handle);
     if (!engine) return 1;
@@ -1500,6 +1502,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         (gdn_policy == 2 ? "BOTH_UNFUSED" :
         (gdn_policy == 3 ? "AR_FUSED_CH_UNFUSED" : "AR_UNFUSED_CH_FUSED")));
     LOGI("LOCAL_LLM_GDN_POLICY_REQUEST - id=%d,policy=%s", gdn_policy, gdn_policy_name);
+    if ((kv_cache_type_k != GGML_TYPE_F16 && kv_cache_type_k != GGML_TYPE_Q8_0) ||
+        (kv_cache_type_v != GGML_TYPE_F16 && kv_cache_type_v != GGML_TYPE_Q8_0)) {
+        LOGE("Invalid KV cache types: K=%d,V=%d (only F16/Q8_0 supported)", kv_cache_type_k, kv_cache_type_v);
+        return 7;
+    }
     if (flash_attention_mode < -1 || flash_attention_mode > 1) {
         LOGE("Invalid Flash Attention mode: %d", flash_attention_mode);
         return 7;
@@ -1750,15 +1757,18 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = ctx_size;
+    ctx_params.type_k = static_cast<ggml_type>(kv_cache_type_k);
+    ctx_params.type_v = static_cast<ggml_type>(kv_cache_type_v);
     ctx_params.n_batch = b_size;
     ctx_params.n_ubatch = resolved_micro_batch;
     ctx_params.n_threads = n_threads;
     ctx_params.n_threads_batch = resolved_batch_threads;
     ctx_params.flash_attn_type = static_cast<llama_flash_attn_type>(flash_attention_mode);
     engine->flash_attention_mode = flash_attention_mode;
-    LOGI("Context policy: backend=%s,n_ctx=%d,n_batch=%d,n_ubatch=%d,flash_attn_type=%d",
+    LOGI("Context policy: backend=%s,n_ctx=%d,n_batch=%d,n_ubatch=%d,flash_attn_type=%d,cache_k=%s,cache_v=%s",
          use_vulkan ? "VULKAN" : "CPU", ctx_size, b_size, resolved_micro_batch,
-         flash_attention_mode);
+         flash_attention_mode, ggml_type_name(static_cast<ggml_type>(kv_cache_type_k)),
+         ggml_type_name(static_cast<ggml_type>(kv_cache_type_v)));
     if (!use_vulkan) {
         ctx_params.abort_callback = llama_decode_abort_requested;
         ctx_params.abort_callback_data = engine;

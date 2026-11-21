@@ -230,6 +230,8 @@ internal class LocalLlmEngineImpl(
                 flashAttentionMode = config.flashAttentionMode.nativeId,
                 vulkanDmmvWorkgroup = config.vulkanMatvecWorkgroup.nativeId,
                 gdnPolicy = config.gdnPolicy.nativeId,
+                kvCacheTypeK = config.kvCacheTypeK.nativeId,
+                kvCacheTypeV = config.kvCacheTypeV.nativeId,
                 progressCallback = progressCallback
             )
 
