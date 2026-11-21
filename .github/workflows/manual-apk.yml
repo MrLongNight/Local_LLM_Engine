@@ -235,6 +235,7 @@ jobs:
       - name: Build APK and process-isolation test APK
         shell: bash
         env:
+          APP_BUILD_NUMBER: ${{ github.run_number }}
           ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
           MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || 'BLOCK' }}
         run: |
@@ -249,7 +250,8 @@ jobs:
             echo "::error::TEMPORARY SPIN mode requires enable_vulkan_perf_profiler=true."
             exit 1
           fi
-          gradle_args=()
+          test "${APP_BUILD_NUMBER}" = "${GITHUB_RUN_NUMBER}"
+          gradle_args=("-PappBuildNumber=${APP_BUILD_NUMBER}")
           if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
             echo "Building separate Vulkan per-operation profiler APK (Mali fence wait: ${MALI_FENCE_WAIT_STRATEGY})."
             gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
@@ -676,7 +678,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Local-LMM-Engine-debug-diagnostics-apk
+          name: Local-LMM-Engine-debug-diagnostics-apk-build-${{ github.run_number }}
           path: |
             app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk
             app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk.sha256
