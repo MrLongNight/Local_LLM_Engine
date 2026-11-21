@@ -991,12 +991,18 @@ class EngineDiagnosticsTest {
             "2026-11-21 19:05:13.050 [INFO] [ipc_client] TIMEOUT_COOPERATIVE_CANCEL_ESCALATED - " +
                 "runId=cpu-run,reason=service_unresponsive,pid=26257"
         )
+        val appKillEvents = listOf(
+            "2026-11-21 19:05:13.005 [WARN] [ipc_client] HARD_KILL - " +
+                "source=client_side_fallback,targetPid=26257",
+            "2026-11-21 19:05:13.006 [INFO] [ipc_client] PROCESS_KILL_REQUESTED - " +
+                "reason=client_side_fallback,targetPid=26257,processKillRequests=1,cooperativeCancels=1"
+        )
         val laterModelEvents = (1..36).map { index ->
             "2026-11-21 19:06:%02d.000 [INFO] [engine] MODEL_LOAD_PROGRESS - ".format(index) +
                 "percent=$index,pid=28000"
         }
 
-        val report = EngineDiagnostics.buildCompactReportForTest(processEvents + laterModelEvents)
+        val report = EngineDiagnostics.buildCompactReportForTest(processEvents + appKillEvents + laterModelEvents)
         val processSection = report.substringAfter("[5a] PROZESS- UND SERVICE-LEBENSZYKLUS")
             .substringBefore("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
 
@@ -1011,6 +1017,12 @@ class EngineDiagnosticsTest {
         assertTrue(processSection.contains("INFERENCE_TIMEOUT"))
         assertTrue(processSection.contains("timeoutSource=FIRST_TOKEN"))
         assertTrue(processSection.contains("TIMEOUT_COOPERATIVE_CANCEL_ESCALATED"))
+        assertTrue(processSection.contains("HARD_KILL"))
+        assertTrue(processSection.contains("source=client_side_fallback"))
+        assertTrue(processSection.contains("PROCESS_KILL_REQUESTED"))
+        assertTrue(processSection.contains("targetPid=26257"))
+        assertTrue(processSection.contains("processKillRequests=1"))
+        assertTrue(processSection.contains("cooperativeCancels=1"))
         assertTrue(report.contains("MODEL_LOAD_PROGRESS"))
     }
 
