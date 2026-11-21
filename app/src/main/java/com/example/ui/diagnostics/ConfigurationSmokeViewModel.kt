@@ -97,7 +97,7 @@ abstract class ConfigurationSmokeViewModel(
         )
     }
 
-    /** D0 is a three-run, SHA-verified CPU-only baseline. */
+    /** D0 runs three CPU-only profiles using the same model source/load path as the paired runner. */
     fun runConfigurationSmokeTest() = startConfigurationSmokeTest(requireD0Reference = true)
 
     /** Separate CPU/Vulkan candidate comparison, not counted as D0. */
@@ -136,25 +136,24 @@ abstract class ConfigurationSmokeViewModel(
             phase = ConfigurationSmokePhase.PREPARING,
             currentStep = 1,
             message = if (requireD0Reference) {
-                "Prüfe die SHA-256 des geladenen GGUF für drei byte-identische CPU-Läufe…"
+                "Prüfe die geladene Modellquelle und Dateigröße für drei CPU-Läufe…"
             } else {
                 "Bereite den separaten CPU-/Vulkan-Vergleich vor…"
             }
         )
-        val modelAssessment = InferenceConfigSmokePlan.assessD0ModelSha(model)
+        val modelAssessment = InferenceConfigSmokePlan.assessD0ModelSource(model)
         val testMode = if (requireD0Reference) "D0_CPU_REFERENCE_3_RUNS" else "GENERAL_MODEL_AGNOSTIC_CPU_VULKAN_PAIR"
         val d0BaselineEligible = requireD0Reference && modelAssessment.baselineEligible
         if (requireD0Reference && !modelAssessment.baselineEligible) {
             EngineDiagnostics.info(
                 "config_test",
-                "CONFIG_SMOKE_MODEL_SHA_REJECTED",
+                "CONFIG_SMOKE_MODEL_SOURCE_REJECTED",
                 "status=${modelAssessment.status},reason=${modelAssessment.reason}," +
                     "model=${model.name},bytes=${model.sizeBytes},shaStatus=${modelAssessment.shaStatus}"
             )
             rejectSmokeRun(
-                "D0 nicht gestartet: Für die CPU-Baseline ist eine gültige SHA-256 erforderlich. " +
-                    "Bitte das GGUF zuerst in die private Modellbibliothek importieren; direkte externe SAF-Deskriptoren " +
-                    "liefern keinen verifizierten Hash."
+                "D0 nicht gestartet: Die geladene Modellquelle oder die gemeldete Dateigröße ist ungültig. " +
+                    "Bitte das GGUF zuerst regulär laden."
             )
             return
         }
@@ -185,7 +184,7 @@ abstract class ConfigurationSmokeViewModel(
             phase = ConfigurationSmokePhase.PREPARING,
             currentStep = 1,
             message = if (requireD0Reference) {
-                "Modell-SHA-256 bestätigt. Drei CPU-only-Läufe werden vorbereitet; Vulkan bleibt aus."
+                "Modellquelle und Dateigröße bestätigt. Drei CPU-only-Läufe werden vorbereitet; eine vorhandene SHA wird ebenfalls geprüft."
             } else {
                 "Modellkandidat erkannt. CPU- und Vulkan-Profile werden vorbereitet…"
             }
@@ -317,16 +316,11 @@ abstract class ConfigurationSmokeViewModel(
                         }
 
                         val loaded = loadResult.getOrThrow()
-                        val sameModelIdentity = if (requireD0Reference) {
-                            InferenceConfigSmokePlan.matchesD0ModelBytes(model, loaded)
-                        } else {
-                            loaded.sizeBytes == model.sizeBytes &&
-                                (model.sha256.isNullOrBlank() ||
-                                    model.sha256.equals(loaded.sha256, ignoreCase = true))
-                        }
+                        val sameModelIdentity =
+                            InferenceConfigSmokePlan.matchesReloadedModelIdentity(model, loaded)
                         if (!sameModelIdentity) {
                             throw ConfigurationSmokeModelIdentityException(
-                                "Nach Neuladen wurde nicht dieselbe Modelldatei mit identischer Größe/SHA-256 bestätigt."
+                                "Nach Neuladen stimmte die gemeldete Modellgröße nicht überein oder eine vorhandene SHA-256 wich ab."
                             )
                         }
                         pendingRecoveryFromProfile?.let { failedProfile ->
@@ -351,11 +345,9 @@ abstract class ConfigurationSmokeViewModel(
                             )
                         }
                         confirmedBackends += profile.id + "=" + backend
-                        val shaStatus = if (!model.sha256.isNullOrBlank() && model.sha256 == loaded.sha256) {
-                            "VERIFIED"
-                        } else {
-                            "UNAVAILABLE"
-                        }
+                        val shaStatus = if (!model.sha256.isNullOrBlank() &&
+                            model.sha256.equals(loaded.sha256, ignoreCase = true)
+                        ) "VERIFIED" else "UNAVAILABLE_OPTIONAL"
 
                         publishSmokeProgress(
                             phase = if (profile.expectedBackend == "CPU") ConfigurationSmokePhase.CPU_INFERENCE
@@ -621,7 +613,9 @@ abstract class ConfigurationSmokeViewModel(
                             ",completedRuns=" + completedRuns +
                             ",passedRuns=" + passedRuns +
                             ",modelBytes=" + model.sizeBytes +
-                            ",modelSha256=" + model.sha256 +
+                            ",modelIdentity=" + modelAssessment.status +
+                            ",modelSourceType=" + (if (model.path.startsWith("content://", ignoreCase = true)) "SAF_CONTENT_URI" else "FILE_PATH") +
+                            ",modelSha256=" + (model.sha256 ?: "unavailable") +
                             ",backend=CPU,gpuLayersRequested=0,vulkanProfiles=0" +
                             ",nativeRunIds=" + nativeRunIds.joinToString("|")
                     )
@@ -630,7 +624,7 @@ abstract class ConfigurationSmokeViewModel(
                         ", abgeschlossen=" + completedRuns + "/" + InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS +
                         ", Vulkan=NICHT AUSGEFÜHRT)"
                     if (d0Status != "PASS") {
-                        rows += "D0 bleibt offen: alle drei identitätsgesicherten CPU-Läufe müssen exakte Ausgabe und FinishReason=STOP bestehen."
+                        rows += "D0 bleibt offen: alle drei quellgrößen-geprüften CPU-Läufe müssen exakte Ausgabe und FinishReason=STOP bestehen."
                     }
                 } else {
                     publishSmokeProgress(
@@ -758,9 +752,9 @@ abstract class ConfigurationSmokeViewModel(
                 _configSmokeReport.value = buildString {
                     appendLine("Automatischer In-App-Konfigurationstest")
                     appendLine("Testmodus: " + testMode)
-                    appendLine("D0-Modell-SHA-Status: " + modelAssessment.status +
+                    appendLine("D0-Modellidentität: " + modelAssessment.status +
                         " (" + modelAssessment.reason + ")")
-                    appendLine("D0-SHA-256: " + modelAssessment.shaStatus)
+                    appendLine("D0-SHA-256: " + modelAssessment.shaStatus + " (optional; Modellquelle wird wiederverwendet und Größe geprüft)")
                     appendLine("D0-Baseline vergleichbar: " + if (d0BaselineEligible) "JA" else "NEIN")
                     appendLine("Modell: " + model.name + " (" + model.sizeMb.toInt() + " MB)")
                     appendLine("Backend-Ergebnisse: " + confirmedBackends.joinToString(", ").ifBlank { "keines bestätigt" })
@@ -800,7 +794,7 @@ abstract class ConfigurationSmokeViewModel(
                         "D0 CPU-only-Gesamtgate: PASS (3/3 Läufe). Vulkan wurde nicht ausgeführt; Modellkonfiguration wiederhergestellt."
                     requireD0Reference ->
                         "D0 CPU-only-Gesamtgate: " + (d0CpuGateCombinedStatus ?: "UNAVAILABLE") +
-                            ". Drei identitätsgesicherte CPU-Läufe sind erforderlich."
+                            ". Drei CPU-Läufe mit derselben Modellquelle und gemeldeten Modellgröße sind erforderlich."
                     pairedGateCombinedStatus == "PASS" ->
                         "CPU-/Vulkan-Gesamtgate: PASS. Ursprüngliche Modellkonfiguration wiederhergestellt."
                     else ->

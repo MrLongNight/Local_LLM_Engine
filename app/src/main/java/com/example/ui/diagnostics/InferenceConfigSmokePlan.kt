@@ -21,28 +21,33 @@ internal object InferenceConfigSmokePlan {
     )
 
     /**
-     * D0 accepts the currently loaded model without checking its name, architecture,
-     * parameter count or quantization. A valid SHA proves that all three reloads use
-     * exactly the same model bytes.
+     * D0 accepts the currently loaded model source. A missing SHA is normal for
+     * direct SAF descriptors and must not block the CPU reference run.
      */
-    internal fun assessD0ModelSha(model: ModelInfo): D0ModelAssessment {
+    internal fun assessD0ModelSource(model: ModelInfo): D0ModelAssessment {
+        val sourceAvailable = model.path.isNotBlank() && model.sizeBytes > 0L
         val sha = model.sha256?.trim()
         val shaStatus = when {
             sha.isNullOrEmpty() -> "UNAVAILABLE"
             sha.matches(Regex("[0-9a-fA-F]{64}")) -> "AVAILABLE"
             else -> "INVALID"
         }
-        val status = when (shaStatus) {
-            "AVAILABLE" -> "MODEL_SHA_AVAILABLE"
-            "UNAVAILABLE" -> "MODEL_SHA_UNAVAILABLE"
-            else -> "MODEL_SHA_INVALID"
+        val status = when {
+            !sourceAvailable -> "MODEL_SOURCE_UNAVAILABLE"
+            shaStatus == "AVAILABLE" -> "SOURCE_SIZE_AND_SHA_AVAILABLE"
+            else -> "SOURCE_AND_SIZE_ONLY"
         }
-        val reason = when (shaStatus) {
-            "AVAILABLE" -> "sha256_available"
-            "UNAVAILABLE" -> "sha256_unavailable"
-            else -> "sha256_invalid"
+        val reason = when {
+            !sourceAvailable -> "model_source_or_size_unavailable"
+            shaStatus == "AVAILABLE" -> "same_source_size_and_sha_available"
+            else -> "same_source_and_size_sha_optional"
         }
-        return D0ModelAssessment(status, reason, shaStatus, shaStatus == "AVAILABLE")
+        return D0ModelAssessment(
+            status = status,
+            reason = reason,
+            shaStatus = shaStatus,
+            baselineEligible = sourceAvailable
+        )
     }
 
     const val MEASURED_TOKENS = 96
@@ -169,18 +174,14 @@ internal object InferenceConfigSmokePlan {
         )
     }
 
-    /** A D0 reload must prove the exact imported model bytes again. */
-    internal fun matchesD0ModelBytes(requested: ModelInfo, loaded: ModelInfo): Boolean {
-        val requestedSha = requested.sha256?.trim()
-            ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
-            ?: return false
-        val loadedSha = loaded.sha256?.trim()
-            ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
-            ?: return false
-        return requested.sizeBytes > 0L &&
-            requested.sizeBytes == loaded.sizeBytes &&
-            requestedSha.equals(loadedSha, ignoreCase = true)
-    }
+    /**
+     * Shared by D0 and the paired CPU/Vulkan runner. The caller reuses the same
+     * ModelSource for each profile; this is the existing paired size/optional-SHA rule.
+     */
+    internal fun matchesReloadedModelIdentity(requested: ModelInfo, loaded: ModelInfo): Boolean =
+        requested.sizeBytes == loaded.sizeBytes &&
+            (requested.sha256.isNullOrBlank() ||
+                requested.sha256.equals(loaded.sha256, ignoreCase = true))
 
     internal fun requiresQ4kDecodeEvidence(expectedBackend: String, expectsQ4kModel: Boolean): Boolean =
         expectedBackend.equals("VULKAN", ignoreCase = true) && expectsQ4kModel

@@ -90,12 +90,12 @@ The overlay comment records repeated runtime-verified Mali-G57 measurements for 
 
 Use **Settings → D0-CPU-Referenz und Backendvergleich → D0: drei CPU-only-Referenzläufe starten** for the Gate-A reference. The D0 action runs exactly three separate CPU inference profiles. It does not create or load a Vulkan candidate profile. The separate CPU/Vulkan candidate action is reserved for the paired D1a parity check; do not use it as the D0 CPU baseline.
 
-### Model choice and byte identity
+### Model choice and stable source reuse
 
 - **Intended comparison model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF). The app does not gate D0 by model name, architecture, parameter count or quantization; it runs the currently loaded GGUF and records its metadata.
 - **Model selection:** D0 does not reject a loaded model based on its filename, family, architecture, parameter count or quantization. For direct comparison with D1a, load the intended Qwen3 reference model; D0 logs the actual model identity so results from different GGUFs are not mixed.
-- **SHA-256 is mandatory for reproducibility, not model selection:** Import the chosen GGUF into the app-private model library before running D0. External SAF descriptors do not receive a SHA inferred from their display name; if SHA is unavailable or malformed, D0 refuses to start. All three reloads must report the same valid 64-hex SHA-256 and exact file byte count.
-- Start with the imported model loaded and no inference running. Each D0 profile reloads the same source and verifies its byte count and SHA-256 before inference. The user's original engine configuration is restored after the three CPU runs.
+- **SHA-256 is optional, including for direct SAF sources:** D0 does not require importing a model into the private library. It constructs `ModelSource.ContentUri` or `ModelSource.FilePath` from the currently loaded `ModelInfo.path`, matching the paired runner, and reuses that same source object across its three CPU profiles. It calls the same `engine.loadModel(source, config)` path as the paired CPU profile. Each reload must report the same model size; when the initially loaded model provides an SHA-256, every reload must match it. When the original source skips SHA (as direct SAF does), SHA remains unavailable and does not block the run.
+- Start with the model loaded from its normal source and no inference running. Each D0 profile reuses the exact `ModelSource` instance and loader used by the paired runner; the reported model size must match on reload, and an SHA present on the initially loaded model must also match. Direct SAF loads with no SHA are not rejected. The user's original engine configuration is restored after the three CPU runs.
 - The built-in test uses the fixed prompt and expected output below. Do not replace it with previous chat history or a different prompt when collecting the regression baseline.
 
 ### Fixed D0 CPU parameters
@@ -139,15 +139,15 @@ Interior whitespace or any other text is a mismatch. The 96-token ceiling is int
 
 ### D0 pass criteria — CPU-only
 
-1. Record the currently loaded model's filename, architecture, quantization, actual byte count and verified SHA-256. Model family/architecture/parameter count/quantization are not start gates; every one of the three runs must use the same exact model bytes. Use Qwen3-4B-Instruct-2507 Q4_K_M when collecting results intended for direct comparison with D1a.
+1. Record the currently loaded model's filename, architecture, quantization, source type and reported byte count. Model family/architecture/parameter count/quantization and SHA availability are not start gates. The same `ModelSource` instance is reused for every reload; reported size must match, and an SHA present on the initially loaded model must match on reload. Use Qwen3-4B-Instruct-2507 Q4_K_M when collecting results intended for direct comparison with D1a.
 2. All three model loads complete with effective context 256. Each inference ends with `STOP`, `OUTPUT_GATE=PASS` and the exact two-line output above. `MAX_TOKENS`, cancel, error, partial output or any text mismatch fails that CPU run.
 3. Run-correlated diagnostics must prove CPU was the actual execution backend and GPU offload was zero (`gpuLayers=0`, CPU graph distribution, zero Vulkan graph nodes). Requested CPU preference alone is insufficient.
 4. Save all three native Run-IDs and capture model-load time, prompt-token count, prefill, TTFT, generated-token count, decode tokens/s and total generation time, process PSS, available system RAM, memory-guard decisions and Android thermal status.
-5. D0 passes only when all three runs pass independently with the same verified model SHA. Report CPU metrics separately; there is no Vulkan result or CPU/Vulkan parity claim in D0.
+5. D0 passes only when all three runs pass independently after reusing the same `ModelSource`, with the same reported model size and matching SHA if the initially loaded model provided one. A direct SAF source with `sha256=unavailable` remains eligible. Report CPU metrics separately; there is no Vulkan result or CPU/Vulkan parity claim in D0.
 
 ### D1a pass criteria — paired CPU/Vulkan parity
 
-1. Use the same imported Qwen3-4B-Instruct-2507 Q4_K_M bytes, the exact prompt above, matching context/batch/micro-batch/sampler and a verified SHA-256.
+1. Use the same Qwen3-4B-Instruct-2507 Q4_K_M source, exact prompt above, matching context/batch/micro-batch/sampler and the same source construction and reload size/SHA rule as the D0 CPU path. Direct SAF sources without SHA remain eligible; when the initially loaded model provides a SHA, reloads must match it.
 2. Both CPU and Vulkan loads complete and both independently produce the exact output with `STOP`. `MAX_TOKENS`, cancel, error, partial output or a text mismatch fails that backend.
 3. **CPU run:** diagnostics prove the CPU was the actual execution backend and GPU offload was zero.
 4. **Vulkan run:** diagnostics prove actual Vulkan node/layer execution and record actual GPU layers plus the run-correlated graph/backend distribution. A registered Vulkan device or requested Vulkan mode alone is insufficient. CPU nodes are allowed only when the graph/operator policy explicitly assigns them to CPU; record their count and reasons.

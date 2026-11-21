@@ -16,7 +16,7 @@ import org.junit.Test
 class InferenceConfigSmokePlanTest {
     @Test
     fun d0AcceptsTheLoadedModelWithoutCheckingItsNameArchitectureSizeOrQuantization() {
-        val result = InferenceConfigSmokePlan.assessD0ModelSha(
+        val result = InferenceConfigSmokePlan.assessD0ModelSource(
             ModelInfo(
                 name = "Llama-3.2-1B-Instruct-Q5_K_M.gguf",
                 path = "/models/Llama-3.2-1B-Instruct-Q5_K_M.gguf",
@@ -27,33 +27,47 @@ class InferenceConfigSmokePlanTest {
                 sha256 = "a".repeat(64)
             )
         )
-        assertEquals("MODEL_SHA_AVAILABLE", result.status)
+        assertEquals("SOURCE_SIZE_AND_SHA_AVAILABLE", result.status)
         assertEquals("AVAILABLE", result.shaStatus)
         assertTrue(result.baselineEligible)
     }
 
     @Test
-    fun d0RequiresOnlyAValidShaForReproducibleModelBytes() {
-        val base = ModelInfo(
+    fun d0AcceptsDirectSafModelWithoutShaWhenSourceAndSizeAreAvailable() {
+        val directSafModel = ModelInfo(
+            name = "04.0B_Qwen3-2507_Instruct_256k_Q4_K_M.gguf",
+            path = "content://provider.example/models/qwen3.gguf",
+            sizeBytes = 2_491_323_904L,
+            parameterCount = 4_022_468_096L,
+            architecture = "qwen3",
+            description = "Qwen3 4B Instruct 2507 | Q4_K - Medium",
+            sha256 = null
+        )
+
+        val assessment = InferenceConfigSmokePlan.assessD0ModelSource(directSafModel)
+
+        assertEquals("SOURCE_AND_SIZE_ONLY", assessment.status)
+        assertEquals("UNAVAILABLE", assessment.shaStatus)
+        assertTrue("Direct SAF source with a known size must be eligible without SHA", assessment.baselineEligible)
+    }
+
+    @Test
+    fun d0OnlyRequiresAModelSourceAndPositiveSizeNotASha() {
+        val sourceWithoutSha = ModelInfo(
             name = "Any-Loaded-Model.gguf",
             path = "/models/Any-Loaded-Model.gguf",
             sizeBytes = 2_500_000_000L,
-            parameterCount = 999_000_000L,
-            architecture = "any_architecture",
-            description = "Any quantization",
-            sha256 = "b".repeat(64)
+            sha256 = null
         )
-        val valid = InferenceConfigSmokePlan.assessD0ModelSha(base)
-        assertEquals("MODEL_SHA_AVAILABLE", valid.status)
-        assertTrue(valid.baselineEligible)
-        val missing = InferenceConfigSmokePlan.assessD0ModelSha(base.copy(sha256 = null))
-        assertEquals("MODEL_SHA_UNAVAILABLE", missing.status)
-        assertFalse(missing.baselineEligible)
-        assertEquals("sha256_unavailable", missing.reason)
-        val malformed = InferenceConfigSmokePlan.assessD0ModelSha(base.copy(sha256 = "not-a-sha"))
-        assertEquals("MODEL_SHA_INVALID", malformed.status)
-        assertEquals("INVALID", malformed.shaStatus)
-        assertFalse(malformed.baselineEligible)
+        assertTrue(InferenceConfigSmokePlan.assessD0ModelSource(sourceWithoutSha).baselineEligible)
+
+        val emptySource = InferenceConfigSmokePlan.assessD0ModelSource(sourceWithoutSha.copy(path = ""))
+        assertFalse(emptySource.baselineEligible)
+        assertEquals("MODEL_SOURCE_UNAVAILABLE", emptySource.status)
+
+        val unknownSize = InferenceConfigSmokePlan.assessD0ModelSource(sourceWithoutSha.copy(sizeBytes = 0L))
+        assertFalse(unknownSize.baselineEligible)
+        assertEquals("MODEL_SOURCE_UNAVAILABLE", unknownSize.status)
     }
 
     @Test
@@ -88,45 +102,55 @@ class InferenceConfigSmokePlanTest {
         assertTrue(profiles.all { it.config.threads == 6 && it.config.effectiveBatchThreads == 6 })
         assertEquals(profiles[0].config, profiles[1].config)
         assertEquals(profiles[0].config, profiles[2].config)
+        assertEquals(
+            "D0 CPU profile must use the exact same EngineConfig as the paired runner's CPU profile",
+            InferenceConfigSmokePlan.create(base, 8).first().config,
+            profiles.first().config
+        )
         assertEquals(BackendPreference.AUTO, base.backendPreference)
         assertEquals(12, base.gpuLayers)
         assertEquals(2048, base.contextSize)
     }
 
     @Test
-    fun d0ReloadRequiresSameValidSha256AndModelSize() {
-        val reference = ModelInfo(
-            name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-            path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-            sizeBytes = 2_500_000_000L,
-            parameterCount = 4_020_000_000L,
-            architecture = "qwen3",
-            description = "Q4_K_M",
-            sha256 = "a".repeat(64)
+    fun d0ReloadUsesTheSameSizeAndOptionalShaRuleAsThePairedRunner() {
+        val directSafSource = ModelInfo(
+            name = "Qwen3.gguf",
+            path = "content://provider.example/models/qwen3.gguf",
+            sizeBytes = 2_491_323_904L,
+            sha256 = null
         )
         assertTrue(
-            InferenceConfigSmokePlan.matchesD0ModelBytes(
-                reference,
-                reference.copy(path = "/reloaded/model.gguf")
+            InferenceConfigSmokePlan.matchesReloadedModelIdentity(
+                directSafSource,
+                directSafSource.copy()
             )
         )
         assertFalse(
-            InferenceConfigSmokePlan.matchesD0ModelBytes(
-                reference,
-                reference.copy(sha256 = "b".repeat(64))
+            InferenceConfigSmokePlan.matchesReloadedModelIdentity(
+                directSafSource,
+                directSafSource.copy(sizeBytes = directSafSource.sizeBytes + 1L)
+            )
+        )
+
+        val hashedSource = directSafSource.copy(sha256 = "a".repeat(64))
+        assertTrue(
+            InferenceConfigSmokePlan.matchesReloadedModelIdentity(
+                hashedSource,
+                hashedSource.copy()
             )
         )
         assertFalse(
-            InferenceConfigSmokePlan.matchesD0ModelBytes(
-                reference,
-                reference.copy(sizeBytes = reference.sizeBytes + 1)
+            InferenceConfigSmokePlan.matchesReloadedModelIdentity(
+                hashedSource,
+                hashedSource.copy(sha256 = "b".repeat(64))
             )
         )
         assertFalse(
-            InferenceConfigSmokePlan.matchesD0ModelBytes(reference, reference.copy(sha256 = null))
-        )
-        assertFalse(
-            InferenceConfigSmokePlan.matchesD0ModelBytes(reference.copy(sha256 = null), reference)
+            InferenceConfigSmokePlan.matchesReloadedModelIdentity(
+                hashedSource,
+                hashedSource.copy(sha256 = null)
+            )
         )
     }
 

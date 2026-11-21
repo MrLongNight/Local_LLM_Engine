@@ -31,7 +31,7 @@
 
 ## Verbindliche Ausführungsreihenfolge nach GO
 
-1. **Gate A — vor Integration:** P0-07d (CPU-only-D0-Testpfad) → D0 ausschließlich auf CPU (drei Läufe, identische Modellbytes und vorhandene Modell-SHA-256) → P0-08a → D3 → P1-02c → P1-04a → P1-04e.
+1. **Gate A — vor Integration:** P0-07d (CPU-only-D0-Testpfad) → D0 ausschließlich auf CPU (drei Läufe, dieselbe wiederverwendete Modellquelle, gleiche Modellgröße und optionale SHA-256) → P0-08a → D3 → P1-02c → P1-04a → P1-04e.
 2. **Vorgezogen nach Gate A, vor Gate B:** P2-01c prüft `RemoteUrl` als Engine-Funktion und liefert die Entscheidungsgrundlage für den Nutzer.
 3. **Gate B — Engine-Features für die neue Pipeline:** P0-09a–c → P0-10a–b → P0-11a–b → P1-05c.
 4. **Integration:** INT-01–INT-06 erst nach erfolgreichem Gate A und Gate B.
@@ -116,7 +116,7 @@
 
 - [ ] **P0-11a** 🛠️ AGENT · DIAGNOSE · S · Impact H — Herkunft und Kosten der Top-1/Top-5-Logit-Traces aus P0-03b prüfen sowie den Logits-Readback pro Token quantifizieren (CPU; Vulkan-Messwerte aus P1-01a). Festlegen und dokumentieren, ob Logprobs vor oder nach Grammatik-Maskierung gemessen werden. Nur Befund.
 - [ ] **P0-11b** 🛠️ AGENT · CODE/TESTS · M · Impact H — Optionales `returnLogprobs` pro Request ergänzen (Standard aus, dann keine Zusatzkosten): pro Token ID und Log-Wahrscheinlichkeit des gewählten Tokens, optional Top-k mit `k ≤ 5`, samt dokumentierter Semantik. Tests: Anzahl der Einträge = `tokensGenerated`, alle Log-Wahrscheinlichkeiten ≤ 0, deaktiviert = keine Daten.
-- [ ] **P0-07d** 🛠️ AGENT · CODE/TESTS · S · Impact H — Den D0-Testpfad vom CPU/Vulkan-Paarvergleich trennen: drei einzeln run-korrelierte CPU-Profile (GPU-Layer=0), strikte Modell-SHA-256-/Dateigrößenprüfung vor und bei jedem Reload, der bestehende Paarvergleich bleibt separat für D1a. Kein Vulkan-Profil im D0-Ablauf; 96 Tokens bleiben unverändert.
+- [ ] **P0-07d** 🛠️ AGENT · CODE/TESTS · S · Impact H — Den D0-Testpfad vom CPU/Vulkan-Paarvergleich trennen: drei einzeln run-korrelierte CPU-Profile (GPU-Layer=0). D0 und der gepaarte CPU-Teil verwenden dieselbe `ModelSource`-Konstruktion, denselben `engine.loadModel`-Pfad und dieselbe Reload-Regel: gemeldete Modellgröße muss gleich bleiben; eine SHA-256 wird verglichen, wenn sie beim ursprünglich geladenen Modell vorhanden ist. Direkte SAF-Deskriptoren ohne SHA dürfen D0 nicht blockieren. CPU-Profilkonfigurationen müssen identisch sein; Button-Zustand, Klick und Startentscheidung erscheinen im Diagnoseexport. Kein Vulkan-Profil im D0-Ablauf; 96 Tokens bleiben unverändert.
 ---
 
 ## P1 — Leistung, Ressourcen, Diagnostik und systematische Modellbewertung
@@ -190,7 +190,7 @@
 
 Diese Sessions benötigen das echte nubia Z2462N / Android 16 / ARM64 / Mali-G57. Emulator- und CI-Ergebnisse ersetzen sie nicht.
 
-- [ ] **D0** 📱 DU · ENDGERÄT · Impact H — Drei CPU-only-Referenzläufe auf dem nubia Z2462N mit dem aktuell geladenen GGUF: das D0-Testfenster einmal starten; es führt intern drei separate CPU-Profile mit derselben Datei aus (`BackendPreference.CPU`, `gpuLayers=0`). Kein Modellnamen-/Architektur-/Parameter-/Quantisierungsfilter. Eine gültige Modell-SHA-256 muss vorhanden sein und bei jedem Reload byte-identisch bleiben. Für direkte Vergleichbarkeit mit D1a das vorgesehene Qwen3-4B-Instruct-2507 Q4_K_M laden. Den festen Rechen-/Sequenzprompt, identische Parameter, korrekte Ausgabe/STOP und drei reproduzierbare CPU-Ergebnisse prüfen; Lade-/Prefill-/TTFT-/Decode-Messwerte, PSS/RAM und Temperatur protokollieren. Das D0-Fenster erzeugt kein Vulkan-Profil.
+- [ ] **D0** 📱 DU · ENDGERÄT · Impact H — Drei CPU-only-Referenzläufe auf dem nubia Z2462N mit dem aktuell geladenen GGUF. D0 verwendet dieselbe `ModelSource`-Konstruktion und denselben `engine.loadModel`-Pfad wie das CPU-Profil des Paarvergleichs und reicht dieselbe Quelle für alle drei Profile weiter. Die gemeldete Modellgröße muss bei jedem Reload gleich bleiben; eine SHA-256 muss nur übereinstimmen, wenn sie beim ursprünglichen Load vorhanden war. Kein Modellnamen-/Architektur-/Parameter-/Quantisierungsfilter und keine private Neuimport-Pflicht. Für direkte Vergleichbarkeit mit D1a das vorgesehene Qwen3-4B-Instruct-2507 Q4_K_M laden. `BackendPreference.CPU`, `gpuLayers=0`; festen Prompt, korrekte Ausgabe/STOP sowie Lade-/Prefill-/TTFT-/Decode-Messwerte, PSS/RAM und Temperatur prüfen. Das D0-Fenster erzeugt kein Vulkan-Profil.
 - [ ] **D3** 📱 DU · ENDGERÄT · Impact H — Timeout und kooperativen Abbruch/Eskalation prüfen, den `:inference`-Prozess gezielt beenden und Reconnect/Folgeinferenz in fünf kombinierten Zyklen ausführen. Gleichzeitig PSS, Native-/Java-Heap, Graphics-PSS, Vulkan-Heap soweit verfügbar, offene FDs und Ressourcenfreigabe erfassen.
 - [ ] **D1a** 📱 DU · ENDGERÄT · Impact H — Qwen3-4B-Instruct-2507 Q4_K_M auf CPU und Vulkan mit dem in D0 definierten identischen Prompt und derselben Konfiguration vergleichen. Template, Tokenizer, Special Tokens, UTF-8, Ausgabe, Finish-Grund und eine Folgeanfrage kontrollieren. Exakte Modellbytes/SHA und Laufparameter protokollieren.
 - [ ] **D1b** 📱 DU · ENDGERÄT · Impact H — **Nachrangig bis nach Integration.** Qwen3.5-4B dense auf CPU und Vulkan prüfen. GDN-CPU-Fallback, übrige Graph-Verteilung, hybride/recurrente State-Behandlung, Ausgabe, Finish-Grund und Folgeanfrage kontrollieren.

@@ -14,6 +14,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.example.ui.EngineViewModel
 import com.example.ui.diagnostics.ConfigurationSmokeProgress
 import com.example.ui.diagnostics.ConfigurationSmokeRunStatus
+import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.ModelInfo
 
 internal fun backendAcceptanceBlockReason(
@@ -56,6 +58,35 @@ internal fun BackendAcceptanceTestSection(
         isGenerating = isGenerating,
         isImporting = isImporting
     )
+    val modelSourceType = when {
+        currentModel == null -> "NONE"
+        currentModel.path.startsWith("content://", ignoreCase = true) -> "SAF_CONTENT_URI"
+        else -> "FILE_PATH"
+    }
+
+    LaunchedEffect(
+        blockReason,
+        modelSourceType,
+        currentModel?.sizeBytes,
+        isBenchmarking,
+        isConfigSmokeTesting,
+        isGenerating,
+        isImporting
+    ) {
+        EngineDiagnostics.info(
+            "config_test",
+            "CONFIG_SMOKE_D0_BUTTON_STATE",
+            "enabled=" + (blockReason == null) +
+                ",reason=" + (blockReason ?: "NONE") +
+                ",modelLoaded=" + (currentModel != null) +
+                ",modelSourceType=" + modelSourceType +
+                ",modelSizeBytes=" + (currentModel?.sizeBytes ?: 0L) +
+                ",benchmarking=" + isBenchmarking +
+                ",configSmokeRunning=" + isConfigSmokeTesting +
+                ",generating=" + isGenerating +
+                ",importing=" + isImporting
+        )
+    }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -66,13 +97,22 @@ internal fun BackendAcceptanceTestSection(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "D0 führt drei CPU-only-Läufe mit dem aktuell geladenen GGUF aus (GPU-Layer=0, Vulkan wird nicht gestartet). Name, Architektur, Parameterzahl und Quantisierung des Modells sind keine Startbedingung. Eine gültige SHA-256 sichert nur dieselben Modellbytes über alle drei Reloads; das Modell vorher in die private Modellbibliothek importieren. Der zweite Test ist ein separater CPU/Vulkan-Kandidatenvergleich.",
+                text = "D0 führt drei CPU-only-Läufe mit dem aktuell geladenen GGUF aus (GPU-Layer=0, Vulkan wird nicht gestartet). Name, Architektur, Parameterzahl und Quantisierung sind keine Startbedingung. D0 und der Paarvergleich verwenden dieselbe Modellquelle und denselben Engine-Ladepfad; D0 verwendet dieselbe CPU-Profilkonfiguration wie der CPU-Teil des Paarvergleichs. Eine SHA ist keine Startbedingung. Der zweite Test bleibt ein separater CPU/Vulkan-Kandidatenvergleich.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(10.dp))
             Button(
-                onClick = { viewModel.runConfigurationSmokeTest() },
+                onClick = {
+                    EngineDiagnostics.info(
+                        "config_test",
+                        "CONFIG_SMOKE_D0_BUTTON_CLICKED",
+                        "modelLoaded=" + (currentModel != null) +
+                            ",modelSourceType=" + modelSourceType +
+                            ",modelSizeBytes=" + (currentModel?.sizeBytes ?: 0L)
+                    )
+                    viewModel.runConfigurationSmokeTest()
+                },
                 enabled = blockReason == null,
                 modifier = Modifier.fillMaxWidth().testTag("backend_acceptance_button")
             ) {

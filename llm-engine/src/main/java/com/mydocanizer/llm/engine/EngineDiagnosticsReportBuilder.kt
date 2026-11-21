@@ -145,6 +145,12 @@ internal object EngineDiagnosticsReportBuilder {
             "BINDING_DIED",
             "CANCEL_REQUESTED",
             "CONFIG_SMOKE_REFERENCE_REJECTED",
+            "CONFIG_SMOKE_D0_BUTTON_STATE",
+            "CONFIG_SMOKE_D0_BUTTON_CLICKED",
+            "CONFIG_SMOKE_START_REQUESTED",
+            "CONFIG_SMOKE_START_BLOCKED",
+            "CONFIG_SMOKE_START_REJECTED",
+            "CONFIG_SMOKE_MODEL_SOURCE_REJECTED",
             "CONFIG_SMOKE_STARTED",
             "CONFIG_SMOKE_PROFILE_STARTED",
             "CONFIG_SMOKE_PROFILE_RESULT",
@@ -186,7 +192,13 @@ internal object EngineDiagnosticsReportBuilder {
 
     private fun readableEventTitle(event: String): String = when (event) {
         "CONFIG_SMOKE_REFERENCE_REJECTED" -> "D0-Referenzmodell abgelehnt"
-        "CONFIG_SMOKE_STARTED" -> "Vulkan-Kurztest gestartet"
+        "CONFIG_SMOKE_D0_BUTTON_STATE" -> "D0-Button-Zustand und Sperrgrund"
+        "CONFIG_SMOKE_D0_BUTTON_CLICKED" -> "D0-Button-Klick empfangen"
+        "CONFIG_SMOKE_START_REQUESTED" -> "Konfigurationstest-Start angefordert"
+        "CONFIG_SMOKE_START_BLOCKED" -> "Konfigurationstest-Start blockiert"
+        "CONFIG_SMOKE_START_REJECTED" -> "Konfigurationstest nicht gestartet"
+        "CONFIG_SMOKE_MODEL_SOURCE_REJECTED" -> "D0-Modellquelle abgelehnt"
+        "CONFIG_SMOKE_STARTED" -> "Konfigurationstest gestartet"
         "CONFIG_SMOKE_PROFILE_STARTED" -> "Backend-Profil gestartet"
         "CONFIG_SMOKE_PROFILE_RESULT" -> "Backend-Profil abgeschlossen"
         "CONFIG_SMOKE_PROFILE_RECOVERY_STARTED" -> "Service-Recovery vor Folgeprofil gestartet"

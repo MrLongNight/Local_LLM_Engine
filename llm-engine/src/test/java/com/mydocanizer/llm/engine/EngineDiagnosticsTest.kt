@@ -912,4 +912,28 @@ class EngineDiagnosticsTest {
         assertTrue(report.contains("reason=MAX_TOKENS"))
     }
 
+
+    @Test
+    fun compactExportRetainsD0ButtonStateClickAndStartDecision() {
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(
+                "2026-11-21 16:00:00.000 [INFO] [config_test] CONFIG_SMOKE_D0_BUTTON_STATE - " +
+                    "enabled=false,reason=Ein anderer Benchmark läuft noch. D0 startet danach.,modelLoaded=true," +
+                    "modelSourceType=SAF_CONTENT_URI,benchmarking=true,configSmokeRunning=false",
+                "2026-11-21 16:00:01.000 [INFO] [config_test] CONFIG_SMOKE_D0_BUTTON_CLICKED - " +
+                    "modelLoaded=true,modelSourceType=SAF_CONTENT_URI,modelSizeBytes=2491323904",
+                "2026-11-21 16:00:01.001 [INFO] [config_test] CONFIG_SMOKE_START_REQUESTED - " +
+                    "mode=D0_CPU_REFERENCE_3_RUNS,modelLoaded=true",
+                "2026-11-21 16:00:01.002 [INFO] [config_test] CONFIG_SMOKE_START_REJECTED - " +
+                    "reason=direct_source_or_size_unavailable"
+            )
+        )
+
+        assertTrue(report.contains("D0-Button-Zustand und Sperrgrund"))
+        assertTrue(report.contains("enabled=false"))
+        assertTrue(report.contains("CONFIG_SMOKE_D0_BUTTON_CLICKED"))
+        assertTrue(report.contains("Konfigurationstest-Start angefordert"))
+        assertTrue(report.contains("Konfigurationstest nicht gestartet"))
+    }
+
 }
