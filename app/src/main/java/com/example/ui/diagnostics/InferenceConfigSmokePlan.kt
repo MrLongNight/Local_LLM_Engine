@@ -102,6 +102,7 @@ internal object InferenceConfigSmokePlan {
     }
 
     const val MEASURED_TOKENS = 96
+    const val D0_CPU_REFERENCE_RUNS = 3
     const val COOLDOWN_MS = 0L
 
     const val USER_PROMPT =
@@ -169,19 +170,48 @@ internal object InferenceConfigSmokePlan {
         val config: EngineConfig
     )
 
-    fun create(
+    /** Three independent CPU profiles; D0 deliberately never creates a Vulkan profile. */
+    fun createD0CpuReferenceProfiles(
         base: EngineConfig,
         availableProcessors: Int
     ): List<Profile> {
-        // The nubia Z2462N has eight CPU cores; cap this fixed comparison at six
-        // workers so the CPU reference and Vulkan host work use the same budget.
+        val common = fixedSmokeConfig(base, availableProcessors)
+        return (1..D0_CPU_REFERENCE_RUNS).map { run ->
+            Profile(
+                id = "cpu-reference-$run",
+                label = "CPU · Referenz $run/$D0_CPU_REFERENCE_RUNS",
+                expectedBackend = "CPU",
+                config = common.copy(backendPreference = BackendPreference.CPU, gpuLayers = 0)
+            )
+        }
+    }
+
+    /** Paired runner reserved for D1a and explicitly requested CPU/Vulkan comparisons. */
+    fun create(base: EngineConfig, availableProcessors: Int): List<Profile> {
+        val common = fixedSmokeConfig(base, availableProcessors)
+        return listOf(
+            Profile(
+                id = "cpu-reference",
+                label = "CPU · Referenz",
+                expectedBackend = "CPU",
+                config = common.copy(backendPreference = BackendPreference.CPU, gpuLayers = 0)
+            ),
+            Profile(
+                id = "vulkan-candidate",
+                label = "Vulkan · Kandidat",
+                expectedBackend = "VULKAN",
+                config = common.copy(backendPreference = BackendPreference.VULKAN, gpuLayers = 99)
+            )
+        )
+    }
+
+    private fun fixedSmokeConfig(base: EngineConfig, availableProcessors: Int): EngineConfig {
         val threadCount = availableProcessors.coerceAtLeast(1).coerceAtMost(6)
-        val common = base.copy(
+        return base.copy(
             contextSize = 256,
             batchSize = 128,
             threads = threadCount,
             batchThreads = threadCount,
-            // The CPU and Vulkan paths must evaluate the same explicit micro-batch.
             microBatchSize = 64,
             temperature = 0f,
             topP = 1f,
@@ -193,27 +223,23 @@ internal object InferenceConfigSmokePlan {
             gdnPolicy = GdnPolicy.ARCH_DEFAULT,
             memoryGuardOverride = false
         )
-        return listOf(
-            Profile(
-                id = "cpu-reference",
-                label = "CPU · Referenz",
-                expectedBackend = "CPU",
-                config = common.copy(
-                    backendPreference = BackendPreference.CPU,
-                    gpuLayers = 0
-                )
-            ),
-            Profile(
-                id = "vulkan-candidate",
-                label = "Vulkan · Kandidat",
-                expectedBackend = "VULKAN",
-                config = common.copy(
-                    backendPreference = BackendPreference.VULKAN,
-                    gpuLayers = 99
-                )
-            )
-        )
     }
+
+    /** A D0 reload must prove the exact imported model bytes again. */
+    internal fun matchesD0ReferenceModelIdentity(requested: ModelInfo, loaded: ModelInfo): Boolean {
+        val requestedSha = requested.sha256?.trim()
+            ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
+            ?: return false
+        val loadedSha = loaded.sha256?.trim()
+            ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
+            ?: return false
+        return requested.sizeBytes > 0L &&
+            requested.sizeBytes == loaded.sizeBytes &&
+            requestedSha.equals(loadedSha, ignoreCase = true)
+    }
+
+    internal fun requiresQ4kDecodeEvidence(expectedBackend: String, expectsQ4kModel: Boolean): Boolean =
+        expectedBackend.equals("VULKAN", ignoreCase = true) && expectsQ4kModel
 
     internal fun resolvedUbatchForTest(config: EngineConfig, activeBackend: String? = null): Int =
         if (config.microBatchSize > 0) minOf(config.microBatchSize, config.batchSize)

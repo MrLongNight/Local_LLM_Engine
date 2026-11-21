@@ -86,43 +86,43 @@ The overlay comment records repeated runtime-verified Mali-G57 measurements for 
 
 **No performance-default change was made in this audit.** The actual target-device dispatch still needs confirmation from the run-correlated `LOCAL_LLM_VULKAN_Q4_K_DECODE_PATH` trace on the nubia Mali-G57. A CI build or the presence of Vulkan shaders does not prove GPU execution. The missing-Q8_1-pipeline fallback is now covered by the shared native resolver fixture (MMVQ success, missing matvec, missing quantizer, no compatible base kernel and AUTO base path), checked CMake ordering guards, and the APK build's compiled-source marker verification (P0-04b, commits `56f9279` and `6af672a`; Unit CI #44420571365 and Android build/emulator jobs #44420786376). This is automated logic/build coverage; no device run has artificially removed a Vulkan pipeline at runtime.
 
-## Standard paired device functional and performance smoke test
+## D0 CPU-only reference and D1a CPU/Vulkan paired smoke test
 
-Use the app's **Settings → CPU/Vulkan-Funktionstest → D0: Qwen3-4B-Referenz prüfen** after changes that may affect inference correctness, prompt/template handling, token output, backend selection, memory behavior or native execution. CPU and Vulkan are **both mandatory**. This built-in test is the repeatable short regression baseline between TODO tasks; it does not replace deeper D1a/D2 acceptance runs.
+Use **Settings → D0-CPU-Referenz und Backendvergleich → D0: drei CPU-only-Referenzläufe starten** for the Gate-A reference. The D0 action runs exactly three separate CPU inference profiles. It does not create or load a Vulkan candidate profile. The separate CPU/Vulkan candidate action is reserved for the paired D1a parity check; do not use it as the D0 CPU baseline.
 
-### Fixed model and conversation
+### Fixed model and identity
 
-- **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Load the exact same unchanged GGUF before every comparison. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF).
+- **Model:** Qwen3-4B-Instruct-2507, architecture `qwen3`, quantization `Q4_K_M`. Reference file: [DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF / Qwen3-4B-Instruct-2507-Q4_K_M.gguf](https://huggingface.co/DhruvalLabs/Qwen3-4B-Instruct-2507-GGUF).
 - **Filename aliases:** User-standardized names are supported. D0 matches the Qwen3 / 4B / Instruct / 2507 identity in one normalized filename or GGUF-description candidate (including the `04.0B_Qwen3-2507_Instruct_...` form), while architecture, 3.5–4.5 billion parameter count and Q4_K_M remain separate mandatory checks. A renamed filename cannot override conflicting GGUF metadata.
-- **SHA-256:** A content-addressed import under the app-private `files/models` directory may reuse its import-time SHA-256 prefix even when the same file is opened through a descriptor symlink. External SAF descriptors do not receive a SHA inferred from their display name; without a trusted/imported or computed digest, a functional check may run but the result is not a comparable D0 baseline.
-- Start with the model loaded and no inference running. The test itself creates a fresh single-message conversation for each backend profile, reloads the same model file, and restores the original model configuration afterwards.
+- **SHA-256 is mandatory for D0:** Import the exact GGUF into the app-private model library before running D0. External SAF descriptors do not receive a SHA inferred from their display name; if the model's SHA is unavailable, the D0 action refuses to start. All three reloads must report the same valid 64-hex SHA-256 and exact file byte count.
+- Start with the imported model loaded and no inference running. Each D0 profile reloads the same source and verifies its byte count and SHA-256 before inference. The user's original engine configuration is restored after the three CPU runs.
 - The built-in test uses the fixed prompt and expected output below. Do not replace it with previous chat history or a different prompt when collecting the regression baseline.
 
-### Fixed paired parameters
+### Fixed D0 CPU parameters
 
-The app's `InferenceConfigSmokePlan` enforces the same effective values for both profiles:
+All three D0 profiles use the same settings:
 
-| Parameter | CPU run | Vulkan run |
-|---|---:|---:|
-| Requested backend | CPU | Vulkan |
-| GPU layers | 0 | 99 (backend clamps to device/model limit) |
-| Context | 256 | 256 |
-| Batch | 128 | 128 |
-| Micro-batch | 64 | 64 |
-| Threads | min(6, available CPU cores) | same |
-| Batch threads | same as threads | same |
-| Temperature | 0 / greedy | 0 / greedy |
-| Top-K | 20 | 20 |
-| Top-P | 1.0 | 1.0 |
-| Min-P | 0.05 | 0.05 |
-| Maximum generated tokens | 96 | 96 |
-| Vulkan workgroup / Flash Attention / GDN | AUTO / AUTO / architecture default | same |
+| Parameter | D0 CPU runs 1–3 |
+|---|---:|
+| Requested backend | CPU |
+| GPU layers | 0 |
+| Context | 256 |
+| Batch | 128 |
+| Micro-batch | 64 |
+| Threads | min(6, available CPU cores) |
+| Batch threads | same as threads |
+| Temperature | 0 / greedy |
+| Top-K | 20 |
+| Top-P | 1.0 |
+| Min-P | 0.05 |
+| Maximum generated tokens | 96 |
+| Vulkan workgroup / Flash Attention / GDN | AUTO / AUTO / architecture default |
 
-The only intentional profile difference is backend preference and GPU-layer offload. The test temporarily overrides the user's current context/batch/thread/sampler and experimental-kernel settings for comparability, then restores the original model configuration. The underlying user configuration is not mutated.
+The D0 runner temporarily overrides the user's current context/batch/thread/sampler and experimental-kernel settings for comparability, then restores the original model configuration. It does not change persisted user settings or global performance defaults.
 
 ### Fixed prompt and exact expected output
 
-The app sends this exact user prompt independently to CPU and Vulkan:
+The app sends this exact user prompt independently on all three CPU runs and on each backend in the separate D1a pair:
 
 ~~~text
 Berechne 8 * 24 - 37. Gib genau zwei Zeilen aus: In Zeile 1 ERGEBNIS=<berechnetes Ergebnis>. In Zeile 2 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32. Keine Einleitung, keine Erklärung und kein weiterer Text.
@@ -135,32 +135,34 @@ ERGEBNIS=155
 FOLGE=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
 ~~~
 
-Interior whitespace or any other text is a mismatch. The 96-token ceiling is intentionally above the expected sequence length so the test must end naturally with `STOP`, not `MAX_TOKENS`.
+Interior whitespace or any other text is a mismatch. The 96-token ceiling is intentionally above the expected sequence length so each run must end naturally with `STOP`, not `MAX_TOKENS`.
 
-### Pass criteria — check each backend independently
+### D0 pass criteria — CPU-only
 
-1. The exact model file is Qwen3-4B-Instruct-2507 / `qwen3` / Q4_K_M. Record filename, actual byte count and SHA-256. Both runs must use the same identity. A missing SHA (`UNAVAILABLE`) permits a one-off functional check but **does not establish a comparable baseline**.
-2. Model load completes, effective context is 256, finish reason is `STOP`, and `OUTPUT_GATE=PASS`. The trimmed output must match the two lines above exactly. `MAX_TOKENS`, cancel, error, partial output or any text mismatch fails that backend run.
-3. **CPU run:** diagnostics must prove CPU was the actual execution backend and GPU offload was zero. A requested CPU mode alone is insufficient.
-4. **Vulkan run:** diagnostics must prove actual Vulkan node/layer execution and record actual GPU layers plus the run-correlated graph/backend distribution. A registered Vulkan device or requested Vulkan mode alone is insufficient. CPU nodes are allowed only when the graph/operator policy explicitly assigns them to CPU; record their count and reasons.
-5. A silent CPU fallback during the Vulkan run is a failure, not a successful Vulkan test. A silent Vulkan assignment during the CPU run is likewise a failure.
-6. The paired CPU/Vulkan correctness gate must pass, including identical measured top-1 token choices and the configured top-5 overlap threshold. A passing text output alone does not waive a failed numeric comparison gate.
+1. The exact model file is Qwen3-4B-Instruct-2507 / `qwen3` / Q4_K_M; record its filename, actual byte count and verified SHA-256. Every one of the three runs must use that same identity.
+2. All three model loads complete with effective context 256. Each inference ends with `STOP`, `OUTPUT_GATE=PASS` and the exact two-line output above. `MAX_TOKENS`, cancel, error, partial output or any text mismatch fails that CPU run.
+3. Run-correlated diagnostics must prove CPU was the actual execution backend and GPU offload was zero (`gpuLayers=0`, CPU graph distribution, zero Vulkan graph nodes). Requested CPU preference alone is insufficient.
+4. Save all three native Run-IDs and capture model-load time, prompt-token count, prefill, TTFT, generated-token count, decode tokens/s and total generation time, process PSS, available system RAM, memory-guard decisions and Android thermal status.
+5. D0 passes only when all three runs pass independently with the same verified model SHA. Report CPU metrics separately; there is no Vulkan result or CPU/Vulkan parity claim in D0.
 
-### Comparison record and repeat cadence
+### D1a pass criteria — paired CPU/Vulkan parity
 
-Save a diagnostic export for each comparison and record the CPU/Vulkan native Run-IDs together as one pair. For each backend capture:
+1. Use the same imported Qwen3-4B-Instruct-2507 Q4_K_M bytes, the exact prompt above, matching context/batch/micro-batch/sampler and a verified SHA-256.
+2. Both CPU and Vulkan loads complete and both independently produce the exact output with `STOP`. `MAX_TOKENS`, cancel, error, partial output or a text mismatch fails that backend.
+3. **CPU run:** diagnostics prove the CPU was the actual execution backend and GPU offload was zero.
+4. **Vulkan run:** diagnostics prove actual Vulkan node/layer execution and record actual GPU layers plus the run-correlated graph/backend distribution. A registered Vulkan device or requested Vulkan mode alone is insufficient. CPU nodes are allowed only when the graph/operator policy explicitly assigns them to CPU; record their count and reasons.
+5. Silent CPU fallback during the Vulkan run or silent Vulkan assignment during the CPU run is a failure.
+6. The paired numeric correctness gate must pass, including identical measured top-1 token choices and the configured top-5 overlap threshold. A passing text output alone does not waive a failed numeric comparison gate.
 
-- model-load time and effective context;
-- prompt-token count, prefill time and time-to-first-token;
-- generated-token count, decode tokens/s and total generation time;
-- actual CPU/Vulkan graph distribution and GPU-layer count;
-- process PSS, available system RAM, memory-guard decisions and Android thermal status.
+### Repeat cadence
 
-The initial D0 baseline should run the built-in paired test three times; calculate the median CPU and Vulkan values separately. Between TODO tasks, run one paired comparison after any change that can affect inference, model loading, CPU/Vulkan selection, prompt handling, memory or native execution. Treat a single-pair throughput delta as a warning only; repeat three pairs under comparable thermal and memory conditions before calling it a performance regression or improvement. The current built-in flow runs CPU first and Vulkan second; keep the order consistent when comparing repeated baselines.
+Run D0 once per baseline collection; its D0 action internally performs three independent CPU runs and records the median CPU values. D1a is a separate paired CPU/Vulkan run after D0 and is the gate for enabling Vulkan as a product path. Until D1a passes, CPU remains the product/default backend and Vulkan remains opt-in.
 
-The paired result is the engine's CPU/Vulkan regression baseline. Keep functional pass/fail separate from performance interpretation: a faster run with wrong output, changed model bytes or incorrect backend selection is still a failure. Do not use the short smoke result as final model-performance acceptance; D2 remains the dedicated longer benchmark.
+After any change that can affect inference, model loading, CPU/Vulkan selection, prompt handling, memory or native execution, run the appropriate correctness gate again. Treat a single-pair throughput delta as a warning only; repeat three paired comparisons under comparable thermal and memory conditions before calling it a performance regression or improvement.
 
-The 256-token context is intentional: the 18.11.2026 device report showed the Memory Guard reducing a requested 2048-token context to 256 under the then-current memory pressure. Fixing the effective context at 256 keeps this regression test within the observed device budget; the separate D1a/D2 runs retain their own explicitly matched context settings.
+The paired CPU/Vulkan result belongs to D1a, not D0. Keep functional pass/fail separate from performance interpretation: a faster run with wrong output, changed model bytes or incorrect backend selection is still a failure. Do not use the short smoke result as final model-performance acceptance; D2 remains the dedicated longer benchmark.
+
+The 256-token context is intentional: the 18.11.2026 device report showed the Memory Guard reducing a requested 2048-token context to 256 under the then-current memory pressure. Fixing the effective context at 256 keeps the D0 regression test within the observed device budget; D1a/D2 retain their explicitly matched context settings.
 
 ## Performance reporting rules
 

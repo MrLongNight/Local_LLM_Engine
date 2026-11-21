@@ -160,6 +160,88 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
+    fun createsThreeCpuOnlyD0ProfilesWithoutAnyVulkanProfile() {
+        val base = EngineConfig(
+            contextSize = 2048,
+            batchSize = 512,
+            threads = 4,
+            backendPreference = BackendPreference.AUTO,
+            gpuLayers = 12,
+            temperature = 0.7f,
+            topP = 0.8f,
+            maxPredictTokens = 512,
+            topK = 40,
+            minP = 0.1f
+        )
+        val profiles = InferenceConfigSmokePlan.createD0CpuReferenceProfiles(base, 8)
+
+        assertEquals(3, profiles.size)
+        assertEquals(
+            listOf("cpu-reference-1", "cpu-reference-2", "cpu-reference-3"),
+            profiles.map { it.id }
+        )
+        assertTrue(profiles.all { it.expectedBackend == "CPU" })
+        assertTrue(profiles.all { it.config.backendPreference == BackendPreference.CPU })
+        assertTrue(profiles.all { it.config.gpuLayers == 0 })
+        assertTrue(profiles.all { it.config.contextSize == 256 })
+        assertTrue(profiles.all { it.config.batchSize == 128 })
+        assertTrue(profiles.all { it.config.microBatchSize == 64 })
+        assertTrue(profiles.all { it.config.maxPredictTokens == 96 })
+        assertTrue(profiles.all { it.config.temperature == 0f })
+        assertTrue(profiles.all { it.config.threads == 6 && it.config.effectiveBatchThreads == 6 })
+        assertEquals(profiles[0].config, profiles[1].config)
+        assertEquals(profiles[0].config, profiles[2].config)
+        assertEquals(BackendPreference.AUTO, base.backendPreference)
+        assertEquals(12, base.gpuLayers)
+        assertEquals(2048, base.contextSize)
+    }
+
+    @Test
+    fun d0ReloadRequiresSameValidSha256AndModelSize() {
+        val reference = ModelInfo(
+            name = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            path = "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            sizeBytes = 2_500_000_000L,
+            parameterCount = 4_020_000_000L,
+            architecture = "qwen3",
+            description = "Q4_K_M",
+            sha256 = "a".repeat(64)
+        )
+        assertTrue(
+            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(
+                reference,
+                reference.copy(path = "/reloaded/model.gguf")
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(
+                reference,
+                reference.copy(sha256 = "b".repeat(64))
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(
+                reference,
+                reference.copy(sizeBytes = reference.sizeBytes + 1)
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(reference, reference.copy(sha256 = null))
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(reference.copy(sha256 = null), reference)
+        )
+    }
+
+    @Test
+    fun cpuQ4kReferenceDoesNotRequireVulkanQ4kDecodeEvidence() {
+        assertFalse(InferenceConfigSmokePlan.requiresQ4kDecodeEvidence("CPU", true))
+        assertFalse(InferenceConfigSmokePlan.requiresQ4kDecodeEvidence("CPU", false))
+        assertTrue(InferenceConfigSmokePlan.requiresQ4kDecodeEvidence("VULKAN", true))
+        assertFalse(InferenceConfigSmokePlan.requiresQ4kDecodeEvidence("VULKAN", false))
+    }
+
+    @Test
     fun createsPairedCpuAndVulkanProfilesWithFixedSharedParameters() {
         val base = EngineConfig(
             contextSize = 2048,

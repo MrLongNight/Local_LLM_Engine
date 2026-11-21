@@ -37,13 +37,13 @@ internal fun BackendAcceptanceTestSection(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "CPU/Vulkan-Funktionstest",
+                text = "D0-CPU-Referenz und Backendvergleich",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Der D0-Referenzlauf akzeptiert ausschließlich Qwen3-4B-Instruct-2507 Q4_K_M mit passender Architektur und Parameterzahl. Ein fehlender SHA-256 erlaubt einen Funktionstest, aber keine vergleichbare D0-Baseline. Andere GGUF-Kandidaten können separat im allgemeinen Lauf geprüft werden; sie werden niemals als 4B-Referenz gezählt.",
+                text = "D0 führt drei CPU-only-Läufe mit Qwen3-4B-Instruct-2507 Q4_K_M aus (GPU-Layer=0, Vulkan wird nicht gestartet). Eine gültige SHA-256 ist Pflicht: Das Modell vorher in die private Modellbibliothek importieren; direkte externe SAF-Deskriptoren liefern keinen verifizierten Hash. Der zweite Test ist ein separater CPU/Vulkan-Kandidatenvergleich.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -57,7 +57,7 @@ internal fun BackendAcceptanceTestSection(
                     when {
                         isConfigSmokeTesting -> "D0-Test läuft…"
                         isBenchmarking -> "Anderer Test läuft…"
-                        else -> "D0: Qwen3-4B-Referenz prüfen"
+                        else -> "D0: drei CPU-only-Referenzläufe starten"
                     }
                 )
             }
@@ -71,7 +71,7 @@ internal fun BackendAcceptanceTestSection(
                     when {
                         isConfigSmokeTesting -> "Modelltest läuft…"
                         isBenchmarking -> "Anderer Test läuft…"
-                        else -> "Allgemeinen Modellkandidaten prüfen"
+                        else -> "Separaten CPU/Vulkan-Kandidatenvergleich starten"
                     }
                 )
             }

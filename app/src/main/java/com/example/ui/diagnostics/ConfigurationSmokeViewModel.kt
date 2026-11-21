@@ -92,15 +92,10 @@ abstract class ConfigurationSmokeViewModel(
         )
     }
 
-    /**
-     * Short, fixed CPU-reference/Vulkan-candidate comparison using the same model
-     * source, prompt and shared effective settings. Backend-specific GPU offload
-     * is the only intentional configuration difference. The original configuration
-     * is restored in finally; bounded test input/output text is Debug-diagnostic only.
-     */
+    /** D0 is a three-run, SHA-verified CPU-only baseline. */
     fun runConfigurationSmokeTest() = startConfigurationSmokeTest(requireD0Reference = true)
 
-    /** General candidate check; its result is never counted as the fixed D0 baseline. */
+    /** Separate CPU/Vulkan candidate comparison, not counted as D0. */
     fun runGeneralConfigurationSmokeTest() = startConfigurationSmokeTest(requireD0Reference = false)
 
     private fun startConfigurationSmokeTest(requireD0Reference: Boolean) {
@@ -125,7 +120,7 @@ abstract class ConfigurationSmokeViewModel(
             message = "Prüfe Modellidentität und bereite CPU-/Vulkan-Vergleich vor…"
         )
         val referenceAssessment = InferenceConfigSmokePlan.assessD0ReferenceModel(model)
-        val testMode = if (requireD0Reference) "D0_REFERENCE" else "GENERAL_MODEL_AGNOSTIC"
+        val testMode = if (requireD0Reference) "D0_CPU_REFERENCE_3_RUNS" else "GENERAL_MODEL_AGNOSTIC_CPU_VULKAN_PAIR"
         val d0BaselineEligible = requireD0Reference && referenceAssessment.baselineEligible
         if (requireD0Reference && !referenceAssessment.isReferenceModel) {
             val reason = referenceAssessment.reason
@@ -142,6 +137,20 @@ abstract class ConfigurationSmokeViewModel(
             )
             return
         }
+        if (requireD0Reference && !referenceAssessment.baselineEligible) {
+            EngineDiagnostics.info(
+                "config_test",
+                "CONFIG_SMOKE_REFERENCE_REJECTED",
+                "status=REFERENCE_MODEL_SHA_UNAVAILABLE,reason=${referenceAssessment.reason}," +
+                    "model=${model.name},bytes=${model.sizeBytes},shaStatus=${referenceAssessment.shaStatus}"
+            )
+            rejectSmokeRun(
+                "D0 nicht gestartet: Für die CPU-Baseline ist eine gültige SHA-256 erforderlich. " +
+                    "Bitte das GGUF zuerst in die private Modellbibliothek importieren; direkte externe SAF-Deskriptoren " +
+                    "liefern keinen verifizierten Hash."
+            )
+            return
+        }
 
         val originalConfig = _engineConfig.value
         val source = if (model.path.startsWith("content://", ignoreCase = true)) {
@@ -149,22 +158,29 @@ abstract class ConfigurationSmokeViewModel(
         } else {
             ModelSource.FilePath(model.path)
         }
-        val profiles = InferenceConfigSmokePlan.create(
-            originalConfig,
-            Runtime.getRuntime().availableProcessors()
-        )
+        val profiles = if (requireD0Reference) {
+            InferenceConfigSmokePlan.createD0CpuReferenceProfiles(
+                originalConfig,
+                Runtime.getRuntime().availableProcessors()
+            )
+        } else {
+            InferenceConfigSmokePlan.create(
+                originalConfig,
+                Runtime.getRuntime().availableProcessors()
+            )
+        }
         if (profiles.isEmpty()) {
-            rejectSmokeRun("Kein Vulkan-Diagnoseprofil verfügbar.")
+            rejectSmokeRun("Kein Inferenz-Testprofil verfügbar.")
             return
         }
 
         publishSmokeProgress(
             phase = ConfigurationSmokePhase.PREPARING,
             currentStep = 1,
-            message = if (requireD0Reference && !d0BaselineEligible) {
-                "Referenzmodell erkannt, aber SHA-256 fehlt. Dieser Lauf ist nur eine Funktionsprüfung und keine vergleichbare D0-Baseline."
+            message = if (requireD0Reference) {
+                "Modellidentität und SHA-256 bestätigt. Drei CPU-only-Referenzläufe werden vorbereitet; Vulkan bleibt aus."
             } else {
-                "Referenzmodell geprüft. CPU- und Vulkan-Test werden vorbereitet…"
+                "Modellkandidat erkannt. CPU- und Vulkan-Profile werden vorbereitet…"
             }
         )
         _isBenchmarking.value = true
@@ -183,6 +199,7 @@ abstract class ConfigurationSmokeViewModel(
             val confirmedBackends = mutableListOf<String>()
             var stoppedReason: String? = null
             var pairedGateCombinedStatus: String? = null
+            var d0CpuGateCombinedStatus: String? = null
             var cancelledByUser = false
             var restoreFailed = false
             EngineDiagnostics.info(
@@ -194,6 +211,7 @@ abstract class ConfigurationSmokeViewModel(
                     ",referenceShaStatus=" + referenceAssessment.shaStatus +
                     ",d0BaselineEligible=" + d0BaselineEligible +
                     ",model=" + model.name + ",bytes=" + model.sizeBytes +
+                    ",modelSha256=" + (model.sha256 ?: "unavailable") +
                     ",architecture=" + model.architecture + ",parameters=" + model.parameterCount +
                     ",profiles=" + profiles.size + ",context=" + originalConfig.contextSize +
                     ",batch=" + originalConfig.batchSize + ",threads=" + originalConfig.threads +
@@ -292,11 +310,16 @@ abstract class ConfigurationSmokeViewModel(
                         }
 
                         val loaded = loadResult.getOrThrow()
-                        if (loaded.sizeBytes != model.sizeBytes ||
-                            (!model.sha256.isNullOrBlank() && model.sha256 != loaded.sha256)
-                        ) {
+                        val sameModelIdentity = if (requireD0Reference) {
+                            InferenceConfigSmokePlan.matchesD0ReferenceModelIdentity(model, loaded)
+                        } else {
+                            loaded.sizeBytes == model.sizeBytes &&
+                                (model.sha256.isNullOrBlank() ||
+                                    model.sha256.equals(loaded.sha256, ignoreCase = true))
+                        }
+                        if (!sameModelIdentity) {
                             throw ConfigurationSmokeModelIdentityException(
-                                "Nach Neuladen wurde nicht dieselbe Modelldatei bestätigt (Größe/SHA-256)."
+                                "Nach Neuladen wurde nicht dieselbe Modelldatei mit identischer Größe/SHA-256 bestätigt."
                             )
                         }
                         pendingRecoveryFromProfile?.let { failedProfile ->
@@ -360,8 +383,11 @@ abstract class ConfigurationSmokeViewModel(
                         val expectsQ4kDecodeTrace = Regex("Q4[_-]?K", RegexOption.IGNORE_CASE).containsMatchIn(
                             model.name + " " + model.description + " " + model.path
                         )
-                        val q4kPathGatePassed = !expectsQ4kDecodeTrace ||
-                            q4kFallbackValidation.status == Q4kPipelineFallbackPolicy.Status.VALID
+                        val q4kPathGatePassed =
+                            !InferenceConfigSmokePlan.requiresQ4kDecodeEvidence(
+                                profile.expectedBackend,
+                                expectsQ4kDecodeTrace
+                            ) || q4kFallbackValidation.status == Q4kPipelineFallbackPolicy.Status.VALID
                         val outputGatePassed = outputMatches && completedNormally &&
                             sample.result.tokensGenerated >= 4 && q4kPathGatePassed
                         profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
@@ -562,67 +588,106 @@ abstract class ConfigurationSmokeViewModel(
                         }
                     }
                 }
-                publishSmokeProgress(
-                    phase = ConfigurationSmokePhase.CHECKING_RESULTS,
-                    currentStep = 6,
-                    message = "CPU-/Vulkan-Ausgaben, Finish-Grund und numerische Token-Parität werden geprüft…"
-                )
-                val cpuSample = profileSamples["cpu-reference"]
-                val vulkanSample = profileSamples["vulkan-candidate"]
-                var numericGate: EngineDiagnostics.BackendCorrectnessResult? = null
-                val pairedGateSummary = InferenceConfigSmokePlan.evaluatePairedGate(
-                    cpuSample?.outputGatePassed,
-                    vulkanSample?.outputGatePassed
-                ) {
-                    EngineDiagnostics.evaluateCpuVulkanCorrectnessGate(
-                        getApplication<Application>(),
-                        requireNotNull(cpuSample).result.nativeRunId,
-                        requireNotNull(vulkanSample).result.nativeRunId
-                    ).also { numericGate = it }.status
-                }
-                pairedGateCombinedStatus = pairedGateSummary.combinedStatus
-                val gate = numericGate ?: EngineDiagnostics.BackendCorrectnessResult(
-                    "UNAVAILABLE",
-                    "CPU_OR_VULKAN_RUN_MISSING"
-                )
-                val cpuOutputGateStatus = when (cpuSample?.outputGatePassed) {
-                    true -> "PASS"
-                    false -> "FAIL"
-                    null -> "UNAVAILABLE"
-                }
-                val vulkanOutputGateStatus = when (vulkanSample?.outputGatePassed) {
-                    true -> "PASS"
-                    false -> "FAIL"
-                    null -> "UNAVAILABLE"
-                }
-                val gateDetails = "profile=CPU_VULKAN_SMOKE,backend=Vulkan," +
-                    "gateRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable") +
-                    ",cpuReferenceRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
-                    ",status=" + gate.status +
-                    ",reason=" + gate.reason +
-                    ",comparedSteps=" + gate.comparedSteps +
-                    ",minimumTop5Overlap=" + gate.minimumTop5Overlap + "/5" +
-                    ",firstDivergenceStep=" + (gate.firstDivergenceStep ?: "n/a")
-                EngineDiagnostics.info("benchmark", "CORRECTNESS_GATE_RESULT", gateDetails)
-                EngineDiagnostics.info(
-                    "config_test",
-                    "CONFIG_SMOKE_RESULT",
-                    "profile=paired-gates,outputGateStatus=" + pairedGateSummary.outputGateStatus +
-                        ",cpuOutputGateStatus=" + cpuOutputGateStatus +
-                        ",vulkanOutputGateStatus=" + vulkanOutputGateStatus +
-                        ",backendParityStatus=" + pairedGateSummary.backendParityStatus +
-                        ",status=" + pairedGateSummary.combinedStatus +
-                        ",cpuNativeRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
-                        ",vulkanNativeRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable")
-                )
-                rows += "Ausgabe-/Finish-Gate: " + pairedGateSummary.outputGateStatus +
-                    " (CPU=" + cpuOutputGateStatus + ", Vulkan=" + vulkanOutputGateStatus + ")"
-                rows += "Numerisches CPU/Vulkan-Paritäts-Gate: " + gate.status +
-                    " (" + gate.reason + ", Schritte=" + gate.comparedSteps +
-                    ", min. Top-5-Überlappung=" + gate.minimumTop5Overlap + "/5)"
-                rows += "Kombiniertes CPU/Vulkan-Gesamtgate: " + pairedGateSummary.combinedStatus
-                if (pairedGateSummary.combinedStatus != "PASS") {
-                    rows += "Keine Performance-/Kernel-Konfiguration durch diesen Lauf freigegeben."
+                if (requireD0Reference) {
+                    publishSmokeProgress(
+                        phase = ConfigurationSmokePhase.CHECKING_RESULTS,
+                        currentStep = 6,
+                        message = "Drei CPU-only-Ausgaben, Finish-Grund und Modellidentität werden geprüft…"
+                    )
+                    val completedRuns = profiles.count {
+                        profileStatuses[it.id] == "PASS" || profileStatuses[it.id] == "FAIL"
+                    }
+                    val passedRuns = profiles.count { profileStatuses[it.id] == "PASS" }
+                    val d0Status = when {
+                        profiles.size == InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS &&
+                            passedRuns == InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS -> "PASS"
+                        profileStatuses.values.any { it == "FAIL" } -> "FAIL"
+                        else -> "UNAVAILABLE"
+                    }
+                    d0CpuGateCombinedStatus = d0Status
+                    val nativeRunIds = profiles.mapNotNull { profileSamples[it.id]?.result?.nativeRunId }
+                    EngineDiagnostics.info(
+                        "benchmark",
+                        "D0_CPU_REFERENCE_GATE_RESULT",
+                        "status=" + d0Status +
+                            ",requestedRuns=" + InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS +
+                            ",completedRuns=" + completedRuns +
+                            ",passedRuns=" + passedRuns +
+                            ",modelBytes=" + model.sizeBytes +
+                            ",modelSha256=" + model.sha256 +
+                            ",backend=CPU,gpuLayersRequested=0,vulkanProfiles=0" +
+                            ",nativeRunIds=" + nativeRunIds.joinToString("|")
+                    )
+                    rows += "D0 CPU-only-Gesamtgate: " + d0Status +
+                        " (bestanden=" + passedRuns + "/" + InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS +
+                        ", abgeschlossen=" + completedRuns + "/" + InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS +
+                        ", Vulkan=NICHT AUSGEFÜHRT)"
+                    if (d0Status != "PASS") {
+                        rows += "D0 bleibt offen: alle drei identitätsgesicherten CPU-Läufe müssen exakte Ausgabe und FinishReason=STOP bestehen."
+                    }
+                } else {
+                    publishSmokeProgress(
+                        phase = ConfigurationSmokePhase.CHECKING_RESULTS,
+                        currentStep = 6,
+                        message = "CPU-/Vulkan-Ausgaben, Finish-Grund und numerische Token-Parität werden geprüft…"
+                    )
+                    val cpuSample = profileSamples["cpu-reference"]
+                    val vulkanSample = profileSamples["vulkan-candidate"]
+                    var numericGate: EngineDiagnostics.BackendCorrectnessResult? = null
+                    val pairedGateSummary = InferenceConfigSmokePlan.evaluatePairedGate(
+                        cpuSample?.outputGatePassed,
+                        vulkanSample?.outputGatePassed
+                    ) {
+                        EngineDiagnostics.evaluateCpuVulkanCorrectnessGate(
+                            getApplication<Application>(),
+                            requireNotNull(cpuSample).result.nativeRunId,
+                            requireNotNull(vulkanSample).result.nativeRunId
+                        ).also { numericGate = it }.status
+                    }
+                    pairedGateCombinedStatus = pairedGateSummary.combinedStatus
+                    val gate = numericGate ?: EngineDiagnostics.BackendCorrectnessResult(
+                        "UNAVAILABLE",
+                        "CPU_OR_VULKAN_RUN_MISSING"
+                    )
+                    val cpuOutputGateStatus = when (cpuSample?.outputGatePassed) {
+                        true -> "PASS"
+                        false -> "FAIL"
+                        null -> "UNAVAILABLE"
+                    }
+                    val vulkanOutputGateStatus = when (vulkanSample?.outputGatePassed) {
+                        true -> "PASS"
+                        false -> "FAIL"
+                        null -> "UNAVAILABLE"
+                    }
+                    val gateDetails = "profile=CPU_VULKAN_SMOKE,backend=Vulkan," +
+                        "gateRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable") +
+                        ",cpuReferenceRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
+                        ",status=" + gate.status +
+                        ",reason=" + gate.reason +
+                        ",comparedSteps=" + gate.comparedSteps +
+                        ",minimumTop5Overlap=" + gate.minimumTop5Overlap + "/5" +
+                        ",firstDivergenceStep=" + (gate.firstDivergenceStep ?: "n/a")
+                    EngineDiagnostics.info("benchmark", "CORRECTNESS_GATE_RESULT", gateDetails)
+                    EngineDiagnostics.info(
+                        "config_test",
+                        "CONFIG_SMOKE_RESULT",
+                        "profile=paired-gates,outputGateStatus=" + pairedGateSummary.outputGateStatus +
+                            ",cpuOutputGateStatus=" + cpuOutputGateStatus +
+                            ",vulkanOutputGateStatus=" + vulkanOutputGateStatus +
+                            ",backendParityStatus=" + pairedGateSummary.backendParityStatus +
+                            ",status=" + pairedGateSummary.combinedStatus +
+                            ",cpuNativeRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
+                            ",vulkanNativeRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable")
+                    )
+                    rows += "Ausgabe-/Finish-Gate: " + pairedGateSummary.outputGateStatus +
+                        " (CPU=" + cpuOutputGateStatus + ", Vulkan=" + vulkanOutputGateStatus + ")"
+                    rows += "Numerisches CPU/Vulkan-Paritäts-Gate: " + gate.status +
+                        " (" + gate.reason + ", Schritte=" + gate.comparedSteps +
+                        ", min. Top-5-Überlappung=" + gate.minimumTop5Overlap + "/5)"
+                    rows += "Kombiniertes CPU/Vulkan-Gesamtgate: " + pairedGateSummary.combinedStatus
+                    if (pairedGateSummary.combinedStatus != "PASS") {
+                        rows += "Keine Performance-/Kernel-Konfiguration durch diesen Lauf freigegeben."
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 cancelledByUser = true
@@ -694,23 +759,41 @@ abstract class ConfigurationSmokeViewModel(
                     appendLine("Backend-Ergebnisse: " + confirmedBackends.joinToString(", ").ifBlank { "keines bestätigt" })
                     appendLine("Kontext: " + originalConfig.contextSize + "; Batch: " + originalConfig.batchSize +
                         "; Threads: " + originalConfig.threads)
-                    appendLine("CPU-Referenz und Vulkan-Kandidat mit identischer Testeingabe und deterministischem Sampling; " +
-                        InferenceConfigSmokePlan.MEASURED_TOKENS + " Token-Limit pro Lauf. GPU-Layer: CPU=0, Vulkan=99 angefordert.")
+                    if (requireD0Reference) {
+                        appendLine(
+                            "D0: drei identische CPU-only-Referenzläufe mit deterministischem Sampling; " +
+                                InferenceConfigSmokePlan.MEASURED_TOKENS +
+                                " Token-Limit je Lauf, GPU-Layer=0, Vulkan nicht ausgeführt."
+                        )
+                    } else {
+                        appendLine(
+                            "CPU-Referenz und Vulkan-Kandidat mit identischer Testeingabe und deterministischem Sampling; " +
+                                InferenceConfigSmokePlan.MEASURED_TOKENS +
+                                " Token-Limit pro Lauf. GPU-Layer: CPU=0, Vulkan=99 angefordert."
+                        )
+                    }
                     rows.forEach { appendLine(it) }
                     if (stoppedReason != null) appendLine("Hinweis: " + stoppedReason)
                     append("Restore-Status steht im Diagnoseexport.")
                 }
+                val terminalGateStatus = if (requireD0Reference) {
+                    d0CpuGateCombinedStatus
+                } else {
+                    pairedGateCombinedStatus
+                }
                 val terminalStatus = when {
                     cancelledByUser -> ConfigurationSmokeRunStatus.CANCELLED
-                    pairedGateCombinedStatus == "PASS" && !restoreFailed &&
-                        (!requireD0Reference || d0BaselineEligible) -> ConfigurationSmokeRunStatus.PASSED
+                    terminalGateStatus == "PASS" && !restoreFailed -> ConfigurationSmokeRunStatus.PASSED
                     else -> ConfigurationSmokeRunStatus.FAILED
                 }
                 val terminalMessage = when {
                     cancelledByUser -> "Test abgebrochen. Die sichere Wiederherstellung ist abgeschlossen."
                     restoreFailed -> "Test beendet, aber die ursprüngliche Modellkonfiguration konnte nicht wiederhergestellt werden."
-                    pairedGateCombinedStatus == "PASS" && requireD0Reference && !d0BaselineEligible ->
-                        "CPU-/Vulkan-Funktionstest bestanden, aber keine vergleichbare D0-Baseline: SHA-256 fehlt."
+                    requireD0Reference && d0CpuGateCombinedStatus == "PASS" ->
+                        "D0 CPU-only-Gesamtgate: PASS (3/3 Läufe). Vulkan wurde nicht ausgeführt; Modellkonfiguration wiederhergestellt."
+                    requireD0Reference ->
+                        "D0 CPU-only-Gesamtgate: " + (d0CpuGateCombinedStatus ?: "UNAVAILABLE") +
+                            ". Drei identitätsgesicherte CPU-Läufe sind erforderlich."
                     pairedGateCombinedStatus == "PASS" ->
                         "CPU-/Vulkan-Gesamtgate: PASS. Ursprüngliche Modellkonfiguration wiederhergestellt."
                     else ->
