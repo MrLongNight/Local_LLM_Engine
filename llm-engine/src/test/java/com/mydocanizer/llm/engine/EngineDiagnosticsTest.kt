@@ -937,7 +937,6 @@ class EngineDiagnosticsTest {
     }
 
     @Test
-    fun compactExportRetainsSmokeThreadRecommendation() {    @Test
     fun compactExportRetainsSmokeThreadRecommendation() {
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(
