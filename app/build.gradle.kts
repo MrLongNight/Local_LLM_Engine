@@ -4,8 +4,11 @@ plugins {
 }
 
 val appBaseVersionName = providers.gradleProperty("appVersionName").orElse("1.0").get()
-val appBuildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER")
-  .orElse(providers.gradleProperty("appBuildNumber"))
+// CI passes the exact APK workflow run number as a Gradle property.
+ // Prefer that explicit value over inherited environment variables, which may
+ // belong to an upstream workflow_run trigger.
+val appBuildNumber = providers.gradleProperty("appBuildNumber")
+  .orElse(providers.environmentVariable("GITHUB_RUN_NUMBER"))
   .orElse("1")
   .get()
   .toIntOrNull()
