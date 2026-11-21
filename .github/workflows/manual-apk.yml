@@ -257,7 +257,9 @@ jobs:
           else
             echo "Building standard Debug APK with bounded full text/token diagnostics and BLOCK fence wait."
           fi
-          # Build identity is compiled into the UI; force a clean, uncached app build so no\n          # Kotlin/Dex output from an earlier run can survive a changed CI version number.\n          gradle --no-daemon --no-build-cache clean "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
+          # Build identity is compiled into the UI; force a clean, uncached app build so no
+          # Kotlin/Dex output from an earlier run can survive a changed CI version number.
+          gradle --no-daemon --no-build-cache clean "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
 
       - name: Verify standard Debug BuildConfig selection
         shell: bash
