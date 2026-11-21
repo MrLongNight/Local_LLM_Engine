@@ -99,7 +99,7 @@ class InferenceConfigSmokePlanTest {
         assertTrue(profiles.all { it.config.microBatchSize == 64 })
         assertTrue(profiles.all { it.config.maxPredictTokens == 96 })
         assertTrue(profiles.all { it.config.temperature == 0f })
-        assertTrue(profiles.all { it.config.threads == 6 && it.config.effectiveBatchThreads == 6 })
+        assertTrue(profiles.all { it.config.threads == 4 && it.config.effectiveBatchThreads == 4 })
         assertEquals(profiles[0].config, profiles[1].config)
         assertEquals(profiles[0].config, profiles[2].config)
         assertEquals(
