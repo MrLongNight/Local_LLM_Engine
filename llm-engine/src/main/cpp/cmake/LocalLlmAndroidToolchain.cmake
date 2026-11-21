@@ -25,6 +25,10 @@ if(DEFINED ANDROID_ABI)
     message(STATUS "LocalLLM detected Android ABI: ${ANDROID_ABI}")
     if(ANDROID_ABI STREQUAL "arm64-v8a")
         set(GGML_SYSTEM_ARCH "ARM")
+        # Compile the shared ARM64 baseline for Cortex-A76/A55-class devices.
+        # Do not enable I8MM/SME2 here; runtime dispatch remains feature-gated.
+        set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod" CACHE STRING "ggml ARM CPU architecture" FORCE)
+        message(STATUS "LocalLLM: GGML_CPU_ARM_ARCH=${GGML_CPU_ARM_ARCH}")
         # Match the official llama.cpp Android reference app. KleidiAI adds
         # Arm-optimized kernels where the runtime CPU feature set supports them.
         set(GGML_CPU_KLEIDIAI ON CACHE BOOL "ggml: use KleidiAI optimized kernels if applicable" FORCE)
