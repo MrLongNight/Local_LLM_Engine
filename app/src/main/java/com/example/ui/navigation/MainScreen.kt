@@ -31,10 +31,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.Context
+import androidx.core.content.pm.PackageInfoCompat
 import com.example.BuildConfig
 import com.example.ui.EngineViewModel
 import com.example.ui.chat.ChatScreen
@@ -42,24 +45,32 @@ import com.example.ui.modelimport.ModelImportScreen
 import com.example.ui.settings.SettingsScreen
 import com.mydocanizer.llm.engine.EngineDiagnostics
 
-internal fun formatAppVersion(versionName: String, versionCode: Int): String =
+internal fun formatAppVersion(versionName: String, versionCode: Long): String =
     "v$versionName · Build $versionCode"
 
-internal fun recordCurrentAppBuildInfo() {
+private fun installedAppVersion(context: Context): Pair<String, Long> {
+    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+    return (packageInfo.versionName ?: "unknown") to PackageInfoCompat.getLongVersionCode(packageInfo)
+}
+
+internal fun recordCurrentAppBuildInfo(context: Context) {
+    val (versionName, versionCode) = installedAppVersion(context)
     EngineDiagnostics.info(
         "app",
         "APP_BUILD_INFO",
-        "versionName=${BuildConfig.VERSION_NAME},versionCode=${BuildConfig.VERSION_CODE}," +
-            "buildType=${BuildConfig.BUILD_TYPE},applicationId=${BuildConfig.APPLICATION_ID},debug=${BuildConfig.DEBUG}"
+        "versionName=$versionName,versionCode=$versionCode," +
+            "buildType=${BuildConfig.BUILD_TYPE},applicationId=${context.packageName},debug=${BuildConfig.DEBUG}"
     )
 }
 
 @Composable
 internal fun AppVersionLabel() {
+    val context = LocalContext.current
+    val (versionName, versionCode) = remember(context) { installedAppVersion(context) }
     Text(
         text = formatAppVersion(
-            versionName = BuildConfig.VERSION_NAME,
-            versionCode = BuildConfig.VERSION_CODE
+            versionName = versionName,
+            versionCode = versionCode
         ),
         modifier = Modifier.testTag("top_app_bar_version"),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -75,6 +86,7 @@ fun MainScreen(
     val currentTab: AppTab by viewModel.currentTab.collectAsState()
     val statusMessage: String? by viewModel.statusMessage.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
     val diagnosticsExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain"),
         onResult = {
@@ -82,14 +94,14 @@ fun MainScreen(
             if (uri != null) {
                 // App-private diagnostic files survive APK updates. Refresh the
                 // identity now so this export cannot inherit an older startup record.
-                recordCurrentAppBuildInfo()
+                recordCurrentAppBuildInfo(context)
                 viewModel.exportDiagnostics(uri)
             }
         }
     )
 
     LaunchedEffect(Unit) {
-        recordCurrentAppBuildInfo()
+        recordCurrentAppBuildInfo(context)
     }
 
     LaunchedEffect(currentTab) {
