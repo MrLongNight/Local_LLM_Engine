@@ -113,6 +113,7 @@ internal object EngineDiagnosticsReportBuilder {
             "SERVICE_DESTROYED",
             "SERVICE_DISCONNECTED",
             "ENGINE_INITIALIZATION",
+            "APP_BUILD_INFO",
             "INIT_FAILED",
             "INFERENCE_STARTED",
             "INFERENCE_COMPLETED",
@@ -192,6 +193,7 @@ internal object EngineDiagnosticsReportBuilder {
     private val fieldSeparator = Regex(""",(?=[A-Za-z][A-Za-z0-9_]*=)""")
 
     private fun readableEventTitle(event: String): String = when (event) {
+        "APP_BUILD_INFO" -> "App-Build-Identität"
         "CONFIG_SMOKE_REFERENCE_REJECTED" -> "D0-Referenzmodell abgelehnt"
         "CONFIG_SMOKE_D0_BUTTON_STATE" -> "D0-Button-Zustand und Sperrgrund"
         "CONFIG_SMOKE_D0_BUTTON_CLICKED" -> "D0-Button-Klick empfangen"
@@ -234,6 +236,11 @@ internal object EngineDiagnosticsReportBuilder {
     }
 
     private val readableFieldNames = mapOf(
+        "versionName" to "App-Version",
+        "versionCode" to "Build-Code",
+        "buildType" to "Build-Variante",
+        "applicationId" to "Application-ID",
+        "debug" to "Debug-Build",
         "backend" to "Backend",
         "activeBackend" to "Aktives Backend",
         "model" to "Modell",
@@ -670,6 +677,11 @@ internal object EngineDiagnosticsReportBuilder {
             .sorted()
             .map { readableEventLine(it, 620) }
         val singleRunPhaseSummary = buildSingleRunPhaseSummary(kotlinLines, nativeLines)
+        val latestAppBuildInfo = kotlinLines.lastOrNull { eventName(it) == "APP_BUILD_INFO" }
+        val appBuildInfo = latestAppBuildInfo?.let { line ->
+            listOf("versionName", "versionCode", "buildType", "applicationId", "debug")
+                .joinToString(",") { key -> "$key=${field(line, key) ?: "UNAVAILABLE"}" }
+        } ?: "UNAVAILABLE"
 
         val nativeKeywords = listOf(
             "VULKAN", "GGML_VULKAN", "BACKEND", "DEVICE", "SUBGROUP",
@@ -1025,6 +1037,7 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("Erstellt: ${Date()}")
             appendLine("Export-Schema: 2")
             appendLine("Build: variant=${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"},textDiagnostics=${BuildConfig.TEXT_DIAGNOSTICS_ENABLED},vulkanProfiler=${BuildConfig.VULKAN_PERF_PROFILER_ENABLED}")
+            appendLine("appBuildInfo=$appBuildInfo")
             appendLine("Datenbasis: ${ordered.size} Logeinträge · ${samples.size} RAM-Messpunkte")
             appendLine("Export: kompakt, nach Themen gruppiert, mit begrenzten run-korrelierten Text-/Token-Traces im Debug-Diagnosemodus")
             appendLine("------------------------------------------------------------")

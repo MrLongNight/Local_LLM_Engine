@@ -914,6 +914,30 @@ class EngineDiagnosticsTest {
 
 
     @Test
+    fun compactExportRetainsAppBuildInfoAndMarksOlderExportsUnavailable() {
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(
+                "2026-11-21 16:00:00.000 [INFO] [app] APP_BUILD_INFO - " +
+                    "versionName=1.0.652,versionCode=652,buildType=debug," +
+                    "applicationId=com.aistudio.localllm.mdoanx.dmmv,debug=true"
+            )
+        )
+
+        assertTrue(report.contains("appBuildInfo=versionName=1.0.652,versionCode=652,buildType=debug"))
+        assertTrue(report.contains("applicationId=com.aistudio.localllm.mdoanx.dmmv"))
+        assertTrue(report.contains("App-Build-Identität [APP_BUILD_INFO]"))
+        assertTrue(report.contains("App-Version: 1.0.652"))
+        assertTrue(report.contains("Build-Code: 652"))
+        assertTrue(report.contains("Build-Variante: debug"))
+
+        val legacyReport = EngineDiagnostics.buildCompactReportForTest(
+            listOf("2026-11-21 16:00:00.000 [INFO] [ui] TAB_SELECTED - tab=CHAT")
+        )
+        assertTrue(legacyReport.contains("appBuildInfo=UNAVAILABLE"))
+    }
+
+    @Test
+    fun compactExportRetainsSmokeThreadRecommendation() {    @Test
     fun compactExportRetainsSmokeThreadRecommendation() {
         val report = EngineDiagnostics.buildCompactReportForTest(
             listOf(

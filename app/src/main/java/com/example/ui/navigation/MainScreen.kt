@@ -45,6 +45,19 @@ import com.mydocanizer.llm.engine.EngineDiagnostics
 internal fun formatAppVersion(versionName: String, versionCode: Int): String =
     "v$versionName · Build $versionCode"
 
+@Composable
+internal fun AppVersionLabel() {
+    Text(
+        text = formatAppVersion(
+            versionName = BuildConfig.VERSION_NAME,
+            versionCode = BuildConfig.VERSION_CODE
+        ),
+        modifier = Modifier.testTag("top_app_bar_version"),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -57,6 +70,15 @@ fun MainScreen(
         contract = ActivityResultContracts.CreateDocument("text/plain"),
         onResult = { uri -> if (uri != null) viewModel.exportDiagnostics(uri) }
     )
+
+    LaunchedEffect(Unit) {
+        EngineDiagnostics.info(
+            "app",
+            "APP_BUILD_INFO",
+            "versionName=${BuildConfig.VERSION_NAME},versionCode=${BuildConfig.VERSION_CODE}," +
+                "buildType=${BuildConfig.BUILD_TYPE},applicationId=${BuildConfig.APPLICATION_ID},debug=${BuildConfig.DEBUG}"
+        )
+    }
 
     LaunchedEffect(currentTab) {
         EngineDiagnostics.info("ui", "TAB_CONTENT_RENDER_REQUESTED", "tab=$currentTab")
@@ -83,15 +105,7 @@ fun MainScreen(
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleLarge
                         )
-                        Text(
-                            text = formatAppVersion(
-                                versionName = BuildConfig.VERSION_NAME,
-                                versionCode = BuildConfig.VERSION_CODE
-                            ),
-                            modifier = Modifier.testTag("top_app_bar_version"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelSmall
-                        )
+                        AppVersionLabel()
                     }
                 },
                 actions = {
