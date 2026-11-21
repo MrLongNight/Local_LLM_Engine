@@ -137,7 +137,7 @@ internal object InferenceConfigSmokePlan {
 
     /** Paired runner reserved for D1a and explicitly requested CPU/Vulkan comparisons. */
     fun create(base: EngineConfig, recommendedThreads: Int): List<Profile> {
-        val common = fixedSmokeConfig(base, availableProcessors)
+        val common = fixedSmokeConfig(base, recommendedThreads)
         return listOf(
             Profile(
                 id = "cpu-reference",
@@ -155,7 +155,7 @@ internal object InferenceConfigSmokePlan {
     }
 
     private fun fixedSmokeConfig(base: EngineConfig, recommendedThreads: Int): EngineConfig {
-        val threadCount = availableProcessors.coerceAtLeast(1).coerceAtMost(6)
+        val threadCount = recommendedThreads.coerceAtLeast(1).coerceAtMost(6)
         return base.copy(
             contextSize = 256,
             batchSize = 128,
