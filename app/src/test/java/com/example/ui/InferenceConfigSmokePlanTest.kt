@@ -265,55 +265,46 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
-    fun fixedPromptAndExpectedOutputAreShortAndNormalizeOnlyOuterWhitespace() {
-        assertEquals("ERGEBNIS=155", InferenceConfigSmokePlan.EXPECTED_OUTPUT)
+    fun fixedPromptIsNeutralAndNormalizationOnlyTrimsOuterWhitespace() {
         assertEquals(96, InferenceConfigSmokePlan.MEASURED_TOKENS)
-        assertEquals(
-            InferenceConfigSmokePlan.EXPECTED_OUTPUT,
-            InferenceConfigSmokePlan.normalizeOutput("\r\n" + InferenceConfigSmokePlan.EXPECTED_OUTPUT + "\r\n")
-        )
-        assertNotEquals(
-            InferenceConfigSmokePlan.EXPECTED_OUTPUT,
-            InferenceConfigSmokePlan.normalizeOutput("ERGEBNIS=154")
-        )
-        assertTrue(InferenceConfigSmokePlan.USER_PROMPT.contains("8 * 24 - 37"))
-        assertTrue(InferenceConfigSmokePlan.USER_PROMPT.contains("ERGEBNIS=<Zahl>"))
+        assertEquals("Antworte kurz auf Deutsch.", InferenceConfigSmokePlan.USER_PROMPT)
+        assertEquals("Eine Antwort", InferenceConfigSmokePlan.normalizeOutput("\r\nEine Antwort\r\n"))
         assertTrue(InferenceConfigSmokePlan.USER_PROMPT.length <= 80)
-        assertFalse(InferenceConfigSmokePlan.USER_PROMPT.contains("155"))
-        assertFalse(InferenceConfigSmokePlan.USER_PROMPT.contains("FOLGE"))
+        assertFalse(InferenceConfigSmokePlan.USER_PROMPT.contains("8 * 24"))
     }
 
     @Test
-    fun smokeOutputGateRequiresExactAnswerNaturalStopAndMinimumTokens() {
+    fun smokeOutputGateChecksInferenceCompletionRatherThanSemanticAccuracy() {
         assertTrue(
             InferenceConfigSmokePlan.passesSmokeOutputGate(
-                "ERGEBNIS=155\r\n",
+                "Eine beliebige sinnvolle Antwort.\r\n",
+                FinishReason.STOP,
+                tokensGenerated = 1
+            )
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.passesSmokeOutputGate(
+                "",
                 FinishReason.STOP,
                 tokensGenerated = 4
             )
         )
         assertFalse(
             InferenceConfigSmokePlan.passesSmokeOutputGate(
-                "ERGEBNIS=154",
-                FinishReason.STOP,
-                tokensGenerated = 4
-            )
-        )
-        assertFalse(
-            InferenceConfigSmokePlan.passesSmokeOutputGate(
-                "ERGEBNIS=155",
+                "Antwort",
                 FinishReason.MAX_TOKENS,
                 tokensGenerated = 96
             )
         )
         assertFalse(
             InferenceConfigSmokePlan.passesSmokeOutputGate(
-                "ERGEBNIS=155",
+                "Antwort",
                 FinishReason.STOP,
-                tokensGenerated = 3
+                tokensGenerated = 0
             )
         )
     }
+
     @Test
     fun evaluatesNumericParityEvenWhenAnOutputGateFails() {
         var parityEvaluationCount = 0

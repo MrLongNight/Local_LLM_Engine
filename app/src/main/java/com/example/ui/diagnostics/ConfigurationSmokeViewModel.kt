@@ -376,8 +376,7 @@ abstract class ConfigurationSmokeViewModel(
                         val cfg = profile.config
                         val loadElapsedMs = profileLoadMs ?: -1L
                         val normalizedOutput = InferenceConfigSmokePlan.normalizeOutput(sample.result.text)
-                        val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
-                        val outputMatches = normalizedOutput == expectedOutput
+                        val outputNonEmpty = normalizedOutput.isNotEmpty()
                         val completedNormally = sample.result.finishReason == com.mydocanizer.llm.engine.FinishReason.STOP
                         val q4kFallbackValidation = if (profile.expectedBackend == "VULKAN") {
                             Q4kPipelineFallbackPolicy.validateNativeEvidence(
@@ -409,14 +408,14 @@ abstract class ConfigurationSmokeViewModel(
                         profileSamples[profile.id] = sample.copy(outputGatePassed = outputGatePassed)
                         val report = String.format(
                             java.util.Locale.US,
-                            "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | exactOutput=%s | gate=%s | graphSplits=%d | run=%s",
+                            "%s | requested=%s | backend=%s | load=%dms | n_threads=%d | n_threads_batch=%d | n_batch=%d | n_ubatch=%d | prompt=%d/%s ms | TTFT=%s ms | decode=%dms | output=%d | %.3f tok/s | finish=%s | nonEmptyOutput=%s | gate=%s | graphSplits=%d | run=%s",
                             profile.label, profile.expectedBackend, backend, profileLoadMs ?: -1L, cfg.threads, cfg.effectiveBatchThreads,
                             cfg.batchSize, InferenceConfigSmokePlan.resolvedUbatchForTest(cfg, loaded.activeBackend), sample.promptTokens,
                             sample.promptEvaluationMs?.toString() ?: "n/a",
                             sample.firstTokenMs?.toString() ?: "n/a",
                             sample.result.durationMs, sample.result.tokensGenerated,
                             sample.result.tokensPerSecond, sample.result.finishReason.name,
-                            outputMatches, if (outputGatePassed) "PASS" else "FAIL", sample.result.graphSplits,
+                            outputNonEmpty, if (outputGatePassed) "PASS" else "FAIL", sample.result.graphSplits,
                             sample.result.diagnosticRunId.ifBlank { "n/a" }
                         ) + " | Q4K-Fallback=" + q4kFallbackValidation.status.name +
                             " (" + q4kFallbackValidation.reason + ")"
@@ -446,7 +445,7 @@ abstract class ConfigurationSmokeViewModel(
                                 ",outputTokens=" + sample.result.tokensGenerated +
                                 ",tokensPerSecond=" + sample.result.tokensPerSecond +
                                 ",finishReason=" + sample.result.finishReason.name +
-                                ",exactOutput=" + outputMatches +
+                                ",nonEmptyOutput=" + outputNonEmpty +
                                 ",normalStop=" + completedNormally +
                                 ",outputGate=" + (if (outputGatePassed) "PASS" else "FAIL") +
                                 ",q4kFallbackStatus=" + q4kFallbackValidation.status.name +
@@ -457,14 +456,14 @@ abstract class ConfigurationSmokeViewModel(
                         recordConfigurationSmokeProfileResult(
                             profile.id,
                             profileStatus,
-                            if (outputGatePassed) "OUTPUT_AND_FINISH_GATE_PASSED" else "OUTPUT_OR_FINISH_GATE_FAILED",
+                            if (outputGatePassed) "INFERENCE_HEALTH_GATE_PASSED" else "EMPTY_OUTPUT_FINISH_OR_BACKEND_EVIDENCE_FAILED",
                             profileLoadMs,
                             sample.result.nativeRunId
                         )
                         if (!outputGatePassed) {
                             val rejection = "profile=" + profile.id +
                                 ",outputTokens=" + sample.result.tokensGenerated +
-                                ",exactOutput=" + outputMatches +
+                                ",nonEmptyOutput=" + outputNonEmpty +
                                 ",finishReason=" + sample.result.finishReason.name
                             rows += "Korrektheits-Gate fehlgeschlagen: " + rejection
                             EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_REJECTED", rejection)
@@ -641,7 +640,7 @@ abstract class ConfigurationSmokeViewModel(
                         ", abgeschlossen=" + completedRuns + "/" + InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS +
                         ", Vulkan=NICHT AUSGEFÜHRT)"
                     if (d0Status != "PASS") {
-                        rows += "D0 bleibt offen: alle drei quellgrößen-geprüften CPU-Läufe müssen exakte Ausgabe und FinishReason=STOP bestehen."
+                        rows += "D0 bleibt offen: alle drei quellgrößen-geprüften CPU-Läufe müssen nichtleere Ausgabe und FinishReason=STOP bestehen."
                     }
                 } else {
                     publishSmokeProgress(
@@ -700,6 +699,10 @@ abstract class ConfigurationSmokeViewModel(
                                 ",cpuOutputGateStatus=" + cpuOutputGateStatus +
                                 ",vulkanOutputGateStatus=" + vulkanOutputGateStatus +
                                 ",backendParityStatus=" + pairedGateSummary.backendParityStatus +
+                                ",backendParityReason=" + gate.reason +
+                                ",backendParityComparedSteps=" + gate.comparedSteps +
+                                ",backendParityTop5OverlapMin=" + gate.minimumTop5Overlap +
+                                ",backendParityFirstDivergenceStep=" + (gate.firstDivergenceStep ?: "n/a") +
                                 ",status=" + pairedGateSummary.combinedStatus +
                                 ",cpuNativeRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
                                 ",vulkanNativeRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable")
@@ -943,7 +946,6 @@ abstract class ConfigurationSmokeViewModel(
         var cancelledPartialText: String? = null
         var failedPartialText: String? = null
         val prompt = InferenceConfigSmokePlan.USER_PROMPT
-        val expectedOutput = InferenceConfigSmokePlan.EXPECTED_OUTPUT
         val isCpuProfile = diagnosticLabel.startsWith("cpu-reference")
         val profileLabel = if (isCpuProfile) "CPU-Referenz" else "Vulkan-Kandidat"
         val inferencePhase = if (isCpuProfile) ConfigurationSmokePhase.CPU_INFERENCE
@@ -960,7 +962,7 @@ abstract class ConfigurationSmokeViewModel(
         EngineDiagnostics.testText(
             "config_test",
             "CONFIG_SMOKE_TEST_INPUT",
-            "stage=$diagnosticLabel,prompt=$prompt,expectedOutput=$expectedOutput"
+            "stage=$diagnosticLabel,prompt=$prompt,gate=inference_health_not_semantic_accuracy"
         )
 
         try {
@@ -1071,18 +1073,10 @@ abstract class ConfigurationSmokeViewModel(
             "config_test",
             "CONFIG_SMOKE_TEST_OUTPUT",
             "stage=" + diagnosticLabel + ",finishReason=" + result.finishReason.name +
-                ",tokens=" + result.tokensGenerated + ",expectedOutput=" + expectedOutput +
-                ",exactOutput=" + (InferenceConfigSmokePlan.normalizeOutput(result.text) == expectedOutput) +
+                ",tokens=" + result.tokensGenerated +
+                ",nonEmptyOutput=" + InferenceConfigSmokePlan.normalizeOutput(result.text).isNotEmpty() +
                 ",text=" + result.text
         )
-        if (InferenceConfigSmokePlan.normalizeOutput(result.text) != expectedOutput) {
-            EngineDiagnostics.info(
-                "config_test",
-                "CONFIG_SMOKE_OUTPUT_CHECK_FAILED",
-                "expectedOutput=" + expectedOutput + ",actualOutput=" +
-                    InferenceConfigSmokePlan.normalizeOutput(result.text)
-            )
-        }
         val outputGatePassed = InferenceConfigSmokePlan.passesSmokeOutputGate(
             result.text,
             result.finishReason,

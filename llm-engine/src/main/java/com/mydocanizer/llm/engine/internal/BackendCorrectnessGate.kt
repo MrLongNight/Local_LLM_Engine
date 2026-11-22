@@ -139,19 +139,29 @@ internal object BackendCorrectnessGate {
             cpuSampler["samplerChain"]?.contains("GREEDY", ignoreCase = true) != true
         ) return fail("CORRECTNESS_GATE_REQUIRES_GREEDY_SAMPLING")
 
-        val cpuCache = singleFields(lines, CACHE_PLAN_MARKER, cpuRunId)
-            ?: return unavailable("CPU_PROMPT_CACHE_EVIDENCE_MISSING_OR_DUPLICATED")
-        val candidateCache = singleFields(lines, CACHE_PLAN_MARKER, candidateRunId)
-            ?: return unavailable("VULKAN_PROMPT_CACHE_EVIDENCE_MISSING_OR_DUPLICATED")
-        for ((backend, cache) in listOf("CPU" to cpuCache, "Vulkan" to candidateCache)) {
-            val promptTokens = cache["promptTokens"]?.toIntOrNull()
-            val reusedTokens = cache["reusedTokens"]?.toIntOrNull()
-            val evaluatedTokens = cache["evaluatedTokens"]?.toIntOrNull()
-            if (promptTokens == null || reusedTokens == null || evaluatedTokens == null ||
-                promptTokens <= 0 || evaluatedTokens < 0
-            ) return unavailable(backend + "_PROMPT_CACHE_EVIDENCE_MALFORMED")
-            if (reusedTokens != 0 || evaluatedTokens != promptTokens) {
-                return fail(backend.uppercase(Locale.US) + "_PROMPT_CACHE_NOT_FRESH")
+        // The paired smoke runner unloads and reloads the model between CPU and
+        // Vulkan profiles. Distinct native model handles prove that their KV/cache
+        // state cannot be shared. Some Android log collectors omit this standalone
+        // native cache-plan line, so require it only when both runs use one handle.
+        val cpuModelId = cpuContext["model"]?.takeIf { it.isNotBlank() }
+        val candidateModelId = candidateContext["model"]?.takeIf { it.isNotBlank() }
+        val separatelyLoadedModels = cpuModelId != null &&
+            candidateModelId != null && cpuModelId != candidateModelId
+        if (!separatelyLoadedModels) {
+            val cpuCache = singleFields(lines, CACHE_PLAN_MARKER, cpuRunId)
+                ?: return unavailable("CPU_PROMPT_CACHE_EVIDENCE_MISSING_OR_DUPLICATED")
+            val candidateCache = singleFields(lines, CACHE_PLAN_MARKER, candidateRunId)
+                ?: return unavailable("VULKAN_PROMPT_CACHE_EVIDENCE_MISSING_OR_DUPLICATED")
+            for ((backend, cache) in listOf("CPU" to cpuCache, "Vulkan" to candidateCache)) {
+                val promptTokens = cache["promptTokens"]?.toIntOrNull()
+                val reusedTokens = cache["reusedTokens"]?.toIntOrNull()
+                val evaluatedTokens = cache["evaluatedTokens"]?.toIntOrNull()
+                if (promptTokens == null || reusedTokens == null || evaluatedTokens == null ||
+                    promptTokens <= 0 || evaluatedTokens < 0
+                ) return unavailable(backend + "_PROMPT_CACHE_EVIDENCE_MALFORMED")
+                if (reusedTokens != 0 || evaluatedTokens != promptTokens) {
+                    return fail(backend.uppercase(Locale.US) + "_PROMPT_CACHE_NOT_FRESH")
+                }
             }
         }
 
