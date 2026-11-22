@@ -90,6 +90,32 @@ class BackendCorrectnessGateTest {
     }
 
     @Test
+    fun acceptsMissingCacheTraceWhenCpuAndVulkanUseSeparatelyLoadedModelInstances() {
+        val lines = fixture().mapNotNull { line ->
+            when {
+                line.contains("runId=vulkan-run,pid=100") -> line.replace("model=7", "model=8")
+                line.contains("Prompt cache plan:") -> null
+                else -> line
+            }
+        }
+
+        val result = BackendCorrectnessGate.evaluate(lines, "cpu-run", "vulkan-run")
+
+        assertEquals("PASS", result.status)
+        assertEquals("TOP1_IDENTICAL_TOP5_OVERLAP_GE_4", result.reason)
+    }
+
+    @Test
+    fun stillRequiresCacheEvidenceWhenBothRunsShareOneModelInstance() {
+        val lines = fixture().filterNot { it.contains("Prompt cache plan:") }
+
+        val result = BackendCorrectnessGate.evaluate(lines, "cpu-run", "vulkan-run")
+
+        assertEquals("UNAVAILABLE", result.status)
+        assertEquals("CPU_PROMPT_CACHE_EVIDENCE_MISSING_OR_DUPLICATED", result.reason)
+    }
+
+    @Test
     fun rejectsTop1MismatchEvenWhenTheCandidateRemainsInsideTheReferenceTopFive() {
         val lines = fixture().map {
             if (it.contains("runId=vulkan-run,backend=Vulkan,step=2")) {
