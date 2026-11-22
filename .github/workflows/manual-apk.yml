@@ -680,9 +680,9 @@ jobs:
         with:
           name: Local-LMM-Engine-v1.0.${{ github.run_number }}-debug-apk
           path: |
-            app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk
-            app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk.sha256
-            app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk.txt
+            app/build/outputs/apk/debug/Local-LMM-Engine-v1.0.${{ github.run_number }}-debug.apk
+            app/build/outputs/apk/debug/Local-LMM-Engine-v1.0.${{ github.run_number }}-debug.apk.sha256
+            app/build/outputs/apk/debug/Local-LMM-Engine-v1.0.${{ github.run_number }}-debug.apk.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -725,6 +725,6 @@ jobs:
         with:
           name: Local-LMM-Engine-emulator-diagnostics
           path: ${{ runner.temp }}/local-llm-emulator-diagnostics/
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 14
 
