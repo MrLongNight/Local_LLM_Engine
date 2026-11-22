@@ -181,8 +181,8 @@ abstract class ConfigurationSmokeViewModel(
             "config_test",
             "CONFIG_SMOKE_THREAD_POLICY",
             "availableProcessors=$availableProcessors,recommendedThreads=$recommendedCpuThreads," +
-                "selectedThreads=${profiles.firstOrNull()?.config?.threads ?: "unavailable"}," +
-                "profileCount=${profiles.size}"
+                "threadCandidates=" + profiles.filter { it.expectedBackend == "CPU" }.map { it.config.threads }.distinct().joinToString("|") +
+                ",profileCount=${profiles.size}"
         )
         if (profiles.isEmpty()) {
             rejectSmokeRun("Kein Inferenz-Testprofil verfügbar.")
@@ -251,7 +251,11 @@ abstract class ConfigurationSmokeViewModel(
                         "config_test",
                         "CONFIG_SMOKE_PROFILE_STARTED",
                         "profile=" + profile.id + ",index=" + (index + 1) +
-                            ",total=" + profiles.size + ",backend=" + profile.expectedBackend
+                            ",total=" + profiles.size + ",backend=" + profile.expectedBackend +
+                            ",threads=" + profile.config.threads +
+                            ",batchThreads=" + profile.config.effectiveBatchThreads +
+                            ",batch=" + profile.config.batchSize +
+                            ",microBatch=" + InferenceConfigSmokePlan.resolvedUbatchForTest(profile.config, profile.expectedBackend)
                     )
                     profileStatuses[profile.id] = "RUNNING"
                     var profileLoadMs: Long? = null
