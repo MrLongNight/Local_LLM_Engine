@@ -268,7 +268,7 @@ class InferenceConfigSmokePlanTest {
     fun fixedPromptIsNeutralAndNormalizationOnlyTrimsOuterWhitespace() {
         assertEquals(96, InferenceConfigSmokePlan.MEASURED_TOKENS)
         assertEquals("Antworte kurz auf Deutsch.", InferenceConfigSmokePlan.USER_PROMPT)
-        assertEquals("Eine Antwort", InferenceConfigSmokePlan.normalizeOutput("\\r\\nEine Antwort\\r\\n"))
+        assertEquals("Eine Antwort", InferenceConfigSmokePlan.normalizeOutput("\r\nEine Antwort\r\n"))
         assertTrue(InferenceConfigSmokePlan.USER_PROMPT.length <= 80)
         assertFalse(InferenceConfigSmokePlan.USER_PROMPT.contains("8 * 24"))
     }
@@ -277,7 +277,7 @@ class InferenceConfigSmokePlanTest {
     fun smokeOutputGateChecksInferenceCompletionRatherThanSemanticAccuracy() {
         assertTrue(
             InferenceConfigSmokePlan.passesSmokeOutputGate(
-                "Eine beliebige sinnvolle Antwort.\\r\\n",
+                "Eine beliebige sinnvolle Antwort.\r\n",
                 FinishReason.STOP,
                 tokensGenerated = 1
             )
