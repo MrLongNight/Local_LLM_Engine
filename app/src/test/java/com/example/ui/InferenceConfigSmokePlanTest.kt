@@ -255,7 +255,8 @@ class InferenceConfigSmokePlanTest {
         assertTrue(d0Profiles.all { it.config.effectiveBatchThreads == 4 })
         assertEquals(listOf(1, 2, 4), pairedProfiles.filterIndexed { index, _ -> index % 2 == 0 }.map { it.config.threads })
         assertEquals(listOf(1, 2, 4), pairedProfiles.filterIndexed { index, _ -> index % 2 == 1 }.map { it.config.threads })
-        assertEquals(listOf(1, 2, 4), pairedProfiles.map { it.config.effectiveBatchThreads })
+        assertTrue(pairedProfiles.all { it.config.threads == it.config.effectiveBatchThreads })
+        assertEquals(listOf(1, 2, 4), pairedProfiles.map { it.config.effectiveBatchThreads }.distinct())
         assertEquals(d0Profiles.first().config, pairedProfiles.first { it.expectedBackend == "CPU" && it.config.threads == 4 }.config)
 
         val twoThreadRecommendation = InferenceConfigSmokePlan.create(base, recommendedThreads = 2)
