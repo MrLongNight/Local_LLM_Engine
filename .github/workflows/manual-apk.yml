@@ -338,7 +338,7 @@ jobs:
           test "$actual_name" = "$expected_version"
           test "$actual_id" = "com.aistudio.localllm.mdoanx.dmmv"
 
-          named_apk="app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${EXPECTED_BUILD_NUMBER}.apk"
+          named_apk="app/build/outputs/apk/debug/Local-LMM-Engine-v${expected_version}-debug.apk"
           cp "$apk" "$named_apk"
           sha256sum "$named_apk" > "$named_apk.sha256"
           {
@@ -678,7 +678,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Local-LMM-Engine-debug-diagnostics-apk-build-${{ github.run_number }}
+          name: Local-LMM-Engine-v1.0.${{ github.run_number }}-debug-apk
           path: |
             app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk
             app/build/outputs/apk/debug/Local-LMM-Engine-debug-diagnostics-build-${{ github.run_number }}.apk.sha256
