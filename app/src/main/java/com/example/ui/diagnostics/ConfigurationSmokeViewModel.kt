@@ -107,7 +107,7 @@ abstract class ConfigurationSmokeViewModel(
         EngineDiagnostics.info(
             "config_test",
             "CONFIG_SMOKE_START_REQUESTED",
-            "mode=" + (if (requireD0Reference) "D0_CPU_REFERENCE_3_RUNS" else "GENERAL_CPU_VULKAN_PAIR") +
+            "mode=" + (if (requireD0Reference) "D0_CPU_REFERENCE_3_RUNS" else "GENERAL_CPU_VULKAN_THREAD_SWEEP") +
                 ",configSmokeRunning=" + _isConfigSmokeTesting.value +
                 ",benchmarking=" + _isBenchmarking.value +
                 ",generating=" + _isGenerating.value +
@@ -138,7 +138,7 @@ abstract class ConfigurationSmokeViewModel(
             message = if (requireD0Reference) {
                 "Prüfe die geladene Modellquelle und Dateigröße für drei CPU-Läufe…"
             } else {
-                "Bereite den separaten CPU-/Vulkan-Vergleich vor…"
+                "Bereite CPU-/Vulkan-Vergleiche mit 1, 2 und bis zu 4 Threads vor…"
             }
         )
         val modelAssessment = InferenceConfigSmokePlan.assessD0ModelSource(model)
@@ -195,7 +195,7 @@ abstract class ConfigurationSmokeViewModel(
             message = if (requireD0Reference) {
                 "Modellquelle und Dateigröße bestätigt. Drei CPU-only-Läufe werden vorbereitet; eine vorhandene SHA wird ebenfalls geprüft."
             } else {
-                "Modellkandidat erkannt. CPU- und Vulkan-Profile werden vorbereitet…"
+                "Modellkandidat erkannt. CPU- und Vulkan-Profile für den 1/2/4-Thread-A/B-Test werden vorbereitet…"
             }
         )
         _isBenchmarking.value = true
@@ -645,61 +645,76 @@ abstract class ConfigurationSmokeViewModel(
                         currentStep = 6,
                         message = "CPU-/Vulkan-Ausgaben, Finish-Grund und numerische Token-Parität werden geprüft…"
                     )
-                    val cpuSample = profileSamples["cpu-reference"]
-                    val vulkanSample = profileSamples["vulkan-candidate"]
-                    var numericGate: EngineDiagnostics.BackendCorrectnessResult? = null
-                    val pairedGateSummary = InferenceConfigSmokePlan.evaluatePairedGate(
-                        cpuSample?.outputGatePassed,
-                        vulkanSample?.outputGatePassed
-                    ) {
-                        EngineDiagnostics.evaluateCpuVulkanCorrectnessGate(
-                            getApplication<Application>(),
-                            requireNotNull(cpuSample).result.nativeRunId,
-                            requireNotNull(vulkanSample).result.nativeRunId
-                        ).also { numericGate = it }.status
+                    val threadCounts = profiles
+                        .filter { it.expectedBackend == "CPU" }
+                        .map { it.config.threads }
+                        .distinct()
+                        .sorted()
+                    val pairStatuses = mutableListOf<String>()
+                    for (threadCount in threadCounts) {
+                        val cpuSample = profileSamples["cpu-reference-t$threadCount"]
+                        val vulkanSample = profileSamples["vulkan-candidate-t$threadCount"]
+                        var numericGate: EngineDiagnostics.BackendCorrectnessResult? = null
+                        val pairedGateSummary = InferenceConfigSmokePlan.evaluatePairedGate(
+                            cpuSample?.outputGatePassed,
+                            vulkanSample?.outputGatePassed
+                        ) {
+                            EngineDiagnostics.evaluateCpuVulkanCorrectnessGate(
+                                getApplication<Application>(),
+                                requireNotNull(cpuSample).result.nativeRunId,
+                                requireNotNull(vulkanSample).result.nativeRunId
+                            ).also { numericGate = it }.status
+                        }
+                        val gate = numericGate ?: EngineDiagnostics.BackendCorrectnessResult(
+                            "UNAVAILABLE",
+                            "CPU_OR_VULKAN_RUN_MISSING"
+                        )
+                        pairStatuses += pairedGateSummary.combinedStatus
+                        val cpuOutputGateStatus = when (cpuSample?.outputGatePassed) {
+                            true -> "PASS"
+                            false -> "FAIL"
+                            null -> "UNAVAILABLE"
+                        }
+                        val vulkanOutputGateStatus = when (vulkanSample?.outputGatePassed) {
+                            true -> "PASS"
+                            false -> "FAIL"
+                            null -> "UNAVAILABLE"
+                        }
+                        val gateDetails = "profile=CPU_VULKAN_THREAD_SWEEP,threads=$threadCount,backend=Vulkan," +
+                            "gateRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable") +
+                            ",cpuReferenceRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
+                            ",status=" + gate.status +
+                            ",reason=" + gate.reason +
+                            ",comparedSteps=" + gate.comparedSteps +
+                            ",minimumTop5Overlap=" + gate.minimumTop5Overlap + "/5" +
+                            ",firstDivergenceStep=" + (gate.firstDivergenceStep ?: "n/a")
+                        EngineDiagnostics.info("benchmark", "CORRECTNESS_GATE_RESULT", gateDetails)
+                        EngineDiagnostics.info(
+                            "config_test",
+                            "CONFIG_SMOKE_RESULT",
+                            "profile=paired-gates,threads=$threadCount,outputGateStatus=" + pairedGateSummary.outputGateStatus +
+                                ",cpuOutputGateStatus=" + cpuOutputGateStatus +
+                                ",vulkanOutputGateStatus=" + vulkanOutputGateStatus +
+                                ",backendParityStatus=" + pairedGateSummary.backendParityStatus +
+                                ",status=" + pairedGateSummary.combinedStatus +
+                                ",cpuNativeRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
+                                ",vulkanNativeRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable")
+                        )
+                        rows += "Threads $threadCount · Ausgabe-/Finish-Gate: " + pairedGateSummary.outputGateStatus +
+                            " (CPU=" + cpuOutputGateStatus + ", Vulkan=" + vulkanOutputGateStatus + ")"
+                        rows += "Threads $threadCount · Numerisches CPU/Vulkan-Paritäts-Gate: " + gate.status +
+                            " (" + gate.reason + ", Schritte=" + gate.comparedSteps +
+                            ", min. Top-5-Überlappung=" + gate.minimumTop5Overlap + "/5)"
+                        rows += "Threads $threadCount · kombiniertes Gate: " + pairedGateSummary.combinedStatus
                     }
-                    pairedGateCombinedStatus = pairedGateSummary.combinedStatus
-                    val gate = numericGate ?: EngineDiagnostics.BackendCorrectnessResult(
-                        "UNAVAILABLE",
-                        "CPU_OR_VULKAN_RUN_MISSING"
-                    )
-                    val cpuOutputGateStatus = when (cpuSample?.outputGatePassed) {
-                        true -> "PASS"
-                        false -> "FAIL"
-                        null -> "UNAVAILABLE"
+                    pairedGateCombinedStatus = when {
+                        pairStatuses.isNotEmpty() && pairStatuses.all { it == "PASS" } -> "PASS"
+                        pairStatuses.any { it == "FAIL" } -> "FAIL"
+                        else -> "UNAVAILABLE"
                     }
-                    val vulkanOutputGateStatus = when (vulkanSample?.outputGatePassed) {
-                        true -> "PASS"
-                        false -> "FAIL"
-                        null -> "UNAVAILABLE"
-                    }
-                    val gateDetails = "profile=CPU_VULKAN_SMOKE,backend=Vulkan," +
-                        "gateRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable") +
-                        ",cpuReferenceRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
-                        ",status=" + gate.status +
-                        ",reason=" + gate.reason +
-                        ",comparedSteps=" + gate.comparedSteps +
-                        ",minimumTop5Overlap=" + gate.minimumTop5Overlap + "/5" +
-                        ",firstDivergenceStep=" + (gate.firstDivergenceStep ?: "n/a")
-                    EngineDiagnostics.info("benchmark", "CORRECTNESS_GATE_RESULT", gateDetails)
-                    EngineDiagnostics.info(
-                        "config_test",
-                        "CONFIG_SMOKE_RESULT",
-                        "profile=paired-gates,outputGateStatus=" + pairedGateSummary.outputGateStatus +
-                            ",cpuOutputGateStatus=" + cpuOutputGateStatus +
-                            ",vulkanOutputGateStatus=" + vulkanOutputGateStatus +
-                            ",backendParityStatus=" + pairedGateSummary.backendParityStatus +
-                            ",status=" + pairedGateSummary.combinedStatus +
-                            ",cpuNativeRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
-                            ",vulkanNativeRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable")
-                    )
-                    rows += "Ausgabe-/Finish-Gate: " + pairedGateSummary.outputGateStatus +
-                        " (CPU=" + cpuOutputGateStatus + ", Vulkan=" + vulkanOutputGateStatus + ")"
-                    rows += "Numerisches CPU/Vulkan-Paritäts-Gate: " + gate.status +
-                        " (" + gate.reason + ", Schritte=" + gate.comparedSteps +
-                        ", min. Top-5-Überlappung=" + gate.minimumTop5Overlap + "/5)"
-                    rows += "Kombiniertes CPU/Vulkan-Gesamtgate: " + pairedGateSummary.combinedStatus
-                    if (pairedGateSummary.combinedStatus != "PASS") {
+                    rows += "CPU-/Vulkan-Thread-Sweep Gesamtgate: " + pairedGateCombinedStatus +
+                        " (Threads=" + threadCounts.joinToString("/") + ")"
+                    if (pairedGateCombinedStatus != "PASS") {
                         rows += "Keine Performance-/Kernel-Konfiguration durch diesen Lauf freigegeben."
                     }
                 }
@@ -781,7 +796,7 @@ abstract class ConfigurationSmokeViewModel(
                         )
                     } else {
                         appendLine(
-                            "CPU-Referenz und Vulkan-Kandidat mit identischer Testeingabe und deterministischem Sampling; " +
+                            "CPU-Referenz und Vulkan-Kandidat werden paarweise mit 1, 2 und bis zu 4 Threads verglichen; " +
                                 InferenceConfigSmokePlan.MEASURED_TOKENS +
                                 " Token-Limit pro Lauf. GPU-Layer: CPU=0, Vulkan=99 angefordert."
                         )
