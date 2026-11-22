@@ -463,7 +463,7 @@ abstract class ConfigurationSmokeViewModel(
                         if (!outputGatePassed) {
                             val rejection = "profile=" + profile.id +
                                 ",outputTokens=" + sample.result.tokensGenerated +
-                                ",exactOutput=" + outputMatches +
+                                ",nonEmptyOutput=" + outputNonEmpty +
                                 ",finishReason=" + sample.result.finishReason.name
                             rows += "Korrektheits-Gate fehlgeschlagen: " + rejection
                             EngineDiagnostics.info("config_test", "CONFIG_SMOKE_OUTPUT_REJECTED", rejection)
