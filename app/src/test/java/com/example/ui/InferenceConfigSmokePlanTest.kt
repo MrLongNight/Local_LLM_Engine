@@ -105,7 +105,7 @@ class InferenceConfigSmokePlanTest {
         assertEquals(profiles[0].config, profiles[2].config)
         assertEquals(
             "D0 CPU profile must use the exact same EngineConfig as the paired runner's CPU profile",
-            InferenceConfigSmokePlan.create(base, recommendedThreads = 4).first().config,
+            InferenceConfigSmokePlan.create(base, recommendedThreads = 4).first { it.expectedBackend == "CPU" && it.config.threads == 4 }.config,
             profiles.first().config
         )
         assertEquals(BackendPreference.AUTO, base.backendPreference)
@@ -182,49 +182,57 @@ class InferenceConfigSmokePlanTest {
             recommendedThreads = 4
         )
 
-        assertEquals(2, profiles.size)
-        val cpu = profiles[0]
-        val vulkan = profiles[1]
-        assertEquals("cpu-reference", cpu.id)
-        assertEquals("CPU", cpu.expectedBackend)
-        assertEquals(BackendPreference.CPU, cpu.config.backendPreference)
-        assertEquals(0, cpu.config.gpuLayers)
-        assertEquals("vulkan-candidate", vulkan.id)
-        assertEquals("VULKAN", vulkan.expectedBackend)
-        assertEquals(BackendPreference.VULKAN, vulkan.config.backendPreference)
-        assertEquals(99, vulkan.config.gpuLayers)
-
-        assertEquals(256, cpu.config.contextSize)
-        assertEquals(cpu.config.contextSize, vulkan.config.contextSize)
-        assertEquals(128, cpu.config.batchSize)
-        assertEquals(cpu.config.batchSize, vulkan.config.batchSize)
-        assertEquals(64, cpu.config.microBatchSize)
-        assertEquals(cpu.config.microBatchSize, vulkan.config.microBatchSize)
-        assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(cpu.config, "CPU backend"))
-        assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(vulkan.config, "Vulkan selected"))
-        assertEquals(4, cpu.config.threads)
-        assertEquals(cpu.config.threads, vulkan.config.threads)
-        assertEquals(4, cpu.config.effectiveBatchThreads)
-        assertEquals(cpu.config.effectiveBatchThreads, vulkan.config.effectiveBatchThreads)
-        assertEquals(20, cpu.config.topK)
-        assertEquals(cpu.config.topK, vulkan.config.topK)
-        assertEquals(0.05f, cpu.config.minP, 0f)
-        assertEquals(cpu.config.minP, vulkan.config.minP, 0f)
-        assertEquals(0f, cpu.config.temperature, 0f)
-        assertEquals(cpu.config.temperature, vulkan.config.temperature, 0f)
-        assertEquals(1f, cpu.config.topP, 0f)
-        assertEquals(cpu.config.topP, vulkan.config.topP, 0f)
-        assertEquals(VulkanMatvecWorkgroup.AUTO, cpu.config.vulkanMatvecWorkgroup)
-        assertEquals(VulkanMatvecWorkgroup.AUTO, vulkan.config.vulkanMatvecWorkgroup)
-        assertEquals(FlashAttentionMode.AUTO, cpu.config.flashAttentionMode)
-        assertEquals(FlashAttentionMode.AUTO, vulkan.config.flashAttentionMode)
-        assertEquals(GdnPolicy.ARCH_DEFAULT, cpu.config.gdnPolicy)
-        assertEquals(GdnPolicy.ARCH_DEFAULT, vulkan.config.gdnPolicy)
-        assertEquals(false, cpu.config.memoryGuardOverride)
-        assertEquals(false, vulkan.config.memoryGuardOverride)
+        assertEquals(6, profiles.size)
+        assertEquals(
+            listOf(
+                "cpu-reference-t1", "vulkan-candidate-t1",
+                "cpu-reference-t2", "vulkan-candidate-t2",
+                "cpu-reference-t4", "vulkan-candidate-t4"
+            ),
+            profiles.map { it.id }
+        )
+        assertTrue(profiles.filterIndexed { index, _ -> index % 2 == 0 }.all {
+            it.expectedBackend == "CPU" && it.config.backendPreference == BackendPreference.CPU && it.config.gpuLayers == 0
+        })
+        assertTrue(profiles.filterIndexed { index, _ -> index % 2 == 1 }.all {
+            it.expectedBackend == "VULKAN" && it.config.backendPreference == BackendPreference.VULKAN && it.config.gpuLayers == 99
+        })
+        profiles.chunked(2).forEach { pair ->
+            val cpu = pair[0]
+            val vulkan = pair[1]
+            assertEquals(cpu.config.threads, vulkan.config.threads)
+            assertEquals(cpu.config.effectiveBatchThreads, vulkan.config.effectiveBatchThreads)
+            assertEquals(256, cpu.config.contextSize)
+            assertEquals(cpu.config.contextSize, vulkan.config.contextSize)
+            assertEquals(128, cpu.config.batchSize)
+            assertEquals(cpu.config.batchSize, vulkan.config.batchSize)
+            assertEquals(64, cpu.config.microBatchSize)
+            assertEquals(cpu.config.microBatchSize, vulkan.config.microBatchSize)
+            assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(cpu.config, "CPU backend"))
+            assertEquals(64, InferenceConfigSmokePlan.resolvedUbatchForTest(vulkan.config, "Vulkan selected"))
+            assertEquals(20, cpu.config.topK)
+            assertEquals(cpu.config.topK, vulkan.config.topK)
+            assertEquals(0.05f, cpu.config.minP, 0f)
+            assertEquals(cpu.config.minP, vulkan.config.minP, 0f)
+            assertEquals(0f, cpu.config.temperature, 0f)
+            assertEquals(cpu.config.temperature, vulkan.config.temperature, 0f)
+            assertEquals(1f, cpu.config.topP, 0f)
+            assertEquals(cpu.config.topP, vulkan.config.topP, 0f)
+            assertEquals(VulkanMatvecWorkgroup.AUTO, cpu.config.vulkanMatvecWorkgroup)
+            assertEquals(VulkanMatvecWorkgroup.AUTO, vulkan.config.vulkanMatvecWorkgroup)
+            assertEquals(FlashAttentionMode.AUTO, cpu.config.flashAttentionMode)
+            assertEquals(FlashAttentionMode.AUTO, vulkan.config.flashAttentionMode)
+            assertEquals(GdnPolicy.ARCH_DEFAULT, cpu.config.gdnPolicy)
+            assertEquals(GdnPolicy.ARCH_DEFAULT, vulkan.config.gdnPolicy)
+            assertEquals(false, cpu.config.memoryGuardOverride)
+            assertEquals(false, vulkan.config.memoryGuardOverride)
+            assertEquals(InferenceConfigSmokePlan.MEASURED_TOKENS, cpu.config.maxPredictTokens)
+            assertEquals(cpu.config.maxPredictTokens, vulkan.config.maxPredictTokens)
+        }
+        assertEquals(1, profiles[0].config.threads)
+        assertEquals(2, profiles[2].config.threads)
+        assertEquals(4, profiles[4].config.threads)
         assertEquals(96, InferenceConfigSmokePlan.MEASURED_TOKENS)
-        assertEquals(InferenceConfigSmokePlan.MEASURED_TOKENS, cpu.config.maxPredictTokens)
-        assertEquals(cpu.config.maxPredictTokens, vulkan.config.maxPredictTokens)
         // The user's prior settings are not mutated by construction of the smoke profiles.
         assertEquals(2048, base.contextSize)
         assertEquals(512, base.batchSize)
@@ -245,15 +253,15 @@ class InferenceConfigSmokePlanTest {
 
         assertTrue(d0Profiles.all { it.config.threads == 4 })
         assertTrue(d0Profiles.all { it.config.effectiveBatchThreads == 4 })
-        assertEquals(4, pairedProfiles[0].config.threads)
-        assertEquals(4, pairedProfiles[1].config.threads)
-        assertEquals(4, pairedProfiles[0].config.effectiveBatchThreads)
-        assertEquals(4, pairedProfiles[1].config.effectiveBatchThreads)
-        assertEquals(d0Profiles.first().config, pairedProfiles.first().config)
+        assertEquals(listOf(1, 2, 4), pairedProfiles.filterIndexed { index, _ -> index % 2 == 0 }.map { it.config.threads })
+        assertEquals(listOf(1, 2, 4), pairedProfiles.filterIndexed { index, _ -> index % 2 == 1 }.map { it.config.threads })
+        assertTrue(pairedProfiles.all { it.config.threads == it.config.effectiveBatchThreads })
+        assertEquals(listOf(1, 2, 4), pairedProfiles.map { it.config.effectiveBatchThreads }.distinct())
+        assertEquals(d0Profiles.first().config, pairedProfiles.first { it.expectedBackend == "CPU" && it.config.threads == 4 }.config)
 
         val twoThreadRecommendation = InferenceConfigSmokePlan.create(base, recommendedThreads = 2)
-        assertEquals(2, twoThreadRecommendation[0].config.threads)
-        assertEquals(2, twoThreadRecommendation[1].config.threads)
+        assertEquals(listOf(1, 2), twoThreadRecommendation.filterIndexed { index, _ -> index % 2 == 0 }.map { it.config.threads })
+        assertEquals(listOf(1, 2), twoThreadRecommendation.filterIndexed { index, _ -> index % 2 == 1 }.map { it.config.threads })
     }
 
     @Test

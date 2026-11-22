@@ -142,23 +142,32 @@ internal object InferenceConfigSmokePlan {
         }
     }
 
-    /** Paired runner reserved for D1a and explicitly requested CPU/Vulkan comparisons. */
+    /**
+     * Paired CPU/Vulkan thread sweep for D1a. Each pair uses identical model,
+     * context, batch, UBatch and sampling; only backend and the tested thread
+     * count differ between pairs. The Vulkan candidates explicitly exercise
+     * the requested host thread count instead of silently capping it.
+     */
     fun create(base: EngineConfig, recommendedThreads: Int): List<Profile> {
-        val common = fixedSmokeConfig(base, recommendedThreads)
-        return listOf(
-            Profile(
-                id = "cpu-reference",
-                label = "CPU · Referenz",
-                expectedBackend = "CPU",
-                config = common.copy(backendPreference = BackendPreference.CPU, gpuLayers = 0)
-            ),
-            Profile(
-                id = "vulkan-candidate",
-                label = "Vulkan · Kandidat",
-                expectedBackend = "VULKAN",
-                config = common.copy(backendPreference = BackendPreference.VULKAN, gpuLayers = 99)
+        val maxThreads = recommendedThreads.coerceAtLeast(1).coerceAtMost(6)
+        val threadCounts = listOf(1, 2, maxThreads).distinct().sorted()
+        return threadCounts.flatMap { threadCount ->
+            val common = fixedSmokeConfig(base, threadCount)
+            listOf(
+                Profile(
+                    id = "cpu-reference-t$threadCount",
+                    label = "CPU · Referenz · $threadCount Threads",
+                    expectedBackend = "CPU",
+                    config = common.copy(backendPreference = BackendPreference.CPU, gpuLayers = 0)
+                ),
+                Profile(
+                    id = "vulkan-candidate-t$threadCount",
+                    label = "Vulkan · Kandidat · $threadCount Threads",
+                    expectedBackend = "VULKAN",
+                    config = common.copy(backendPreference = BackendPreference.VULKAN, gpuLayers = 99)
+                )
             )
-        )
+        }
     }
 
     private fun fixedSmokeConfig(base: EngineConfig, recommendedThreads: Int): EngineConfig {

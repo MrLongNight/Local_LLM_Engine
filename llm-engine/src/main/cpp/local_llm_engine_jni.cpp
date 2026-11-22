@@ -1719,15 +1719,11 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     descriptor_stream = nullptr; // EngineInstance owns the duplicate until model unload.
     report_model_load_stage(&progress_context, 0.72f); // weights complete; context setup begins
 
-    int n_threads = threads > 0 ? threads : recommended_performance_core_count();
-    // Keep host submission threads low while layers are offloaded to Vulkan.
-    if (use_vulkan && model_params.n_gpu_layers > 0) {
-        const int capped_threads = std::clamp(n_threads, 1, 2);
-        if (capped_threads != n_threads) {
-            LOGI("Vulkan host threads capped for offload: requested=%d,selected=%d", n_threads, capped_threads);
-        }
-        n_threads = capped_threads;
-    }
+    // Respect the caller's measured thread choice for both CPU and Vulkan.
+    // Vulkan host-thread count is a benchmark dimension, not a universal 1..2
+    // policy: hybrid models may execute substantial work on the CPU even when
+    // most transformer layers are offloaded.
+    const int n_threads = threads > 0 ? threads : recommended_performance_core_count();
     engine->n_threads = n_threads;
 
     // Dynamic context size resolution:
@@ -1743,10 +1739,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
 
     int b_size = batch_size > 0 ? batch_size : BATCH_SIZE;
     engine->batch_size = b_size;
-    int resolved_batch_threads = batch_threads > 0 ? batch_threads : n_threads;
-    if (use_vulkan && model_params.n_gpu_layers > 0) {
-        resolved_batch_threads = std::clamp(resolved_batch_threads, 1, 2);
-    }
+    const int resolved_batch_threads = batch_threads > 0 ? batch_threads : n_threads;
     // Default Vulkan ubatch is bounded for finer progress/cancel granularity.
     // Explicit values always win, enabling a controlled 32/64/128 sweep.
     const int resolved_micro_batch = micro_batch_size > 0
@@ -1754,6 +1747,8 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         : (use_vulkan ? std::min(64, b_size) : b_size);
     engine->n_threads_batch = resolved_batch_threads;
     engine->micro_batch_size = resolved_micro_batch;
+    LOGI("Thread policy: backend=%s,requestedThreads=%d,effectiveThreads=%d,requestedBatchThreads=%d,effectiveBatchThreads=%d",
+         use_vulkan ? "VULKAN" : "CPU", threads, n_threads, batch_threads, resolved_batch_threads);
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = ctx_size;
