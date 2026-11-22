@@ -97,7 +97,7 @@ internal fun BackendAcceptanceTestSection(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "D0 führt drei CPU-only-Läufe mit dem aktuell geladenen GGUF aus (GPU-Layer=0, Vulkan wird nicht gestartet). Name, Architektur, Parameterzahl und Quantisierung sind keine Startbedingung. D0 und der Paarvergleich verwenden dieselbe Modellquelle und denselben Engine-Ladepfad; D0 verwendet dieselbe CPU-Profilkonfiguration wie der CPU-Teil des Paarvergleichs. Eine SHA ist keine Startbedingung. Der zweite Test bleibt ein separater CPU/Vulkan-Kandidatenvergleich.",
+                text = "D0 führt drei CPU-only-Läufe mit dem aktuell geladenen GGUF aus (GPU-Layer=0, Vulkan wird nicht gestartet). Name, Architektur, Parameterzahl und Quantisierung sind keine Startbedingung. D0 und der Paarvergleich verwenden dieselbe Modellquelle und denselben Engine-Ladepfad; D0 verwendet die CPU-Konfiguration mit der empfohlenen Kernzahl. Eine SHA ist keine Startbedingung. Der zweite Test vergleicht CPU und Vulkan paarweise mit 1, 2 und der empfohlenen Thread-Anzahl (max. 6); alle übrigen Inferenzparameter bleiben pro Paar identisch.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -134,7 +134,7 @@ internal fun BackendAcceptanceTestSection(
                     when {
                         isConfigSmokeTesting -> "D0-Test läuft…"
                         blockReason != null -> "Vergleich derzeit nicht startbar"
-                        else -> "Separaten CPU/Vulkan-Kandidatenvergleich starten"
+                        else -> "CPU/Vulkan-Thread-A/B-Test (1/2/empfohlen) starten"
                     }
                 )
             }
