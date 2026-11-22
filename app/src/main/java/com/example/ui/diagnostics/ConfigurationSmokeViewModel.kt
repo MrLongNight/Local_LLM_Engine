@@ -138,7 +138,7 @@ abstract class ConfigurationSmokeViewModel(
             message = if (requireD0Reference) {
                 "Prüfe die geladene Modellquelle und Dateigröße für drei CPU-Läufe…"
             } else {
-                "Bereite CPU-/Vulkan-Vergleiche mit 1, 2 und bis zu 4 Threads vor…"
+                "Bereite CPU-/Vulkan-Vergleiche mit 1, 2 und die empfohlene Thread-Anzahl (max. 6 Threads) vor…"
             }
         )
         val modelAssessment = InferenceConfigSmokePlan.assessD0ModelSource(model)
@@ -195,7 +195,7 @@ abstract class ConfigurationSmokeViewModel(
             message = if (requireD0Reference) {
                 "Modellquelle und Dateigröße bestätigt. Drei CPU-only-Läufe werden vorbereitet; eine vorhandene SHA wird ebenfalls geprüft."
             } else {
-                "Modellkandidat erkannt. CPU- und Vulkan-Profile für den 1/2/4-Thread-A/B-Test werden vorbereitet…"
+                "Modellkandidat erkannt. CPU- und Vulkan-Profile für den 1/2/empfohlenen-Thread-A/B-Test werden vorbereitet…"
             }
         )
         _isBenchmarking.value = true
@@ -800,7 +800,7 @@ abstract class ConfigurationSmokeViewModel(
                         )
                     } else {
                         appendLine(
-                            "CPU-Referenz und Vulkan-Kandidat werden paarweise mit 1, 2 und bis zu 4 Threads verglichen; " +
+                            "CPU-Referenz und Vulkan-Kandidat werden paarweise mit 1, 2 und die empfohlene Thread-Anzahl (max. 6 Threads) verglichen; " +
                                 InferenceConfigSmokePlan.MEASURED_TOKENS +
                                 " Token-Limit pro Lauf. GPU-Layer: CPU=0, Vulkan=99 angefordert."
                         )
