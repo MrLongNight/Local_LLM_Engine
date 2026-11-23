@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
+import com.mydocanizer.llm.engine.EngineDiagnostics
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
 import java.io.File
@@ -88,7 +89,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             awaitSnapshot(serviceLog, servicePid, "MODEL_LOAD_FAILED")
 
             val snapshots = serviceLog.readLines().filter { it.contains("[memory] RESOURCE_SNAPSHOT - ") }
-            assertTrue("At least eight lifecycle snapshots must be persisted; found ${snapshots.size}", snapshots.size >= 9)
+            assertTrue("At least nine lifecycle snapshots must be persisted; found ${snapshots.size}", snapshots.size >= 9)
 
             val expectedPhases = listOf(
                 "MODEL_LOADING",
@@ -136,6 +137,12 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "Open file-descriptor counts must be numeric across lifecycle phases: $fdTimeline",
                 fdTimeline.size >= 9
             )
+
+            val report = EngineDiagnostics.buildCompactReportForTest(serviceLog.readLines())
+            listOf("nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=", "openFDs=", "threads=")
+                .forEach { field ->
+                    assertTrue("Exported memory timeline must retain $field", report.contains(field))
+                }
         } finally {
             client.close()
             modelFile.delete()
