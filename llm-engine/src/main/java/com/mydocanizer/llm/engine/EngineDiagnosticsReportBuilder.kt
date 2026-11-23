@@ -1042,6 +1042,12 @@ internal object EngineDiagnosticsReportBuilder {
                 val values = listOf(
                     "pss=${sample.pssMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     "nativeHeap=${sample.nativeHeapMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
+                    field(sample.line, "nativeHeapFreeMb")?.let { "nativeHeapFree=${it}MB" },
+                    field(sample.line, "nativeHeapSizeMb")?.let { "nativeHeapSize=${it}MB" },
+                    field(sample.line, "processVmRssMb")?.let { "VmRSS=${it}MB" },
+                    field(sample.line, "processVmHwmMb")?.let { "VmHWM=${it}MB" },
+                    field(sample.line, "openFdCount")?.let { "openFDs=$it" },
+                    field(sample.line, "processThreads")?.let { "threads=$it" },
                     "availRAM=${sample.availableRamMb?.let { "%.1f".format(Locale.US, it) } ?: "n/a"}MB",
                     sample.thermalStatus?.let { "thermal=$it" },
                     field(sample.line, "contextTokens")?.let { "ctx=$it" },
