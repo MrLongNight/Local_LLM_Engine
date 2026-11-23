@@ -202,17 +202,18 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
         phase: String,
         afterLineCount: Int
     ): Int = withTimeout(10_000L) {
-        while (true) {
+        var observedLineCount: Int? = null
+        while (observedLineCount == null) {
             val lines = if (logFile.isFile) logFile.readLines(Charsets.UTF_8) else emptyList()
             if (lines.drop(afterLineCount).any { line ->
                     line.contains("[memory] RESOURCE_SNAPSHOT - pid=$pid,phase=$phase,")
                 }
             ) {
-                return@withTimeout lines.size
+                observedLineCount = lines.size
+            } else {
+                delay(50L)
             }
-            delay(50L)
         }
-        @Suppress("UNREACHABLE_CODE")
-        afterLineCount
+        observedLineCount
     }
 }
