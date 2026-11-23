@@ -159,8 +159,8 @@ class GrammarConstraintTest : InferenceServiceProcessTestBase() {
 root ::= "{" ws "\"_reasoning\"" ws ":" ws string "," ws "\"absender\"" ws ":" ws opt_string "," ws "\"dokumententyp\"" ws ":" ws opt_string "," ws "\"match_keywords\"" ws ":" ws string_array "," ws "\"kategorie_vorschlag\"" ws ":" ws opt_string "}" ws
 opt_string ::= string | "null"
 string_array ::= "[" ws (string ("," ws string)*)? ws "]"
-string ::= "\"" ([^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
-ws ::= [ \t\n\r]*
+string ::= "\"" ([^"\\\x7F\x00-\x1F] | "\\" (["\\bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
+ws ::= | " " | "\n" [ \t]{0,20}
 """
 
         const val DMS_JSON_GBNF = """
@@ -170,8 +170,8 @@ string_array ::= "[" ws (string ("," ws string)*)? ws "]"
 object ::= "{" ws (pair ("," ws pair)*)? ws "}"
 pair ::= string ws ":" ws (string | number | "true" | "false" | "null")
 number ::= "-"? [0-9]+ ("." [0-9]+)?
-string ::= "\"" ([^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
-ws ::= [ \t\n\r]*
+string ::= "\"" ([^"\\\x7F\x00-\x1F] | "\\" (["\\bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
+ws ::= | " " | "\n" [ \t]{0,20}
 """
     }
 
