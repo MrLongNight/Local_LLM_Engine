@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### 23.11.2026 — Emulator-Regressionen #726/#727
+
+- Beide Android-APK-Runs #726 (Run `45268309664`, SHA `7fb2a0d`) und #727 (Run `45269066910`, SHA `15ce396`) sind nach erfolgreicher Unit-Test-Gate-Prüfung und erfolgreicher APK-/Native-Kompilierung in `:llm-engine:connectedDebugAndroidTest` fehlgeschlagen. In beiden Runs scheiterten dieselben 2 von 19 Tests.
+- `GrammarConstraintTest`: `TRIAGE_JSON_GBNF` wird vom gepinnten llama.cpp-Parser abgelehnt. Ursache: GBNF-Escapes waren in Kotlin-Raw-Strings nochmals doppelt/dreifach escaped. Die Grammatik-Fixtures werden auf die tatsächlichen Parser-Escapes zurückgeführt; die Whitespace-Regel wird vereinfacht.
+- `ResourceLifecycleDiagnosticsTest`: 10-s-Timeout beim Warten auf Lifecycle-Logs. Ursache: Testmatcher entsprachen nicht dem realen Format aus `EngineDiagnosticsStorage` (`[tag] EVENT: details`); sie erwarteten einen Bindestrich oder ließen das Leerzeichen nach dem Doppelpunkt aus. Die Matcher werden an das tatsächlich persistierte Logformat angepasst.
+- Diese Korrekturen sind noch nicht als bestanden verifiziert. TODOs P0-09b und P1-02c bleiben offen, bis ein neuer Android-Emulatorlauf alle 19 Tests erfolgreich ausführt. Unit-Test-Erfolg allein ist keine Android-Abnahme.
+
+
 ### 23.11.2026 — Ressourcenlebenszyklus und Build-Verifikation
 
 - Native Unload-Freigabe ergänzt: Token-/Chat-Vektoren, Strings und Diagnosepuffer geben ihre Kapazität explizit frei; Stream-Zustand und Laufflags werden zurückgesetzt.

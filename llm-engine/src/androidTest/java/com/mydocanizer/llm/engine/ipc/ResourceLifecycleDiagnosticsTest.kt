@@ -188,7 +188,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             )
 
             val nativeStateLines = testLines
-                .filter { it.contains("[native] NATIVE_MODEL_RESOURCE_STATE - ") }
+                .filter { it.contains("[native] NATIVE_MODEL_RESOURCE_STATE: ") }
             val loadedNativeState = nativeStateLines.firstOrNull {
                 it.contains("stage=AFTER_LOAD_ATTEMPT,resultCode=0,")
             } ?: throw AssertionError("Native state after successful load was not recorded")
@@ -312,7 +312,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
     private suspend fun awaitNativeState(logFile: File, stage: String) {
         withTimeout(10_000L) {
             while (!logFile.isFile || logFile.readLines(Charsets.UTF_8).none { line ->
-                    line.contains("[native] NATIVE_MODEL_RESOURCE_STATE - stage=$stage,")
+                    line.contains("[native] NATIVE_MODEL_RESOURCE_STATE: stage=$stage,")
                 }
             ) {
                 delay(50L)
