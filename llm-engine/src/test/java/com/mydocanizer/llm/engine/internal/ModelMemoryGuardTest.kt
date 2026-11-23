@@ -38,6 +38,46 @@ class ModelMemoryGuardTest {
     }
 
     @Test
+    fun rejectsCpuLoadWhenMinimumContextEstimateExceedsAvailableRam() {
+        val modelBytes = 2_000L * mib
+        try {
+            ModelMemoryGuard.plan(
+                modelBytes = modelBytes,
+                requestedContextTokens = 2048,
+                availableBytes = 1_500L * mib,
+                totalBytes = 8_192L * mib,
+                requireAvailableMemory = true
+            )
+            throw AssertionError("CPU load must fail fast instead of risking a process kill")
+        } catch (expected: InsufficientAvailableModelMemoryException) {
+            assertEquals(
+                InsufficientAvailableModelMemoryException.REASON_CPU_AVAILABLE_RAM_LIMIT,
+                expected.reasonCode
+            )
+            assertEquals(ModelMemoryGuard.MIN_CONTEXT_TOKENS, expected.effectiveContextTokens)
+            assertTrue(expected.requiredBytes > expected.availableBytes)
+            assertTrue(expected.message.orEmpty().startsWith(ModelMemoryGuard.OVERRIDE_REQUIRED_MARKER))
+            assertTrue(expected.diagnosticDetails().contains("reason=CPU_AVAILABLE_RAM_LIMIT"))
+        }
+    }
+
+    @Test
+    fun explicitOverrideCanProceedDespiteStrictCpuAvailableRamLimit() {
+        val plan = ModelMemoryGuard.plan(
+            modelBytes = 2_000L * mib,
+            requestedContextTokens = 2048,
+            availableBytes = 1_500L * mib,
+            totalBytes = 8_192L * mib,
+            allowHardLimitOverride = true,
+            requireAvailableMemory = true
+        )
+        assertTrue(plan.availableLimitExceeded)
+        assertTrue(plan.availableLimitOverrideApplied)
+        assertTrue(plan.pressureWarning)
+        assertEquals(ModelMemoryGuard.MIN_CONTEXT_TOKENS, plan.effectiveContextTokens)
+    }
+
+    @Test
     fun lowMemorySignalAloneNeverBlocksModelLoad() {
         val plan = ModelMemoryGuard.plan(1_000L * mib, 256, 4_000L * mib, 8_000L * mib, lowMemory = true)
         assertEquals(256, plan.effectiveContextTokens)
