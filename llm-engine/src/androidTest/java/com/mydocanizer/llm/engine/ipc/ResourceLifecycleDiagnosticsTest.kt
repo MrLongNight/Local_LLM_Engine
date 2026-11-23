@@ -222,8 +222,17 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "samplerPresent=0",
                 "backendSamplerAttached=0",
                 "modelFileStreamOpen=0",
+                "chatTemplatesPresent=0",
+                "cachedPromptIdentityPresent=0",
                 "cachedTokens=0",
+                "cachedTokenChars=0",
                 "chatMessages=0",
+                "currentPosition=0",
+                "systemPromptPosition=0",
+                "stopGenerationPosition=0",
+                "inferenceRunIdPresent=0",
+                "cancelRequested=0",
+                "generationFinished=0",
                 "activeBackend=None"
             ).forEach { field ->
                 assertTrue("Native unload must release $field: $unloadedNativeState", unloadedNativeState.contains(field))
