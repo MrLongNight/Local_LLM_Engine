@@ -288,6 +288,24 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 procStatus["VmHWM"]?.substringBefore(' ')?.toLongOrNull()?.let {
                     append(",processVmHwmMb=${mb(it * 1024L)}")
                 }
+                procStatus["RssAnon"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processRssAnonMb=${mb(it * 1024L)}")
+                }
+                procStatus["RssFile"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processRssFileMb=${mb(it * 1024L)}")
+                }
+                procStatus["RssShmem"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processRssShmemMb=${mb(it * 1024L)}")
+                }
+                procStatus["VmSwap"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processVmSwapMb=${mb(it * 1024L)}")
+                }
+                procStatus["VmData"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processVmDataMb=${mb(it * 1024L)}")
+                }
+                procStatus["VmSize"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processVmSizeMb=${mb(it * 1024L)}")
+                }
                 procStatus["Threads"]?.toIntOrNull()?.let { append(",processThreads=$it") }
                 append(",openFdCount=${openFdCount ?: "unknown"}")
                 append(",javaHeapUsedMb=${mb(javaUsedBytes)}")
