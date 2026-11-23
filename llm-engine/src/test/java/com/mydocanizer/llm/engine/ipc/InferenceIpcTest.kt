@@ -1408,7 +1408,7 @@ class InferenceIpcTest {
             hangAfterStartedBeforeToken.set(true)
         }
         val timeoutConfig = TimeoutConfig.fast(
-            prefillMs = 500L,
+            prefillMs = 50L,
             firstTokenMs = 100L,
             interTokenMs = 500L,
             totalInferenceMs = 1_500L
