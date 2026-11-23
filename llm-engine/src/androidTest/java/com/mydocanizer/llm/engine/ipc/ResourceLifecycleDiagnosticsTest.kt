@@ -210,15 +210,15 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             )
             val cachedTokenCapacity = Regex("cachedTokensCapacity=(\\d+)")
                 .find(inferencePrefillState)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val promptSignatureCapacity = Regex("cachedPromptPromptSignatureCapacity=(\\d+)")
+            val promptSignatureSize = Regex("cachedPromptPromptSignatureSize=(\\d+)")
                 .find(inferencePrefillState)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             assertTrue(
                 "Native KV token vector must own capacity while the model is loaded",
                 cachedTokenCapacity > 0
             )
             assertTrue(
-                "Prompt identity signature must be allocated during inference",
-                promptSignatureCapacity > 0
+                "Prompt identity signature must be populated during inference",
+                promptSignatureSize > 0
             )
 
             val inferenceFinishedState = nativeStateLines.firstOrNull {
@@ -242,17 +242,16 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "modelFileStreamOpen=0",
                 "chatTemplatesPresent=0",
                 "cachedPromptIdentityPresent=0",
-                "cachedPromptModelSignatureCapacity=0",
-                "cachedPromptPromptSignatureCapacity=0",
-                "cachedPromptSamplerSignatureCapacity=0",
-                "cachedPromptContextSignatureCapacity=0",
+                "cachedPromptModelSignatureSize=0",
+                "cachedPromptPromptSignatureSize=0",
+                "cachedPromptSamplerSignatureSize=0",
+                "cachedPromptContextSignatureSize=0",
                 "cachedTokens=0",
                 "cachedTokensCapacity=0",
                 "cachedTokenChars=0",
-                "cachedTokenCharsCapacity=0",
                 "chatMessages=0",
                 "chatMessagesCapacity=0",
-                "inferenceRunIdCapacity=0",
+                "inferenceRunIdSize=0",
                 "currentPosition=0",
                 "systemPromptPosition=0",
                 "stopGenerationPosition=0",
@@ -262,6 +261,22 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "activeBackend=None"
             ).forEach { field ->
                 assertTrue("Native unload must release $field: $unloadedNativeState", unloadedNativeState.contains(field))
+            }
+            listOf(
+                "cachedPromptModelSignatureCapacity",
+                "cachedPromptPromptSignatureCapacity",
+                "cachedPromptSamplerSignatureCapacity",
+                "cachedPromptContextSignatureCapacity",
+                "cachedTokenCharsCapacity",
+                "inferenceRunIdCapacity"
+            ).forEach { field ->
+                val capacity = Regex("$field=(\\d+)")
+                    .find(unloadedNativeState)?.groupValues?.get(1)?.toIntOrNull()
+                    ?: throw AssertionError("Missing $field in native unload state: $unloadedNativeState")
+                assertTrue(
+                    "Unloaded string capacity should be at most the small-string buffer: $field=$capacity",
+                    capacity <= 32
+                )
             }
 
             val failedNativeState = nativeStateLines.lastOrNull {
