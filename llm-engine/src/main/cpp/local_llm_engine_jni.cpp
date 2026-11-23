@@ -3039,8 +3039,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetEngineResou
           << ",samplerPresent=" << (engine->sampler != nullptr ? 1 : 0)
           << ",backendSamplerAttached=" << (engine->backend_sampler_attached ? 1 : 0)
           << ",modelFileStreamOpen=" << (engine->model_file_stream != nullptr ? 1 : 0)
+          << ",chatTemplatesPresent=" << (engine->chat_templates != nullptr ? 1 : 0)
+          << ",cachedPromptIdentityPresent=" << (engine->has_cached_prompt_identity ? 1 : 0)
           << ",cachedTokens=" << engine->cached_tokens.size()
+          << ",cachedTokenChars=" << engine->cached_token_chars.size()
           << ",chatMessages=" << engine->chat_msgs.size()
+          << ",currentPosition=" << engine->current_position
+          << ",systemPromptPosition=" << engine->system_prompt_position
+          << ",stopGenerationPosition=" << engine->stop_generation_position
+          << ",inferenceRunIdPresent=" << (!engine->inference_run_id.empty() ? 1 : 0)
+          << ",cancelRequested=" << (engine->cancel_requested.load(std::memory_order_relaxed) ? 1 : 0)
+          << ",generationFinished=" << (engine->generation_finished ? 1 : 0)
           << ",modelGeneration=" << engine->model_generation
           << ",activeBackend=" << engine->active_backend;
     const std::string result = state.str();
