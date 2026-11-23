@@ -17,7 +17,8 @@ data class InferenceRequest(
     val temperature: Float? = null,
     val topP: Float? = null,
     val timeoutConfig: TimeoutConfig? = null,
-    val enableThinking: Boolean = false
+    val enableThinking: Boolean = false,
+    val grammar: String? = null
 ) : Parcelable {
     init {
         require(messages.isNotEmpty()) { "InferenceRequest messages must not be empty" }
@@ -27,6 +28,9 @@ data class InferenceRequest(
         }
         require(topP == null || (topP.isFinite() && topP in 0f..1f)) {
             "topP must be finite and between 0 and 1"
+        }
+        require(grammar == null || grammar.length <= MAX_GRAMMAR_LENGTH_CHARS) {
+            "grammar must not exceed $MAX_GRAMMAR_LENGTH_CHARS characters"
         }
     }
 
@@ -41,9 +45,9 @@ data class InferenceRequest(
             @Suppress("DEPRECATION")
             parcel.readParcelable(TimeoutConfig::class.java.classLoader)
         },
-        // Appended after the original request parcel layout. Older callers did not
-        // write this field, so default to non-thinking mode when no bytes remain.
-        enableThinking = parcel.dataAvail() >= Int.SIZE_BYTES && parcel.readInt() != 0
+        // Appended fields preserve compatibility with older Parcel writers.
+        enableThinking = parcel.dataAvail() >= Int.SIZE_BYTES && parcel.readInt() != 0,
+        grammar = if (parcel.dataAvail() > 0) parcel.readString() else null
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -63,11 +67,14 @@ data class InferenceRequest(
         }
         parcel.writeParcelable(timeoutConfig, flags)
         parcel.writeInt(if (enableThinking) 1 else 0)
+        parcel.writeString(grammar)
     }
 
     override fun describeContents(): Int = 0
 
     companion object {
+        private const val MAX_GRAMMAR_LENGTH_CHARS = 64 * 1024
+
         @JvmField
         val CREATOR: Parcelable.Creator<InferenceRequest> = object : Parcelable.Creator<InferenceRequest> {
             override fun createFromParcel(parcel: Parcel): InferenceRequest = InferenceRequest(parcel)
@@ -78,14 +85,20 @@ data class InferenceRequest(
             userPrompt: String,
             systemPrompt: String? = null,
             maxPredictTokens: Int = 1024,
-            enableThinking: Boolean = false
+            enableThinking: Boolean = false,
+            grammar: String? = null
         ): InferenceRequest {
             val list = mutableListOf<ChatMessage>()
             if (!systemPrompt.isNullOrBlank()) {
                 list.add(ChatMessage.system(systemPrompt))
             }
             list.add(ChatMessage.user(userPrompt))
-            return InferenceRequest(list, maxPredictTokens, enableThinking = enableThinking)
+            return InferenceRequest(
+                list,
+                maxPredictTokens,
+                enableThinking = enableThinking,
+                grammar = grammar
+            )
         }
     }
 }
