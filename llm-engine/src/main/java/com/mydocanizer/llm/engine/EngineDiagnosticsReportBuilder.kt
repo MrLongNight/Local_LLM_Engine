@@ -257,8 +257,17 @@ internal object EngineDiagnosticsReportBuilder {
         "samplerPresent",
         "backendSamplerAttached",
         "modelFileStreamOpen",
+        "chatTemplatesPresent",
+        "cachedPromptIdentityPresent",
         "cachedTokens",
+        "cachedTokenChars",
         "chatMessages",
+        "currentPosition",
+        "systemPromptPosition",
+        "stopGenerationPosition",
+        "inferenceRunIdPresent",
+        "cancelRequested",
+        "generationFinished",
         "modelGeneration",
         "activeBackend"
     )
