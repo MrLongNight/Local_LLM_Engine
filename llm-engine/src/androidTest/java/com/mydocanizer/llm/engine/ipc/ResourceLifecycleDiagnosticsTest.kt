@@ -125,7 +125,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             )
 
             val testLines = serviceLog.readLines().drop(initialLineCount)
-            val snapshots = testLines.filter { it.contains("[memory] RESOURCE_SNAPSHOT - ") }
+            val snapshots = testLines.filter { it.contains("[memory] RESOURCE_SNAPSHOT:") }
             assertTrue("At least nine lifecycle snapshots must be persisted; found ${snapshots.size}", snapshots.size >= 9)
 
             val expectedPhases = listOf(
@@ -330,7 +330,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
         while (observedLineCount == null) {
             val lines = if (logFile.isFile) logFile.readLines(Charsets.UTF_8) else emptyList()
             if (lines.drop(afterLineCount).any { line ->
-                    line.contains("[memory] RESOURCE_SNAPSHOT - pid=$pid,phase=$phase,")
+                    line.contains("[memory] RESOURCE_SNAPSHOT:pid=$pid,phase=$phase,")
                 }
             ) {
                 observedLineCount = lines.size
