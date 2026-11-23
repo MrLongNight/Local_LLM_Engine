@@ -2997,6 +2997,36 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeCancel(
     return;
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetEngineResourceDiagnostics(
+        JNIEnv* env,
+        jclass /*clazz*/,
+        jlong handle) try {
+    auto* engine = fromHandle(handle);
+    if (!engine) return env->NewStringUTF("handlePresent=0");
+
+    std::lock_guard<std::mutex> lock(engine->mtx);
+    std::ostringstream state;
+    state << "handlePresent=1"
+          << ",modelPresent=" << (engine->model != nullptr ? 1 : 0)
+          << ",contextPresent=" << (engine->context != nullptr ? 1 : 0)
+          << ",batchAllocated=" << (engine->is_batch_allocated ? 1 : 0)
+          << ",samplerPresent=" << (engine->sampler != nullptr ? 1 : 0)
+          << ",backendSamplerAttached=" << (engine->backend_sampler_attached ? 1 : 0)
+          << ",modelFileStreamOpen=" << (engine->model_file_stream != nullptr ? 1 : 0)
+          << ",cachedTokens=" << engine->cached_tokens.size()
+          << ",chatMessages=" << engine->chat_msgs.size()
+          << ",modelGeneration=" << engine->model_generation
+          << ",activeBackend=" << engine->active_backend;
+    const std::string result = state.str();
+    return env->NewStringUTF(result.c_str());
+} catch (const std::exception& error) {
+    const std::string result = std::string("diagnosticsError=") + error.what();
+    return env->NewStringUTF(result.c_str());
+} catch (...) {
+    return env->NewStringUTF("diagnosticsError=unknown");
+}
+
 JNIEXPORT void JNICALL
 Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeUnloadModel(
         JNIEnv* env,
