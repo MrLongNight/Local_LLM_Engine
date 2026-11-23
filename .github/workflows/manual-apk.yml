@@ -36,10 +36,8 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: manual-apk-build-${{ github.ref }}
-  cancel-in-progress: true
-
+# Do not cancel queued APK builds: workflow_run events for successive
+# successful unit-test runs must each get a chance to build their exact commit.
 jobs:
   unit-test-gate:
     name: Require passing unit tests
