@@ -125,15 +125,7 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             isReturnDefaultValues = true
-            // Maven Central occasionally rate-limits Robolectric's multi-hundred-MiB SDK jars.
-            // Google's synchronized Maven Central mirror keeps the test runtime deterministic.
-            all {
-                systemProperty(
-                    "robolectric.dependency.repo.url",
-                    "https://maven-central.storage-download.googleapis.com/maven2"
-                )
-                systemProperty("robolectric.dependency.repo.id", "googleMavenCentralMirror")
-            }
+            // Robolectric supplies real ParcelFileDescriptor behavior for host JVM tests.
         }
     }
 }
@@ -150,4 +142,14 @@ dependencies {
     androidTestImplementation(libs.androidx.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.runner)
+}
+
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    // Maven Central occasionally rate-limits Robolectric's multi-hundred-MiB SDK jars.
+    // Google's synchronized Maven Central mirror keeps the test runtime deterministic.
+    systemProperty(
+        "robolectric.dependency.repo.url",
+        "https://maven-central.storage-download.googleapis.com/maven2"
+    )
+    systemProperty("robolectric.dependency.repo.id", "googleMavenCentralMirror")
 }
