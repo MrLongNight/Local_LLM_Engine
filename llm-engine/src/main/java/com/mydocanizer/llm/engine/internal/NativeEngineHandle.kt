@@ -156,6 +156,10 @@ internal object NativeEngineHandle {
     @JvmStatic
     external fun nativeCancel(handle: Long)
 
+    /** Engine-owned model/context/cache resource state for lifecycle diagnostics. */
+    @JvmStatic
+    external fun nativeGetEngineResourceDiagnostics(handle: Long): String
+
     @JvmStatic
     external fun nativeUnloadModel(handle: Long)
 
