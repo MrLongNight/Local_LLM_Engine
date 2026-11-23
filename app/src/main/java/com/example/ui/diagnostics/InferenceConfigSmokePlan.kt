@@ -207,17 +207,18 @@ internal object InferenceConfigSmokePlan {
      * reference, not an inference/backend failure. Search wrapped IPC causes as well
      * as the top-level exception because loadModel errors may cross the service boundary.
      */
-    internal fun isCpuMemoryGuardAdmissionRejection(
+    internal fun cpuMemoryGuardAdmissionRejection(
         profileBackend: String,
         error: Throwable
-    ): Boolean {
-        if (!profileBackend.equals("CPU", ignoreCase = true)) return false
+    ): String? {
+        if (!profileBackend.equals("CPU", ignoreCase = true)) return null
         var current: Throwable? = error
         repeat(8) {
-            if (current?.message?.contains("MEMORY_GUARD_OVERRIDE_REQUIRED:") == true) return true
+            val message = current?.message
+            if (message?.contains("MEMORY_GUARD_OVERRIDE_REQUIRED:") == true) return message
             current = current?.cause
         }
-        return false
+        return null
     }
 
     internal fun requiresQ4kDecodeEvidence(expectedBackend: String, expectsQ4kModel: Boolean): Boolean =
