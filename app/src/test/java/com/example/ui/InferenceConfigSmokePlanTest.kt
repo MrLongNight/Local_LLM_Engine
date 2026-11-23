@@ -163,16 +163,16 @@ class InferenceConfigSmokePlanTest {
         val wrapped = IllegalStateException("Remote model load failed", memoryGuardCause)
 
         assertTrue(
-            InferenceConfigSmokePlan.isCpuMemoryGuardAdmissionRejection("CPU", wrapped)
+            InferenceConfigSmokePlan.cpuMemoryGuardAdmissionRejection("CPU", wrapped)!!.contains("MEMORY_GUARD_OVERRIDE_REQUIRED:")
         )
         assertFalse(
-            InferenceConfigSmokePlan.isCpuMemoryGuardAdmissionRejection("VULKAN", wrapped)
+            InferenceConfigSmokePlan.cpuMemoryGuardAdmissionRejection("VULKAN", wrapped) == null
         )
         assertFalse(
-            InferenceConfigSmokePlan.isCpuMemoryGuardAdmissionRejection(
+            InferenceConfigSmokePlan.cpuMemoryGuardAdmissionRejection(
                 "CPU",
                 IllegalStateException("Native model initialization failed")
-            )
+            ) == null
         )
     }
 
