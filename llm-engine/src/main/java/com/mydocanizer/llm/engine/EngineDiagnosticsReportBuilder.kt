@@ -249,6 +249,7 @@ internal object EngineDiagnosticsReportBuilder {
         "processKillRequests",
         "cooperativeCancels",
         "loadResult",
+        "resultCode",
         "handlePresent",
         "modelPresent",
         "contextPresent",
