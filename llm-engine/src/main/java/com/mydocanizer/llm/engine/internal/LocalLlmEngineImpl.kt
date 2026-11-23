@@ -235,6 +235,8 @@ internal class LocalLlmEngineImpl(
                 progressCallback = progressCallback
             )
 
+            logNativeModelResourceState(handle, stage = "AFTER_LOAD_ATTEMPT", loadResult = ret)
+
             when (ret) {
                 0 -> { /* Success */ }
                 103 -> throw IllegalStateException(
@@ -374,6 +376,7 @@ internal class LocalLlmEngineImpl(
                 val handle = engineHandle.get()
                 if (handle != 0L) {
                     NativeEngineHandle.nativeUnloadModel(handle)
+                    logNativeModelResourceState(handle, stage = "AFTER_UNLOAD")
                 }
                 _currentModel.value = null
                 loadedConfig = null
@@ -985,6 +988,24 @@ internal class LocalLlmEngineImpl(
         }
         _state.value = EngineState.Closed
         Log.i(TAG, "LocalLlmEngine close queued on llamaDispatcher")
+    }
+
+    private fun logNativeModelResourceState(
+        handle: Long,
+        stage: String,
+        loadResult: Int? = null
+    ) {
+        val state = runCatching {
+            NativeEngineHandle.nativeGetEngineResourceDiagnostics(handle)
+        }.getOrElse { error ->
+            "diagnosticsError=${error.javaClass.simpleName}"
+        }
+        val loadResultField = loadResult?.let { ",loadResult=$it" }.orEmpty()
+        EngineDiagnostics.info(
+            "native",
+            "NATIVE_MODEL_RESOURCE_STATE",
+            "stage=$stage$loadResultField,$state"
+        )
     }
 
     private fun updateModelLoadProgress(percent: Int) {
