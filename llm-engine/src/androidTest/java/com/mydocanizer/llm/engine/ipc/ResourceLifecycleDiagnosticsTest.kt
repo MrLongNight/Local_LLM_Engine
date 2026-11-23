@@ -202,6 +202,18 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "Prompt/KV cache must contain tokens after successful prefill: $inferencePrefillState",
                 cachedTokenCount > 0
             )
+            val cachedTokenCapacity = Regex("cachedTokensCapacity=(\\d+)")
+                .find(inferencePrefillState)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val promptSignatureCapacity = Regex("cachedPromptPromptSignatureCapacity=(\\d+)")
+                .find(inferencePrefillState)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            assertTrue(
+                "Native KV token vector must own capacity while the model is loaded",
+                cachedTokenCapacity > 0
+            )
+            assertTrue(
+                "Prompt identity signature must be allocated during inference",
+                promptSignatureCapacity > 0
+            )
 
             val inferenceFinishedState = nativeStateLines.firstOrNull {
                 it.contains("stage=AFTER_INFERENCE,")
@@ -224,9 +236,17 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "modelFileStreamOpen=0",
                 "chatTemplatesPresent=0",
                 "cachedPromptIdentityPresent=0",
+                "cachedPromptModelSignatureCapacity=0",
+                "cachedPromptPromptSignatureCapacity=0",
+                "cachedPromptSamplerSignatureCapacity=0",
+                "cachedPromptContextSignatureCapacity=0",
                 "cachedTokens=0",
+                "cachedTokensCapacity=0",
                 "cachedTokenChars=0",
+                "cachedTokenCharsCapacity=0",
                 "chatMessages=0",
+                "chatMessagesCapacity=0",
+                "inferenceRunIdCapacity=0",
                 "currentPosition=0",
                 "systemPromptPosition=0",
                 "stopGenerationPosition=0",
