@@ -247,10 +247,13 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 }
 
             val report = EngineDiagnostics.buildCompactReportForTest(testLines)
-            listOf("nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=", "openFDs=", "threads=")
-                .forEach { field ->
-                    assertTrue("Exported memory timeline must retain $field", report.contains(field))
-                }
+            listOf(
+                "nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=", "openFDs=", "threads=",
+                "resultCode=", "chatTemplatesPresent=", "cachedPromptIdentityPresent=",
+                "cachedTokens=", "cachedTokenChars=", "currentPosition=", "inferenceRunIdPresent="
+            ).forEach { field ->
+                assertTrue("Exported lifecycle diagnostics must retain $field", report.contains(field))
+            }
             assertTrue("Exported report must retain native resource ownership evidence", report.contains("NATIVE_MODEL_RESOURCE_STATE"))
             assertTrue("Exported report must retain released model state", report.contains("modelPresent=0"))
         } finally {
