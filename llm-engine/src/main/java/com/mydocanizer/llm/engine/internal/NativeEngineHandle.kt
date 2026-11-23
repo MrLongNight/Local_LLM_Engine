@@ -122,6 +122,7 @@ internal object NativeEngineHandle {
         temperature: Float,
         topP: Float,
         enableThinking: Boolean,
+        grammar: String,
         progressCallback: NativeInferenceProgressCallback
     ): Int
 
