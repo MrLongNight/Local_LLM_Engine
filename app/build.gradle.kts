@@ -82,8 +82,15 @@ android {
     unitTests {
       isIncludeAndroidResources = true
       isReturnDefaultValues = true
-      // Robolectric resolves its SDK artifacts from the normal Gradle/Maven cache.
-      // Do not pin a developer-machine path or force offline mode in CI.
+      // Maven Central occasionally rate-limits Robolectric's multi-hundred-MiB SDK jars.
+      // Google's synchronized Maven Central mirror keeps the test runtime deterministic.
+      all {
+        systemProperty(
+          "robolectric.dependency.repo.url",
+          "https://maven-central.storage-download.googleapis.com/maven2"
+        )
+        systemProperty("robolectric.dependency.repo.id", "googleMavenCentralMirror")
+      }
     }
   }
   dependenciesInfo {
