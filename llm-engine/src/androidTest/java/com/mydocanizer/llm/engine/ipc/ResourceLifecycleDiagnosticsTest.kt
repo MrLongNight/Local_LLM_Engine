@@ -150,6 +150,12 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "nativeHeapSizeMb=",
                 "processVmRssMb=",
                 "processVmHwmMb=",
+                "processRssAnonMb=",
+                "processRssFileMb=",
+                "processRssShmemMb=",
+                "processVmSwapMb=",
+                "processVmDataMb=",
+                "processVmSizeMb=",
                 "processThreads=",
                 "openFdCount=",
                 "javaHeapUsedMb=",
@@ -268,8 +274,9 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
 
             val report = EngineDiagnostics.buildCompactReportForTest(testLines)
             listOf(
-                "nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=", "openFDs=", "threads=",
-                "resultCode=", "chatTemplatesPresent=", "cachedPromptIdentityPresent=",
+                "nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=",
+                "RssAnon=", "RssFile=", "RssShmem=", "VmSwap=", "VmData=", "VmSize=",
+                "openFDs=", "threads=", "resultCode=", "chatTemplatesPresent=", "cachedPromptIdentityPresent=",
                 "cachedTokens=", "cachedTokenChars=", "currentPosition=", "inferenceRunIdPresent="
             ).forEach { field ->
                 assertTrue("Exported lifecycle diagnostics must retain $field", report.contains(field))
