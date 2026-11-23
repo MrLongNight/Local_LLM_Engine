@@ -1161,6 +1161,25 @@ internal object EngineDiagnosticsReportBuilder {
             .filter { eventName(it) == "CORRECTNESS_GATE_RESULT" }
         val configSmokeResults = kotlinLines
             .filter { eventName(it) == "CONFIG_SMOKE_RESULT" }
+        // Keep configuration-smoke evidence in its own bounded section. The generic
+        // important-event tail is intentionally small and can otherwise evict profile
+        // failures, output-gate reasons, or the CPU/Vulkan pairing explanation.
+        val configurationSmokeEvidence = kotlinLines
+            .filter {
+                eventName(it) in setOf(
+                    "CONFIG_SMOKE_STARTED",
+                    "CONFIG_SMOKE_THREAD_POLICY",
+                    "CONFIG_SMOKE_PROFILE_STARTED",
+                    "CONFIG_SMOKE_PROFILE_RESULT",
+                    "CONFIG_SMOKE_RESULT",
+                    "CONFIG_SMOKE_OUTPUT_REJECTED",
+                    "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                    "D0_CPU_REFERENCE_GATE_RESULT",
+                    "CORRECTNESS_GATE_RESULT",
+                    "OUTPUT_GATE_RESULT"
+                )
+            }
+            .takeLast(64)
         val gateStatusSummary = buildList {
             correctnessGateEvents.groupingBy { field(it, "status") ?: "UNKNOWN" }
                 .eachCount().toSortedMap()
@@ -1215,6 +1234,15 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[INFERENZ-KONTEXT / TEMPLATE / TOKENIZER / SAMPLER]")
             if (inferenceSetupEvidence.isEmpty()) appendLine("Keine nativen Prompt-/Sampler-Metadaten vorhanden.")
             inferenceSetupEvidence.forEach { appendLine(readableNativeLine(it, 1_200)) }
+            appendLine()
+            appendLine("[0a] KONFIGURATIONSSMOKE – PROFILE, AUSGABE- UND PAARGATES")
+            if (configurationSmokeEvidence.isEmpty()) {
+                appendLine("Keine Konfigurations-Smoke-Ereignisse vorhanden.")
+            } else {
+                configurationSmokeEvidence.forEach { line ->
+                    appendLine(readableEventLine(line, 900))
+                }
+            }
             appendLine()
             appendLine("[1] CPU/VULKAN-ABNAHMETEST UND ÄLTERE MATRIX – PROFILERGEBNISSE")
             if (fullMatrixRows.isEmpty()) {
