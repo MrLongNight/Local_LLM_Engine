@@ -16,12 +16,14 @@ import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.ReloadAfterAbort
 import com.mydocanizer.llm.engine.TimeoutConfig
 import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -31,6 +33,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -1397,6 +1400,52 @@ class InferenceIpcTest {
         assertEquals(listOf("Hallo"), events.filterIsInstance<InferenceEvent.Token>().map { it.token })
         assertTrue(events.any { it is InferenceEvent.Completed })
         client.close()
+    }
+
+    @Test
+    fun firstTokenDeadlineRunsWhileCollectorDispatcherIsBlocked() = runBlocking {
+        val fakeService = FakeInferenceService().apply {
+            hangAfterStartedBeforeToken.set(true)
+        }
+        val timeoutConfig = TimeoutConfig.fast(
+            prefillMs = 500L,
+            firstTokenMs = 100L,
+            interTokenMs = 500L,
+            totalInferenceMs = 1_500L
+        )
+        val collectorDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        val client = InferenceClient(
+            context = object : android.content.ContextWrapper(null) {},
+            mockService = fakeService,
+            timeoutConfig = timeoutConfig
+        )
+        try {
+            client.initialize()
+            val stream = async(collectorDispatcher) {
+                client.streamChat(InferenceRequest.single("blocked collector timeout test")).toList()
+            }
+            withTimeout(1_000L) {
+                while (fakeService.lastRequestId.get() == null) delay(5L)
+            }
+
+            // Simulate a busy UI/collector dispatcher after prefill. The watchdog must
+            // still enforce its monotonic first-token deadline on an independent dispatcher.
+            withContext(collectorDispatcher) {
+                Thread.sleep(400L)
+            }
+
+            val events = withTimeout(2_000L) { stream.await() }
+            val timeout = events.filterIsInstance<InferenceEvent.Error>().single().throwable
+                as InferenceTimeoutException
+            assertEquals(FinishReason.TIMEOUT_FIRST_TOKEN, timeout.reason)
+            assertTrue(
+                "Watchdog deadline should not inherit collector-dispatcher starvation: ${timeout.elapsedMs}ms",
+                timeout.elapsedMs < 300L
+            )
+        } finally {
+            client.close()
+            collectorDispatcher.close()
+        }
     }
 
     @Test
