@@ -3058,9 +3058,13 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetEngineResou
           << ",modelFileStreamOpen=" << (engine->model_file_stream != nullptr ? 1 : 0)
           << ",chatTemplatesPresent=" << (engine->chat_templates != nullptr ? 1 : 0)
           << ",cachedPromptIdentityPresent=" << (engine->has_cached_prompt_identity ? 1 : 0)
+          << ",cachedPromptModelSignatureSize=" << engine->cached_prompt_identity.model_signature.size()
           << ",cachedPromptModelSignatureCapacity=" << engine->cached_prompt_identity.model_signature.capacity()
+          << ",cachedPromptPromptSignatureSize=" << engine->cached_prompt_identity.prompt_signature.size()
           << ",cachedPromptPromptSignatureCapacity=" << engine->cached_prompt_identity.prompt_signature.capacity()
+          << ",cachedPromptSamplerSignatureSize=" << engine->cached_prompt_identity.sampler_signature.size()
           << ",cachedPromptSamplerSignatureCapacity=" << engine->cached_prompt_identity.sampler_signature.capacity()
+          << ",cachedPromptContextSignatureSize=" << engine->cached_prompt_identity.context_signature.size()
           << ",cachedPromptContextSignatureCapacity=" << engine->cached_prompt_identity.context_signature.capacity()
           << ",cachedTokens=" << engine->cached_tokens.size()
           << ",cachedTokensCapacity=" << engine->cached_tokens.capacity()
@@ -3068,6 +3072,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetEngineResou
           << ",cachedTokenCharsCapacity=" << engine->cached_token_chars.capacity()
           << ",chatMessages=" << engine->chat_msgs.size()
           << ",chatMessagesCapacity=" << engine->chat_msgs.capacity()
+          << ",inferenceRunIdSize=" << engine->inference_run_id.size()
           << ",inferenceRunIdCapacity=" << engine->inference_run_id.capacity()
           << ",currentPosition=" << engine->current_position
           << ",systemPromptPosition=" << engine->system_prompt_position
