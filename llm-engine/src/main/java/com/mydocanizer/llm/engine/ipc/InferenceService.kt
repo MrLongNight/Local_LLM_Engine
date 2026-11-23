@@ -349,8 +349,10 @@ class InferenceService : Service() {
                     EngineDiagnostics.error("ipc", "MODEL_LOAD_EXCEPTION", t)
                     callback?.onModelLoadFailed(t.message ?: t.javaClass.simpleName)
                 } finally {
-                    if (!modelLoadedSuccessfully) resourceMonitor?.modelLoadFailed()
+                    // Close a descriptor whose ownership was not transferred before taking
+                    // the failure snapshot, so the recorded FD count reflects post-cleanup state.
                     if (!descriptorTransferred) runCatching { modelDescriptor.close() }
+                    if (!modelLoadedSuccessfully) resourceMonitor?.modelLoadFailed()
                     progressJob?.cancel()
                 }
             }
