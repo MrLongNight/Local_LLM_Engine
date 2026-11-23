@@ -214,6 +214,6 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 delay(50L)
             }
         }
-        observedLineCount
+        observedLineCount ?: afterLineCount
     }
 }
