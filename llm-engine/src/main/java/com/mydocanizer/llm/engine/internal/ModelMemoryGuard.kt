@@ -2,8 +2,10 @@ package com.mydocanizer.llm.engine.internal
 
 /**
  * Model-load guard that distinguishes the reclaimable GGUF page cache / shared UMA heap
- * from process-private allocations. Only the conservative total-RAM estimate is a hard
- * gate; available RAM and Android's lowMemory flag are warning/context-reduction signals.
+ * from process-private allocations. The conservative total-RAM ceiling applies to every
+ * backend. CPU loads can additionally require the estimated minimum footprint to fit in
+ * currently available RAM; Vulkan retains the soft policy because its UMA/file-cache
+ * accounting is not a reliable proxy for device-local allocations.
  */
 internal object ModelMemoryGuard {
     const val MIN_CONTEXT_TOKENS = 256
@@ -51,7 +53,7 @@ internal object ModelMemoryGuard {
         var contextTokens = requestedContextTokens
         var kvEstimate = kvBytes(contextTokens)
         var required = requiredBytes(contextTokens)
-        // The only hard boundary is 85% of total RAM. Try smaller contexts first.
+        // Apply the total-RAM ceiling first, reducing the context before rejecting.
         while (required > hardLimitBytes && contextTokens > MIN_CONTEXT_TOKENS) {
             contextTokens = maxOf(MIN_CONTEXT_TOKENS, contextTokens / 2)
             kvEstimate = kvBytes(contextTokens)
@@ -72,8 +74,8 @@ internal object ModelMemoryGuard {
             )
         }
 
-        // availMem is soft: reclaimable file cache and the UMA Vulkan heap make it an
-        // unreliable hard boundary. Reduce context where possible; never fail on it.
+        // Reduce context against the current available-memory snapshot. Vulkan and
+        // callers that do not request strict admission retain warning-only behavior.
         val initialPressureWarning = lowMemory || availableBytes == 0L || required > availableBytes
         if (availableBytes > 0L && required > availableBytes) {
             while (required > availableBytes && contextTokens > MIN_CONTEXT_TOKENS) {
