@@ -249,10 +249,14 @@ abstract class ConfigurationSmokeViewModel(
                         continue
                     }
 
-                    // Once CPU admission is rejected for this exact model/config family,
-                    // do not repeat the same guaranteed-to-fail load for remaining CPU profiles.
-                    // Vulkan profiles remain eligible and continue through their normal path.
-                    if (profile.expectedBackend == "CPU" && cpuMemoryGuardUnavailableDetail != null) {
+                    // D0 repeats one identical CPU config three times. Once its memory
+                    // admission is rejected, the remaining duplicate runs cannot add evidence.
+                    // D1 rechecks each thread profile because available RAM can change after
+                    // each preceding Vulkan model unload.
+                    if (requireD0Reference &&
+                        profile.expectedBackend == "CPU" &&
+                        cpuMemoryGuardUnavailableDetail != null
+                    ) {
                         val reasonCode = InferenceConfigSmokePlan.CPU_MEMORY_GUARD_REJECTED
                         profileStatuses[profile.id] = "UNAVAILABLE"
                         profileUnavailableReasons[profile.id] = reasonCode
