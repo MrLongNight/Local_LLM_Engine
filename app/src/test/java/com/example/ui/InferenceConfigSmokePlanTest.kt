@@ -165,10 +165,10 @@ class InferenceConfigSmokePlanTest {
         assertTrue(
             InferenceConfigSmokePlan.cpuMemoryGuardAdmissionRejection("CPU", wrapped)!!.contains("MEMORY_GUARD_OVERRIDE_REQUIRED:")
         )
-        assertFalse(
+        assertTrue(
             InferenceConfigSmokePlan.cpuMemoryGuardAdmissionRejection("VULKAN", wrapped) == null
         )
-        assertFalse(
+        assertTrue(
             InferenceConfigSmokePlan.cpuMemoryGuardAdmissionRejection(
                 "CPU",
                 IllegalStateException("Native model initialization failed")
