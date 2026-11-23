@@ -139,6 +139,8 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
     }
 
     fun modelLoadFailed() {
+        // Retain the attempted model identity, but never report it as still loading.
+        model.get()?.let { attempted -> model.set(attempted.copy(activeBackend = "load_failed")) }
         synchronized(nativeMemoryLock) { phase.set("MODEL_LOAD_FAILED") }
         logPhase("MODEL_LOAD_FAILED")
         sample()

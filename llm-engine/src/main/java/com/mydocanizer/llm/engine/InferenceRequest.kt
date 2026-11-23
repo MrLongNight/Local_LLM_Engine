@@ -10,6 +10,8 @@ import android.os.Parcelable
  * @property maxPredictTokens Maximum tokens to generate for this turn.
  * @property temperature Custom temperature override for this request, or null for engine default.
  * @property topP Custom top-p nucleus sampling override, or null for engine default.
+ * @property enableThinking Whether the model's thinking mode is enabled for this request.
+ * @property grammar Optional GBNF output grammar; the entry rule must be named "root".
  */
 data class InferenceRequest(
     val messages: List<ChatMessage>,

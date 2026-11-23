@@ -82,6 +82,10 @@ class GrammarConstraintTest : InferenceServiceProcessTestBase() {
             assertTrue("The constrained request must emit at least one token", validResult.tokensGenerated > 0)
             assertEquals("Valid grammar must not restart the service", servicePid, client.remotePid.value)
 
+            // Exact production fixtures from myDocAnizer_Mobile's LlamaCppInferenceEngine.kt.
+            assertAppGrammarAccepted(client, servicePid, TRIAGE_JSON_GBNF, "TRIAGE_JSON_GBNF")
+            assertAppGrammarAccepted(client, servicePid, DMS_JSON_GBNF, "DMS_JSON_GBNF")
+
             repeat(3) {
                 val invalidEvents = withTimeout(timeoutConfig.totalInferenceMs + 5_000L) {
                     client.streamChat(
@@ -118,4 +122,57 @@ class GrammarConstraintTest : InferenceServiceProcessTestBase() {
             modelFile.delete()
         }
     }
+
+    private suspend fun assertAppGrammarAccepted(
+        client: InferenceClient,
+        expectedServicePid: Int,
+        grammar: String,
+        grammarName: String
+    ) {
+        val events = withTimeout(30_000L) {
+            client.streamChat(
+                InferenceRequest.single(
+                    "Return a minimal JSON object with null values and an empty keyword array.",
+                    maxPredictTokens = 1,
+                    grammar = grammar
+                ).copy(temperature = 0.0f)
+            ).toList()
+        }
+        val errors = events.filterIsInstance<InferenceEvent.Error>()
+        assertTrue(
+            "$grammarName from myDocAnizer_Mobile must be accepted by the pinned llama.cpp parser: " +
+                errors.joinToString { it.throwable.message.orEmpty() },
+            errors.isEmpty()
+        )
+        val completed = events.filterIsInstance<InferenceEvent.Completed>()
+        assertEquals("$grammarName must produce exactly one terminal completion", 1, completed.size)
+        assertTrue(
+            "$grammarName must emit its required JSON object prefix",
+            completed.single().result.text.trimStart().startsWith("{")
+        )
+        assertTrue("$grammarName must generate at least one token", completed.single().result.tokensGenerated > 0)
+        assertEquals("$grammarName must keep the original native process", expectedServicePid, client.remotePid.value)
+    }
+
+    private companion object {
+        const val TRIAGE_JSON_GBNF = """
+root ::= "{" ws "\"_reasoning\"" ws ":" ws string "," ws "\"absender\"" ws ":" ws opt_string "," ws "\"dokumententyp\"" ws ":" ws opt_string "," ws "\"match_keywords\"" ws ":" ws string_array "," ws "\"kategorie_vorschlag\"" ws ":" ws opt_string "}" ws
+opt_string ::= string | "null"
+string_array ::= "[" ws (string ("," ws string)*)? ws "]"
+string ::= "\"" ([^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
+ws ::= [ \t\n\r]*
+"""
+
+        const val DMS_JSON_GBNF = """
+root ::= "{" ws "\"_reasoning\"" ws ":" ws string "," ws "\"absender\"" ws ":" ws opt_string "," ws "\"dokumententyp\"" ws ":" ws opt_string "," ws "\"match_keywords\"" ws ":" ws string_array "," ws "\"kategorie_vorschlag\"" ws ":" ws opt_string "," ws "\"vorgeschlagener_pfad\"" ws ":" ws opt_string "," ws "\"globale_zusatzfelder\"" ws ":" ws object "}" ws
+opt_string ::= string | "null"
+string_array ::= "[" ws (string ("," ws string)*)? ws "]"
+object ::= "{" ws (pair ("," ws pair)*)? ws "}"
+pair ::= string ws ":" ws (string | number | "true" | "false" | "null")
+number ::= "-"? [0-9]+ ("." [0-9]+)?
+string ::= "\"" ([^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
+ws ::= [ \t\n\r]*
+"""
+    }
+
 }
