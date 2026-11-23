@@ -6,6 +6,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
+import com.mydocanizer.llm.engine.FinishReason
+import com.mydocanizer.llm.engine.InferenceRequest
 import com.mydocanizer.llm.engine.ModelSource
 import com.mydocanizer.llm.engine.TimeoutConfig
 import java.io.File
@@ -82,6 +84,29 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 lastObservedLineCount = awaitSnapshot(
                     serviceLog, servicePid, "MODEL_LOADED_IDLE", lastObservedLineCount
                 )
+
+                if (cycle == 0) {
+                    val inference = client.generateChat(
+                        InferenceRequest.single(
+                            userPrompt = "Antworte kurz auf Deutsch.",
+                            maxPredictTokens = 8
+                        ).copy(timeoutConfig = timeoutConfig)
+                    )
+                    assertTrue(
+                        "Inference must succeed while model resources are loaded: ${inference.exceptionOrNull()}",
+                        inference.isSuccess
+                    )
+                    val generated = inference.getOrThrow()
+                    assertTrue("Inference must generate at least one token", generated.tokensGenerated > 0)
+                    assertTrue("Inference must return non-blank text", generated.text.isNotBlank())
+                    assertTrue(
+                        "Inference must finish normally: ${generated.finishReason}",
+                        generated.finishReason == FinishReason.STOP ||
+                            generated.finishReason == FinishReason.MAX_TOKENS
+                    )
+                    awaitNativeState(serviceLog, "AFTER_INFERENCE_PREFILL")
+                    awaitNativeState(serviceLog, "AFTER_INFERENCE")
+                }
 
                 val unloaded = client.unloadModel()
                 assertTrue(
@@ -168,6 +193,25 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                     assertTrue("Successful native load must own $field: $loadedNativeState", loadedNativeState.contains(field))
                 }
 
+            val inferencePrefillState = nativeStateLines.firstOrNull {
+                it.contains("stage=AFTER_INFERENCE_PREFILL,resultCode=0,")
+            } ?: throw AssertionError("Native state after inference prefill was not recorded")
+            val cachedTokenCount = Regex("cachedTokens=(\\d+)")
+                .find(inferencePrefillState)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            assertTrue(
+                "Prompt/KV cache must contain tokens after successful prefill: $inferencePrefillState",
+                cachedTokenCount > 0
+            )
+
+            val inferenceFinishedState = nativeStateLines.firstOrNull {
+                it.contains("stage=AFTER_INFERENCE,")
+            } ?: throw AssertionError("Native state after inference completion was not recorded")
+            assertTrue(
+                "Inference must retain its native cache until explicit model unload: $inferenceFinishedState",
+                inferenceFinishedState.contains("cachedTokens=") &&
+                    inferenceFinishedState.contains("chatMessages=")
+            )
+
             val unloadedNativeState = nativeStateLines.lastOrNull {
                 it.contains("stage=AFTER_UNLOAD,")
             } ?: throw AssertionError("Native state after model unload was not recorded")
@@ -204,6 +248,17 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             client.close()
             modelFile.delete()
             invalidModelFile.delete()
+        }
+    }
+
+    private suspend fun awaitNativeState(logFile: File, stage: String) {
+        withTimeout(10_000L) {
+            while (!logFile.isFile || logFile.readLines(Charsets.UTF_8).none { line ->
+                    line.contains("[native] NATIVE_MODEL_RESOURCE_STATE - stage=$stage,")
+                }
+            ) {
+                delay(50L)
+            }
         }
     }
 
