@@ -277,7 +277,9 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 "nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=",
                 "RssAnon=", "RssFile=", "RssShmem=", "VmSwap=", "VmData=", "VmSize=",
                 "openFDs=", "threads=", "resultCode=", "chatTemplatesPresent=", "cachedPromptIdentityPresent=",
-                "cachedTokens=", "cachedTokenChars=", "currentPosition=", "inferenceRunIdPresent="
+                "cachedPromptPromptSignatureCapacity=", "cachedTokens=", "cachedTokensCapacity=",
+                "cachedTokenChars=", "cachedTokenCharsCapacity=", "chatMessagesCapacity=",
+                "currentPosition=", "inferenceRunIdPresent="
             ).forEach { field ->
                 assertTrue("Exported lifecycle diagnostics must retain $field", report.contains(field))
             }
