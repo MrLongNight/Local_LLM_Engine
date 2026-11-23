@@ -138,11 +138,48 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 fdTimeline.size >= 9
             )
 
+            val nativeStateLines = serviceLog.readLines()
+                .filter { it.contains("[native] NATIVE_MODEL_RESOURCE_STATE - ") }
+            val loadedNativeState = nativeStateLines.firstOrNull {
+                it.contains("stage=AFTER_LOAD_ATTEMPT,loadResult=0,")
+            } ?: throw AssertionError("Native state after successful load was not recorded")
+            listOf("modelPresent=1", "contextPresent=1", "batchAllocated=1", "samplerPresent=1")
+                .forEach { field ->
+                    assertTrue("Successful native load must own $field: $loadedNativeState", loadedNativeState.contains(field))
+                }
+
+            val unloadedNativeState = nativeStateLines.lastOrNull {
+                it.contains("stage=AFTER_UNLOAD,")
+            } ?: throw AssertionError("Native state after model unload was not recorded")
+            listOf(
+                "modelPresent=0",
+                "contextPresent=0",
+                "batchAllocated=0",
+                "samplerPresent=0",
+                "backendSamplerAttached=0",
+                "modelFileStreamOpen=0",
+                "cachedTokens=0",
+                "chatMessages=0",
+                "activeBackend=None"
+            ).forEach { field ->
+                assertTrue("Native unload must release $field: $unloadedNativeState", unloadedNativeState.contains(field))
+            }
+
+            val failedNativeState = nativeStateLines.lastOrNull {
+                it.contains("stage=AFTER_LOAD_ATTEMPT,") && !it.contains("loadResult=0,")
+            } ?: throw AssertionError("Native state after failed model load was not recorded")
+            listOf("modelPresent=0", "contextPresent=0", "batchAllocated=0", "samplerPresent=0", "modelFileStreamOpen=0")
+                .forEach { field ->
+                    assertTrue("Failed native load must clean up $field: $failedNativeState", failedNativeState.contains(field))
+                }
+
             val report = EngineDiagnostics.buildCompactReportForTest(serviceLog.readLines())
             listOf("nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=", "openFDs=", "threads=")
                 .forEach { field ->
                     assertTrue("Exported memory timeline must retain $field", report.contains(field))
                 }
+            assertTrue("Exported report must retain native resource ownership evidence", report.contains("NATIVE_MODEL_RESOURCE_STATE"))
+            assertTrue("Exported report must retain released model state", report.contains("modelPresent=0"))
         } finally {
             client.close()
             modelFile.delete()
