@@ -194,7 +194,9 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             } ?: throw AssertionError("Native state after successful load was not recorded")
             // FilePath loading intentionally does not retain a SAF FILE*; descriptor-backed
             // ContentUri loading has a separate ownership path.
-            listOf("modelPresent=1", "contextPresent=1", "batchAllocated=1", "samplerPresent=1", "modelFileStreamOpen=0")
+            // The IPC service transfers every model through a ParcelFileDescriptor. JNI retains
+            // its duplicated FILE* stream for llama.cpp until model unload.
+            listOf("modelPresent=1", "contextPresent=1", "batchAllocated=1", "samplerPresent=1", "modelFileStreamOpen=1")
                 .forEach { field ->
                     assertTrue("Successful native load must own $field: $loadedNativeState", loadedNativeState.contains(field))
                 }

@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### 23.11.2026 — Emulator-Regressionen #731
+
+- Android APK #731 (Run `45276012632`, Commit `1bacbb5`) hat Clean-Build, Paketprüfungen und beide APK-Uploads erfolgreich abgeschlossen. `:llm-engine:connectedDebugAndroidTest` scheiterte danach bei 2 von 19 Tests.
+- `GrammarConstraintTest`: Nach der Escape-Korrektur blieb die Produktionsgrammatik ungültig. Der tatsächliche Parsergrund sind Unterstriche in GBNF-Regelnamen (`opt_string`, `string_array`); `llama-grammar.cpp` akzeptiert in Namen Buchstaben, Ziffern und Bindestriche, aber keinen Unterstrich. Die Produktionsdefinitionen und Engine-Testfixtures verwenden jetzt `opt-string` und `string-array`.
+- `ResourceLifecycleDiagnosticsTest`: Die Dateimatcher funktionieren nun. Der Test hat den tatsächlichen Ownership-Vertrag offengelegt: `InferenceService` reicht für alle Modellquellen ein `ParcelFileDescriptor` über `/proc/self/fd/N` weiter; JNI hält eine eigene `dup()`-`FILE*`-Referenz bis zum Unload. `modelFileStreamOpen=1` während des Modellbetriebs ist daher korrekt, `0` erst nach Unload oder fehlgeschlagenem Load. Der Test wird entsprechend korrigiert.
+- Diese Nachkorrekturen sind noch nicht verifiziert. P0-09b und P1-02c bleiben offen, bis ein neuer Emulatorlauf alle 19 Tests erfolgreich ausführt.
+
 ### 23.11.2026 — Emulator-Regressionen #726/#727
 
 - Beide Android-APK-Runs #726 (Run `45268309664`, SHA `7fb2a0d`) und #727 (Run `45269066910`, SHA `15ce396`) sind nach erfolgreicher Unit-Test-Gate-Prüfung und erfolgreicher APK-/Native-Kompilierung in `:llm-engine:connectedDebugAndroidTest` fehlgeschlagen. In beiden Runs scheiterten dieselben 2 von 19 Tests.

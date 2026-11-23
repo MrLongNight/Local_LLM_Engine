@@ -156,17 +156,17 @@ class GrammarConstraintTest : InferenceServiceProcessTestBase() {
 
     private companion object {
         const val TRIAGE_JSON_GBNF = """
-root ::= "{" ws "\"_reasoning\"" ws ":" ws string "," ws "\"absender\"" ws ":" ws opt_string "," ws "\"dokumententyp\"" ws ":" ws opt_string "," ws "\"match_keywords\"" ws ":" ws string_array "," ws "\"kategorie_vorschlag\"" ws ":" ws opt_string "}" ws
-opt_string ::= string | "null"
-string_array ::= "[" ws (string ("," ws string)*)? ws "]"
+root ::= "{" ws "\"_reasoning\"" ws ":" ws string "," ws "\"absender\"" ws ":" ws opt-string "," ws "\"dokumententyp\"" ws ":" ws opt-string "," ws "\"match_keywords\"" ws ":" ws string-array "," ws "\"kategorie_vorschlag\"" ws ":" ws opt-string "}" ws
+opt-string ::= string | "null"
+string-array ::= "[" ws (string ("," ws string)*)? ws "]"
 string ::= "\"" ([^"\\\x7F\x00-\x1F] | "\\" (["\\bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
 ws ::= | " " | "\n" [ \t]{0,20}
 """
 
         const val DMS_JSON_GBNF = """
-root ::= "{" ws "\"_reasoning\"" ws ":" ws string "," ws "\"absender\"" ws ":" ws opt_string "," ws "\"dokumententyp\"" ws ":" ws opt_string "," ws "\"match_keywords\"" ws ":" ws string_array "," ws "\"kategorie_vorschlag\"" ws ":" ws opt_string "," ws "\"vorgeschlagener_pfad\"" ws ":" ws opt_string "," ws "\"globale_zusatzfelder\"" ws ":" ws object "}" ws
-opt_string ::= string | "null"
-string_array ::= "[" ws (string ("," ws string)*)? ws "]"
+root ::= "{" ws "\"_reasoning\"" ws ":" ws string "," ws "\"absender\"" ws ":" ws opt-string "," ws "\"dokumententyp\"" ws ":" ws opt-string "," ws "\"match_keywords\"" ws ":" ws string-array "," ws "\"kategorie_vorschlag\"" ws ":" ws opt-string "," ws "\"vorgeschlagener_pfad\"" ws ":" ws opt-string "," ws "\"globale_zusatzfelder\"" ws ":" ws object "}" ws
+opt-string ::= string | "null"
+string-array ::= "[" ws (string ("," ws string)*)? ws "]"
 object ::= "{" ws (pair ("," ws pair)*)? ws "}"
 pair ::= string ws ":" ws (string | number | "true" | "false" | "null")
 number ::= "-"? [0-9]+ ("." [0-9]+)?

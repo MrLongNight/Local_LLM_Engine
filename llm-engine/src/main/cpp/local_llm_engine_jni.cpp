@@ -392,7 +392,8 @@ struct EngineInstance {
     llama_model* model = nullptr;
     llama_context* context = nullptr;
     // Non-owning in llama.cpp's llama_file(FILE*) wrapper. Keep this FILE* alive
-    // for the full model lifetime; it wraps a dup() of the borrowed SAF descriptor.
+    // for the full model lifetime; it wraps a dup() of the ParcelFileDescriptor transferred
+    // by InferenceService for both local-file and SAF-backed model sources.
     FILE* model_file_stream = nullptr;
     llama_batch batch;
     common_sampler* sampler = nullptr;
@@ -1621,7 +1622,7 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
     if (model_fd >= 0) {
         const int duplicated_fd = dup(model_fd);
         if (duplicated_fd < 0) {
-            LOGE("Could not duplicate borrowed SAF model descriptor fd=%d: %s", model_fd, strerror(errno));
+            LOGE("Could not duplicate borrowed model descriptor fd=%d: %s", model_fd, strerror(errno));
             env->ReleaseStringUTFChars(jmodel_path, model_path);
             return 106;
         }
@@ -1629,12 +1630,12 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeLoadModel(
         if (descriptor_stream == nullptr) {
             const int saved_errno = errno;
             close(duplicated_fd);
-            LOGE("Could not create FILE* for borrowed SAF descriptor fd=%d: %s",
+            LOGE("Could not create FILE* for borrowed model descriptor fd=%d: %s",
                  model_fd, strerror(saved_errno));
             env->ReleaseStringUTFChars(jmodel_path, model_path);
             return 106;
         }
-        LOGI("Loading GGUF through borrowed SAF descriptor fd=%d using llama_model_load_from_file_ptr (no path reopen, no copy)",
+        LOGI("Loading GGUF through borrowed IPC descriptor fd=%d using llama_model_load_from_file_ptr (no path reopen, no copy)",
              model_fd);
     }
 
