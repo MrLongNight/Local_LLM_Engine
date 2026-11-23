@@ -1984,7 +1984,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
         jfloat request_temperature,
         jfloat request_top_p,
         jboolean enable_thinking,
-        jstring j_grammar,
         jobject progress_listener) try {
     auto* engine = fromHandle(handle);
 #if defined(LOCAL_LLM_ENABLE_TEST_HOOKS)
@@ -1999,13 +1998,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     }
 #endif
     if (!engine || !engine->model || !engine->context) return 1;
-
-    std::string request_grammar;
-    if (j_grammar != nullptr && !java_string_to_utf8(env, j_grammar, request_grammar)) {
-        LOGE("Could not convert request GBNF grammar from UTF-16 to standard UTF-8");
-        return 2;
-    }
-    const bool grammar_requested = !request_grammar.empty();
 
     std::string inference_run_id = "unknown";
     if (j_inference_run_id != nullptr) {
@@ -2069,31 +2061,15 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
     try {
         configure_local_sampling(request_sampling, effective_temperature, effective_top_p,
                                  engine->default_top_k, engine->default_min_p);
-        if (grammar_requested) {
-            // Validate before common_sampler_init(): this pinned upstream version allocates
-            // its sampler chain before parsing and throws without freeing that chain on an
-            // invalid grammar. Preflight rejects malformed GBNF before those allocations.
-            llama_sampler* validation_sampler = llama_sampler_init_grammar(
-                llama_model_get_vocab(engine->model), request_grammar.c_str(), "root");
-            if (validation_sampler == nullptr) {
-                LOGE("Request GBNF grammar validation failed (root rule must be 'root')");
-                engine->last_finish_reason = 3;
-                return 9;
-            }
-            llama_sampler_free(validation_sampler);
-            request_sampling.grammar = common_grammar(COMMON_GRAMMAR_TYPE_USER, request_grammar);
-        }
         engine->sampler = common_sampler_init(engine->model, request_sampling);
     } catch (const std::exception& error) {
-        LOGE("Request sampler initialization failed (grammarEnabled=%d): %s",
-             grammar_requested ? 1 : 0, error.what());
+        LOGE("Request sampler initialization failed: %s", error.what());
         engine->last_finish_reason = 3;
-        return grammar_requested ? 9 : 7;
+        return 7;
     } catch (...) {
-        LOGE("Request sampler initialization failed with an unknown exception (grammarEnabled=%d)",
-             grammar_requested ? 1 : 0);
+        LOGE("Request sampler initialization failed with an unknown exception");
         engine->last_finish_reason = 3;
-        return grammar_requested ? 9 : 7;
+        return 7;
     }
     if (engine->sampler == nullptr) {
         LOGE("Request sampler initialization returned null");
@@ -2108,7 +2084,6 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeProcessChat(
                         << ",topP=" << effective_top_p
                         << ",topK=" << engine->default_top_k
                         << ",minP=" << engine->default_min_p
-                        << ",grammarEnabled=" << (grammar_requested ? 1 : 0)
                         << ",repeatPenalty=" << request_sampling.penalty_repeat
                         << ",frequencyPenalty=" << request_sampling.penalty_freq
                         << ",presencePenalty=" << request_sampling.penalty_present
