@@ -413,7 +413,6 @@ internal class LocalLlmEngineImpl(
                 temperature = request.temperature ?: Float.NaN,
                 topP = request.topP ?: Float.NaN,
                 enableThinking = request.enableThinking,
-                grammar = request.grammar.orEmpty(),
                 progressCallback = NativeInferenceProgressCallback { _, _ -> }
             )
         }
@@ -519,7 +518,6 @@ internal class LocalLlmEngineImpl(
                 "topPDefault=${activeConfig?.topP ?: "unknown"},topPOverride=${request.topP ?: "default"}," +
                 "topK=${activeConfig?.topK ?: -1},minP=${activeConfig?.minP ?: "unknown"}," +
                 "maxPredictTokens=${request.maxPredictTokens},enableThinking=${request.enableThinking}," +
-                "grammarEnabled=${!request.grammar.isNullOrEmpty()}," +
                 "messageCount=${request.messages.size},inputChars=${request.messages.sumOf { it.content.length }}," +
                 "timeoutSource=$effectiveTimeoutSource," +
                 "timeoutServiceBindMs=${effectiveTimeout?.serviceBindMs ?: "unknown"}," +
@@ -590,7 +588,6 @@ internal class LocalLlmEngineImpl(
                     temperature = request.temperature ?: Float.NaN,
                     topP = request.topP ?: Float.NaN,
                     enableThinking = request.enableThinking,
-                    grammar = request.grammar.orEmpty(),
                     progressCallback = progressCallback
                 )
             }
@@ -659,7 +656,6 @@ internal class LocalLlmEngineImpl(
                 4 -> "llama.cpp failed while decoding the prompt"
                 5 -> "The model chat template could not be formatted"
                 7 -> "Native request sampler initialization failed"
-                9 -> "GBNF grammar is invalid or could not be initialized; verify its syntax and the root rule."
                 8 -> "Prompt zu lang: Ältere Chat-Nachrichten wurden bereits entfernt, aber System-Prompt und letzte Nutzernachricht passen nicht gemeinsam in den Modellkontext. Verkleinere die letzte Nachricht oder erhöhe den Kontext."
                 else -> "Native prompt evaluation failed with code $processRes"
             }
