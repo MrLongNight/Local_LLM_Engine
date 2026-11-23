@@ -1131,10 +1131,8 @@ internal class InferenceClient(
             }
         }
 
-        // Run the deadline watchdog independently of the collector/UI dispatcher. A busy
-        // collector thread must not postpone first-token, prefill, or total-timeout enforcement.
-        // All timestamps remain monotonic; only the scheduling context changes.
-        watchdogJob = launch(Dispatchers.Default) {
+        // Tiered monotonic watchdog using System.nanoTime()
+        watchdogJob = launch {
             while (isActive && activeRequestId.get() == requestId && pendingTimeout.get() == null) {
                 delay(WATCHDOG_CHECK_INTERVAL_MS)
                 val now = System.nanoTime()
