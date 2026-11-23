@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.util.Log
 import com.mydocanizer.llm.engine.BackendInfo
+import com.mydocanizer.llm.engine.BackendPreference
 import com.mydocanizer.llm.engine.BuildConfig
 import com.mydocanizer.llm.engine.EngineConfig
 import com.mydocanizer.llm.engine.EngineDiagnostics
@@ -22,6 +23,7 @@ import com.mydocanizer.llm.engine.LocalLlmEngine
 import com.mydocanizer.llm.engine.internal.LocalLlmEngineImpl
 import com.mydocanizer.llm.engine.internal.ModelMemoryGuard
 import com.mydocanizer.llm.engine.internal.InsufficientModelMemoryException
+import com.mydocanizer.llm.engine.internal.InsufficientAvailableModelMemoryException
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
@@ -295,7 +297,12 @@ class InferenceService : Service() {
                         availableBytes = memoryInfo.availMem,
                         totalBytes = memoryInfo.totalMem,
                         lowMemory = memoryInfo.lowMemory,
-                        allowHardLimitOverride = config.memoryGuardOverride
+                        allowHardLimitOverride = config.memoryGuardOverride,
+                        // CPU model pages and native allocations are private to this process
+                        // on the tested path. Do not repeat the SIGKILL seen when the
+                        // minimum-context estimate still exceeds currently available RAM.
+                        // Vulkan keeps the existing soft available-memory policy for UMA.
+                        requireAvailableMemory = config.backendPreference == BackendPreference.CPU
                     )
                     val effectiveConfig = if (memoryPlan.contextReduced) {
                         config.copy(contextSize = memoryPlan.effectiveContextTokens)
@@ -308,6 +315,9 @@ class InferenceService : Service() {
                             "requestedContext=${config.contextSize},effectiveContext=${effectiveConfig.contextSize}," +
                             "contextReduced=${memoryPlan.contextReduced},pressureWarning=${memoryPlan.pressureWarning}," +
                             "hardLimitExceeded=${memoryPlan.hardLimitExceeded},overrideApplied=${memoryPlan.overrideApplied}," +
+                            "strictAvailableMemory=${memoryPlan.strictAvailableMemory}," +
+                            "availableLimitExceeded=${memoryPlan.availableLimitExceeded}," +
+                            "availableLimitOverrideApplied=${memoryPlan.availableLimitOverrideApplied}," +
                             "lowMemory=${memoryInfo.lowMemory}"
                     )
 
@@ -338,8 +348,9 @@ class InferenceService : Service() {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (t: Throwable) {
-                    if (t is InsufficientModelMemoryException) {
-                        EngineDiagnostics.info(
+                    when (t) {
+                        is InsufficientModelMemoryException,
+                        is InsufficientAvailableModelMemoryException -> EngineDiagnostics.info(
                             "memory",
                             "MODEL_LOAD_MEMORY_REJECTED",
                             t.diagnosticDetails()
