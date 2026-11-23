@@ -125,7 +125,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             )
 
             val testLines = serviceLog.readLines().drop(initialLineCount)
-            val snapshots = testLines.filter { it.contains("[memory] RESOURCE_SNAPSHOT:") }
+            val snapshots = testLines.filter { it.contains("[memory] RESOURCE_SNAPSHOT - ") }
             assertTrue("At least nine lifecycle snapshots must be persisted; found ${snapshots.size}", snapshots.size >= 9)
 
             val expectedPhases = listOf(
@@ -188,7 +188,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             )
 
             val nativeStateLines = testLines
-                .filter { it.contains("[native] NATIVE_MODEL_RESOURCE_STATE: ") }
+                .filter { it.contains("[native] NATIVE_MODEL_RESOURCE_STATE - ") }
             val loadedNativeState = nativeStateLines.firstOrNull {
                 it.contains("stage=AFTER_LOAD_ATTEMPT,resultCode=0,")
             } ?: throw AssertionError("Native state after successful load was not recorded")
@@ -309,10 +309,11 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
         }
     }
 
+    // Persisted DiagnosticEventEnvelope lines use " - "; Android Logcat formats the same event with ":".
     private suspend fun awaitNativeState(logFile: File, stage: String) {
         withTimeout(10_000L) {
             while (!logFile.isFile || logFile.readLines(Charsets.UTF_8).none { line ->
-                    line.contains("[native] NATIVE_MODEL_RESOURCE_STATE: stage=$stage,")
+                    line.contains("[native] NATIVE_MODEL_RESOURCE_STATE - ") && line.contains("stage=$stage,")
                 }
             ) {
                 delay(50L)
@@ -330,7 +331,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
         while (observedLineCount == null) {
             val lines = if (logFile.isFile) logFile.readLines(Charsets.UTF_8) else emptyList()
             if (lines.drop(afterLineCount).any { line ->
-                    line.contains("[memory] RESOURCE_SNAPSHOT: pid=$pid,phase=$phase,")
+                    line.contains("[memory] RESOURCE_SNAPSHOT - ") && line.contains("pid=$pid,phase=$phase,")
                 }
             ) {
                 observedLineCount = lines.size
