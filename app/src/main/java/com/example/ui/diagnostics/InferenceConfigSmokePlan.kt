@@ -200,6 +200,26 @@ internal object InferenceConfigSmokePlan {
             (requested.sha256.isNullOrBlank() ||
                 requested.sha256.equals(loaded.sha256, ignoreCase = true))
 
+    internal const val CPU_MEMORY_GUARD_REJECTED = "CPU_MEMORY_GUARD_REJECTED"
+
+    /**
+     * A CPU load rejected by the available-RAM admission guard is an unavailable
+     * reference, not an inference/backend failure. Search wrapped IPC causes as well
+     * as the top-level exception because loadModel errors may cross the service boundary.
+     */
+    internal fun isCpuMemoryGuardAdmissionRejection(
+        profileBackend: String,
+        error: Throwable
+    ): Boolean {
+        if (!profileBackend.equals("CPU", ignoreCase = true)) return false
+        var current: Throwable? = error
+        repeat(8) {
+            if (current?.message?.contains("MEMORY_GUARD_OVERRIDE_REQUIRED:") == true) return true
+            current = current?.cause
+        }
+        return false
+    }
+
     internal fun requiresQ4kDecodeEvidence(expectedBackend: String, expectsQ4kModel: Boolean): Boolean =
         expectedBackend.equals("VULKAN", ignoreCase = true) && expectsQ4kModel
 
