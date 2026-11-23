@@ -67,6 +67,8 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             val servicePid = client.remotePid.value
                 ?: throw AssertionError("Inference service PID was not published")
             val serviceLog = File(context.filesDir, "diagnostics/engine-$servicePid.log")
+            val initialLineCount = if (serviceLog.isFile) serviceLog.readLines().size else 0
+            var lastObservedLineCount = initialLineCount
 
             repeat(2) { cycle ->
                 val loaded = client.loadModel(ModelSource.FilePath(modelFile.absolutePath), config)
@@ -74,21 +76,28 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                     "Model load cycle ${cycle + 1} must succeed: ${loaded.exceptionOrNull()}",
                     loaded.isSuccess
                 )
-                awaitSnapshot(serviceLog, servicePid, "MODEL_LOADED_IDLE")
+                lastObservedLineCount = awaitSnapshot(
+                    serviceLog, servicePid, "MODEL_LOADED_IDLE", lastObservedLineCount
+                )
 
                 val unloaded = client.unloadModel()
                 assertTrue(
                     "Model unload cycle ${cycle + 1} must succeed: ${unloaded.exceptionOrNull()}",
                     unloaded.isSuccess
                 )
-                awaitSnapshot(serviceLog, servicePid, "MODEL_UNLOADED")
+                lastObservedLineCount = awaitSnapshot(
+                    serviceLog, servicePid, "MODEL_UNLOADED", lastObservedLineCount
+                )
             }
 
             val failedLoad = client.loadModel(ModelSource.FilePath(invalidModelFile.absolutePath), config)
             assertTrue("Invalid GGUF must fail rather than leave a loaded model", failedLoad.isFailure)
-            awaitSnapshot(serviceLog, servicePid, "MODEL_LOAD_FAILED")
+            lastObservedLineCount = awaitSnapshot(
+                serviceLog, servicePid, "MODEL_LOAD_FAILED", lastObservedLineCount
+            )
 
-            val snapshots = serviceLog.readLines().filter { it.contains("[memory] RESOURCE_SNAPSHOT - ") }
+            val testLines = serviceLog.readLines().drop(initialLineCount)
+            val snapshots = testLines.filter { it.contains("[memory] RESOURCE_SNAPSHOT - ") }
             assertTrue("At least nine lifecycle snapshots must be persisted; found ${snapshots.size}", snapshots.size >= 9)
 
             val expectedPhases = listOf(
@@ -138,7 +147,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                 fdTimeline.size >= 9
             )
 
-            val nativeStateLines = serviceLog.readLines()
+            val nativeStateLines = testLines
                 .filter { it.contains("[native] NATIVE_MODEL_RESOURCE_STATE - ") }
             val loadedNativeState = nativeStateLines.firstOrNull {
                 it.contains("stage=AFTER_LOAD_ATTEMPT,loadResult=0,")
@@ -173,7 +182,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                     assertTrue("Failed native load must clean up $field: $failedNativeState", failedNativeState.contains(field))
                 }
 
-            val report = EngineDiagnostics.buildCompactReportForTest(serviceLog.readLines())
+            val report = EngineDiagnostics.buildCompactReportForTest(testLines)
             listOf("nativeHeapFree=", "nativeHeapSize=", "VmRSS=", "VmHWM=", "openFDs=", "threads=")
                 .forEach { field ->
                     assertTrue("Exported memory timeline must retain $field", report.contains(field))
@@ -187,16 +196,23 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
         }
     }
 
-    private suspend fun awaitSnapshot(logFile: File, pid: Int, phase: String) {
-        withTimeout(10_000L) {
-            while (!logFile.isFile || logFile.readText(Charsets.UTF_8)
-                    .lineSequence()
-                    .none { line ->
-                        line.contains("[memory] RESOURCE_SNAPSHOT - pid=$pid,phase=$phase,")
-                    }
+    private suspend fun awaitSnapshot(
+        logFile: File,
+        pid: Int,
+        phase: String,
+        afterLineCount: Int
+    ): Int = withTimeout(10_000L) {
+        while (true) {
+            val lines = if (logFile.isFile) logFile.readLines(Charsets.UTF_8) else emptyList()
+            if (lines.drop(afterLineCount).any { line ->
+                    line.contains("[memory] RESOURCE_SNAPSHOT - pid=$pid,phase=$phase,")
+                }
             ) {
-                delay(50L)
+                return@withTimeout lines.size
             }
+            delay(50L)
         }
+        @Suppress("UNREACHABLE_CODE")
+        afterLineCount
     }
 }
