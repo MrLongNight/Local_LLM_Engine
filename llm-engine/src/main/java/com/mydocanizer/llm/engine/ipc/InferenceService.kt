@@ -348,12 +348,16 @@ class InferenceService : Service() {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (t: Throwable) {
-                    when (t) {
-                        is InsufficientModelMemoryException,
-                        is InsufficientAvailableModelMemoryException -> EngineDiagnostics.info(
+                    val memoryRejectionDetails = when (t) {
+                        is InsufficientModelMemoryException -> t.diagnosticDetails()
+                        is InsufficientAvailableModelMemoryException -> t.diagnosticDetails()
+                        else -> null
+                    }
+                    if (memoryRejectionDetails != null) {
+                        EngineDiagnostics.info(
                             "memory",
                             "MODEL_LOAD_MEMORY_REJECTED",
-                            t.diagnosticDetails()
+                            memoryRejectionDetails
                         )
                     }
                     Log.e(TAG, "Unhandled exception in loadModel", t)
