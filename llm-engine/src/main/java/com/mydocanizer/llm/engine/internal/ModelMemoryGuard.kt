@@ -24,12 +24,16 @@ internal object ModelMemoryGuard {
         val effectiveContextTokens: Int, val modelBytes: Long, val estimatedKvBytes: Long,
         val requiredBytes: Long, val availableBytes: Long, val totalBytes: Long,
         val hardLimitBytes: Long, val contextReduced: Boolean, val pressureWarning: Boolean,
-        val hardLimitExceeded: Boolean, val overrideApplied: Boolean
+        val hardLimitExceeded: Boolean, val overrideApplied: Boolean,
+        val strictAvailableMemory: Boolean, val availableLimitExceeded: Boolean,
+        val availableLimitOverrideApplied: Boolean
     )
 
     fun plan(
         modelBytes: Long, requestedContextTokens: Int, availableBytes: Long, totalBytes: Long,
-        lowMemory: Boolean = false, allowHardLimitOverride: Boolean = false
+        lowMemory: Boolean = false,
+        allowHardLimitOverride: Boolean = false,
+        requireAvailableMemory: Boolean = false
     ): Plan {
         require(modelBytes > 0L) { "Model file size must be known and greater than zero" }
         require(requestedContextTokens >= MIN_CONTEXT_TOKENS) {
@@ -78,13 +82,27 @@ internal object ModelMemoryGuard {
                 required = requiredBytes(contextTokens)
             }
         }
-        val pressureWarning = initialPressureWarning || required > availableBytes
+        val availableLimitExceeded = availableBytes == 0L || required > availableBytes
+        if (requireAvailableMemory && availableLimitExceeded && !allowHardLimitOverride) {
+            throw InsufficientAvailableModelMemoryException(
+                modelBytes = modelBytes,
+                requestedContextTokens = requestedContextTokens,
+                effectiveContextTokens = contextTokens,
+                requiredBytes = required,
+                availableBytes = availableBytes,
+                totalBytes = totalBytes
+            )
+        }
+        val pressureWarning = initialPressureWarning || availableLimitExceeded
         return Plan(
             effectiveContextTokens = contextTokens, modelBytes = modelBytes,
             estimatedKvBytes = kvEstimate, requiredBytes = required,
             availableBytes = availableBytes, totalBytes = totalBytes, hardLimitBytes = hardLimitBytes,
             contextReduced = contextTokens != requestedContextTokens, pressureWarning = pressureWarning,
-            hardLimitExceeded = hardLimitExceeded, overrideApplied = hardLimitExceeded && allowHardLimitOverride
+            hardLimitExceeded = hardLimitExceeded, overrideApplied = hardLimitExceeded && allowHardLimitOverride,
+            strictAvailableMemory = requireAvailableMemory,
+            availableLimitExceeded = availableLimitExceeded,
+            availableLimitOverrideApplied = requireAvailableMemory && availableLimitExceeded && allowHardLimitOverride
         )
     }
 
@@ -94,6 +112,36 @@ internal object ModelMemoryGuard {
         if (a == 0L || b == 0L) 0L else if (a > Long.MAX_VALUE / b) Long.MAX_VALUE else a * b
     private fun saturatedAdd(a: Long, b: Long): Long =
         if (a > Long.MAX_VALUE - b) Long.MAX_VALUE else a + b
+}
+
+internal class InsufficientAvailableModelMemoryException(
+    val modelBytes: Long,
+    val requestedContextTokens: Int,
+    val effectiveContextTokens: Int,
+    val requiredBytes: Long,
+    val availableBytes: Long,
+    val totalBytes: Long
+) : IllegalStateException(
+    buildString {
+        append("${ModelMemoryGuard.OVERRIDE_REQUIRED_MARKER} ")
+        append("CPU-Modellladen aus Sicherheitsgründen abgebrochen: ")
+        append("Geschätzter Mindestbedarf=${requiredBytes / (1024L * 1024L)} MiB liegt über ")
+        append("dem aktuell verfügbaren Speicher=${availableBytes / (1024L * 1024L)} MiB ")
+        append("(Kontext=$effectiveContextTokens, Modell=${modelBytes / (1024L * 1024L)} MiB). ")
+        append("Schließe speicherintensive Apps oder bestätige „Trotzdem laden“ ausdrücklich.")
+    }
+) {
+    val reasonCode: String
+        get() = REASON_CPU_AVAILABLE_RAM_LIMIT
+
+    fun diagnosticDetails(): String =
+        "reason=$reasonCode,modelBytes=$modelBytes,requestedContext=$requestedContextTokens," +
+            "effectiveContext=$effectiveContextTokens,requiredBytes=$requiredBytes," +
+            "availableBytes=$availableBytes,totalBytes=$totalBytes"
+
+    companion object {
+        const val REASON_CPU_AVAILABLE_RAM_LIMIT = "CPU_AVAILABLE_RAM_LIMIT"
+    }
 }
 
 internal class InsufficientModelMemoryException(
