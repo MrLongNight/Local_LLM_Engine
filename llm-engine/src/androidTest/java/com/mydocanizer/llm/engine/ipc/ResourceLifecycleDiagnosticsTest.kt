@@ -256,6 +256,8 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             }
             assertTrue("Exported report must retain native resource ownership evidence", report.contains("NATIVE_MODEL_RESOURCE_STATE"))
             assertTrue("Exported report must retain released model state", report.contains("modelPresent=0"))
+            assertTrue("Exported report must retain the memory admission plan", report.contains("MODEL_LOAD_MEMORY_PLAN"))
+            assertTrue("CPU memory policy must be visible in the exported report", report.contains("strictAvailableMemory=true"))
         } finally {
             client.close()
             modelFile.delete()
