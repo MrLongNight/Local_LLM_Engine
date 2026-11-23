@@ -156,6 +156,27 @@ class InferenceConfigSmokePlanTest {
     }
 
     @Test
+    fun cpuMemoryGuardRejectionIsUnavailableAndRecognizedThroughWrappedIpcCauses() {
+        val memoryGuardCause = IllegalStateException(
+            "MEMORY_GUARD_OVERRIDE_REQUIRED: CPU model requires more currently available RAM"
+        )
+        val wrapped = IllegalStateException("Remote model load failed", memoryGuardCause)
+
+        assertTrue(
+            InferenceConfigSmokePlan.isCpuMemoryGuardAdmissionRejection("CPU", wrapped)
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.isCpuMemoryGuardAdmissionRejection("VULKAN", wrapped)
+        )
+        assertFalse(
+            InferenceConfigSmokePlan.isCpuMemoryGuardAdmissionRejection(
+                "CPU",
+                IllegalStateException("Native model initialization failed")
+            )
+        )
+    }
+
+    @Test
     fun cpuQ4kReferenceDoesNotRequireVulkanQ4kDecodeEvidence() {
         assertFalse(InferenceConfigSmokePlan.requiresQ4kDecodeEvidence("CPU", true))
         assertFalse(InferenceConfigSmokePlan.requiresQ4kDecodeEvidence("CPU", false))
