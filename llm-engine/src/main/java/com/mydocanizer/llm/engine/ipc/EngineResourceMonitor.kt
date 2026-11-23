@@ -104,6 +104,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         )
         synchronized(nativeMemoryLock) { phase.set("MODEL_LOADING") }
         logPhase("MODEL_LOADING")
+        sample()
     }
 
     fun modelLoaded(info: ModelInfo, config: EngineConfig) {
@@ -124,6 +125,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         )
         synchronized(nativeMemoryLock) { phase.set("MODEL_LOADED_IDLE") }
         logPhase("MODEL_LOADED_IDLE")
+        sample()
     }
 
     fun nativeBackendReady() {
@@ -133,11 +135,13 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
     fun modelUnloading() {
         synchronized(nativeMemoryLock) { phase.set("MODEL_UNLOADING") }
         logPhase("MODEL_UNLOADING")
+        sample()
     }
 
     fun modelLoadFailed() {
         synchronized(nativeMemoryLock) { phase.set("MODEL_LOAD_FAILED") }
         logPhase("MODEL_LOAD_FAILED")
+        sample()
     }
 
     fun inferenceStarted(runId: String) {
@@ -205,6 +209,9 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         model.set(null)
         synchronized(nativeMemoryLock) { phase.set("MODEL_UNLOADED") }
         logPhase("MODEL_UNLOADED")
+        // Capture immediately after llama_model/context unload and descriptor close.
+        // Periodic idle sampling is too sparse to provide a reliable post-release point.
+        sample()
     }
 
     fun modelUnloadFailed() {
@@ -212,6 +219,7 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
             phase.set(if (model.get() == null) "SERVICE_IDLE" else "MODEL_LOADED_IDLE")
         }
         logPhase("MODEL_UNLOAD_FAILED")
+        sample()
     }
 
     private fun logPhase(value: String) {
@@ -249,6 +257,18 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 processMemory.getMemoryStats()["summary.graphics"]?.toLongOrNull()
             }.getOrNull()
 
+            val procStatus = runCatching {
+                File("/proc/${Process.myPid()}/status").useLines { lines ->
+                    lines.mapNotNull { line ->
+                        val separator = line.indexOf(':')
+                        if (separator <= 0) null else line.substring(0, separator) to line.substring(separator + 1).trim()
+                    }.toMap()
+                }
+            }.getOrDefault(emptyMap())
+            val openFdCount = runCatching {
+                File("/proc/${Process.myPid()}/fd").list()?.size
+            }.getOrNull()
+
             val details = buildString {
                 append("pid=${Process.myPid()}")
                 append(",phase=${phase.get()}")
@@ -258,6 +278,16 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
                 append(",otherPssMb=${mb(processMemory.otherPss * 1024L)}")
                 graphicsPssKb?.let { append(",graphicsPssMb=${mb(it * 1024L)}") }
                 append(",nativeHeapAllocatedMb=${mb(Debug.getNativeHeapAllocatedSize())}")
+                append(",nativeHeapFreeMb=${mb(Debug.getNativeHeapFreeSize())}")
+                append(",nativeHeapSizeMb=${mb(Debug.getNativeHeapSize())}")
+                procStatus["VmRSS"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processVmRssMb=${mb(it * 1024L)}")
+                }
+                procStatus["VmHWM"]?.substringBefore(' ')?.toLongOrNull()?.let {
+                    append(",processVmHwmMb=${mb(it * 1024L)}")
+                }
+                procStatus["Threads"]?.toIntOrNull()?.let { append(",processThreads=$it") }
+                append(",openFdCount=${openFdCount ?: "unknown"}")
                 append(",javaHeapUsedMb=${mb(javaUsedBytes)}")
                 append(",javaHeapCommittedMb=${mb(runtime.totalMemory())}")
                 append(",javaHeapMaxMb=${mb(runtime.maxMemory())}")
