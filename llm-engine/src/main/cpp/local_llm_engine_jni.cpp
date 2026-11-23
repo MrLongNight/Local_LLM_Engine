@@ -674,7 +674,24 @@ struct EngineInstance {
             model_file_stream = nullptr;
         }
         active_backend = "None";
-        inference_run_id.clear();
+
+        // clear() retains vector/string capacity. A model unload is an explicit
+        // resource boundary, so return engine-owned prompt/chat buffers instead of
+        // carrying a previous model's peak allocations into the next load.
+        std::vector<llama_token>().swap(cached_tokens);
+        std::vector<common_chat_msg>().swap(chat_msgs);
+        std::string().swap(cached_token_chars);
+        std::string().swap(inference_run_id);
+        std::string().swap(cached_prompt_identity.model_signature);
+        std::string().swap(cached_prompt_identity.prompt_signature);
+        std::string().swap(cached_prompt_identity.sampler_signature);
+        std::string().swap(cached_prompt_identity.context_signature);
+        assistant_ss = std::ostringstream{};
+        supports_incremental_memory_ops = false;
+        cancel_requested.store(false, std::memory_order_relaxed);
+#if defined(LOCAL_LLM_ENABLE_TEXT_DIAGNOSTICS)
+        std::string().swap(last_token_selection_trace);
+#endif
     }
 
     void unload() {
@@ -3041,9 +3058,17 @@ Java_com_mydocanizer_llm_engine_internal_NativeEngineHandle_nativeGetEngineResou
           << ",modelFileStreamOpen=" << (engine->model_file_stream != nullptr ? 1 : 0)
           << ",chatTemplatesPresent=" << (engine->chat_templates != nullptr ? 1 : 0)
           << ",cachedPromptIdentityPresent=" << (engine->has_cached_prompt_identity ? 1 : 0)
+          << ",cachedPromptModelSignatureCapacity=" << engine->cached_prompt_identity.model_signature.capacity()
+          << ",cachedPromptPromptSignatureCapacity=" << engine->cached_prompt_identity.prompt_signature.capacity()
+          << ",cachedPromptSamplerSignatureCapacity=" << engine->cached_prompt_identity.sampler_signature.capacity()
+          << ",cachedPromptContextSignatureCapacity=" << engine->cached_prompt_identity.context_signature.capacity()
           << ",cachedTokens=" << engine->cached_tokens.size()
+          << ",cachedTokensCapacity=" << engine->cached_tokens.capacity()
           << ",cachedTokenChars=" << engine->cached_token_chars.size()
+          << ",cachedTokenCharsCapacity=" << engine->cached_token_chars.capacity()
           << ",chatMessages=" << engine->chat_msgs.size()
+          << ",chatMessagesCapacity=" << engine->chat_msgs.capacity()
+          << ",inferenceRunIdCapacity=" << engine->inference_run_id.capacity()
           << ",currentPosition=" << engine->current_position
           << ",systemPromptPosition=" << engine->system_prompt_position
           << ",stopGenerationPosition=" << engine->stop_generation_position
