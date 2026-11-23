@@ -1046,4 +1046,34 @@ class EngineDiagnosticsTest {
         assertTrue(processSection.contains("reason=REASON_60"))
     }
 
+
+
+    @Test
+    fun compactExportRetainsEveryConfigurationSmokeFailureAndPairingReason() {
+        val lines = listOf(
+            "2026-11-23 20:00:00.000 [INFO] [config_test] CONFIG_SMOKE_STARTED - testMode=GENERAL_MODEL_AGNOSTIC_CPU_VULKAN_PAIR,profiles=6",
+            "2026-11-23 20:00:01.000 [INFO] [config_test] CONFIG_SMOKE_THREAD_POLICY - recommendedThreads=4,profileCount=6",
+            "2026-11-23 20:00:02.000 [INFO] [config_test] CONFIG_SMOKE_PROFILE_RESULT - profile=cpu-reference-t1,status=FAIL,reason=CPU_AVAILABLE_RAM_LIMIT,nativeRunId=unavailable",
+            "2026-11-23 20:00:03.000 [INFO] [config_test] CONFIG_SMOKE_RESULT - profile=paired-gates,threads=1,status=UNAVAILABLE,backendParityReason=CPU_OR_VULKAN_RUN_MISSING,cpuNativeRunId=unavailable,vulkanNativeRunId=vulkan-run-1",
+            "2026-11-23 20:00:04.000 [INFO] [benchmark] CORRECTNESS_GATE_RESULT - profile=CPU_VULKAN_THREAD_SWEEP,threads=1,backend=Vulkan,status=UNAVAILABLE,reason=CPU_OR_VULKAN_RUN_MISSING,comparedSteps=0",
+            "2026-11-23 20:00:05.000 [INFO] [inference] OUTPUT_GATE_RESULT - runId=vulkan-run-1,stage=FINAL,status=TRUNCATED,reason=MAX_TOKENS",
+            "2026-11-23 20:00:06.000 [INFO] [benchmark] D0_CPU_REFERENCE_GATE_RESULT - status=FAIL,requestedRuns=3,completedRuns=2,passedRuns=1"
+        )
+
+        val report = EngineDiagnostics.buildCompactReportForTest(lines)
+        val section = report.substringAfter("[0a] KONFIGURATIONSSMOKE")
+            .substringBefore("[1] CPU/VULKAN-ABNAHMETEST")
+
+        assertTrue(section.contains("CONFIG_SMOKE_STARTED"))
+        assertTrue(section.contains("profile=cpu-reference-t1"))
+        assertTrue(section.contains("CPU_AVAILABLE_RAM_LIMIT"))
+        assertTrue(section.contains("profile=paired-gates"))
+        assertTrue(section.contains("CPU_OR_VULKAN_RUN_MISSING"))
+        assertTrue(section.contains("comparedSteps=0"))
+        assertTrue(section.contains("OUTPUT_GATE_RESULT"))
+        assertTrue(section.contains("reason=MAX_TOKENS"))
+        assertTrue(section.contains("D0_CPU_REFERENCE_GATE_RESULT"))
+        assertTrue(section.contains("completedRuns=2"))
+    }
+
 }
