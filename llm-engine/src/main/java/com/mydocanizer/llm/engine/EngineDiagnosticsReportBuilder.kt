@@ -110,6 +110,7 @@ internal object EngineDiagnosticsReportBuilder {
             "BACKEND_BENCHMARK",
             "MODEL_LOADED",
             "MODEL_UNLOAD",
+            "NATIVE_MODEL_RESOURCE_STATE",
             "SERVICE_CREATED",
             "SERVICE_DESTROYED",
             "SERVICE_DISCONNECTED",
@@ -213,6 +214,7 @@ internal object EngineDiagnosticsReportBuilder {
         "INFERENCE_CANCELLED",
         "INFERENCE_TIMEOUT",
         "INFERENCE_TIMEOUT_POLICY",
+        "NATIVE_MODEL_RESOURCE_STATE",
         "CANCEL_REQUESTED",
         "COOPERATIVE_CANCEL_ESCALATED",
         "TIMEOUT_COOPERATIVE_CANCEL_SENT",
@@ -245,7 +247,19 @@ internal object EngineDiagnosticsReportBuilder {
         "targetPid",
         "source",
         "processKillRequests",
-        "cooperativeCancels"
+        "cooperativeCancels",
+        "loadResult",
+        "handlePresent",
+        "modelPresent",
+        "contextPresent",
+        "batchAllocated",
+        "samplerPresent",
+        "backendSamplerAttached",
+        "modelFileStreamOpen",
+        "cachedTokens",
+        "chatMessages",
+        "modelGeneration",
+        "activeBackend"
     )
 
     private fun isProcessLifecycleEvent(line: String): Boolean {
@@ -265,6 +279,7 @@ internal object EngineDiagnosticsReportBuilder {
     private val fieldSeparator = Regex(""",(?=[A-Za-z][A-Za-z0-9_]*=)""")
 
     private fun readableEventTitle(event: String): String = when (event) {
+        "NATIVE_MODEL_RESOURCE_STATE" -> "Native Modellressourcen nach Load/Unload"
         "APP_BUILD_INFO" -> "App-Build-Identität"
         "CONFIG_SMOKE_REFERENCE_REJECTED" -> "D0-Referenzmodell abgelehnt"
         "CONFIG_SMOKE_D0_BUTTON_STATE" -> "D0-Button-Zustand und Sperrgrund"
