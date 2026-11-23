@@ -152,7 +152,9 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             val loadedNativeState = nativeStateLines.firstOrNull {
                 it.contains("stage=AFTER_LOAD_ATTEMPT,loadResult=0,")
             } ?: throw AssertionError("Native state after successful load was not recorded")
-            listOf("modelPresent=1", "contextPresent=1", "batchAllocated=1", "samplerPresent=1", "modelFileStreamOpen=1")
+            // FilePath loading intentionally does not retain a SAF FILE*; descriptor-backed
+            // ContentUri loading has a separate ownership path.
+            listOf("modelPresent=1", "contextPresent=1", "batchAllocated=1", "samplerPresent=1", "modelFileStreamOpen=0")
                 .forEach { field ->
                     assertTrue("Successful native load must own $field: $loadedNativeState", loadedNativeState.contains(field))
                 }
