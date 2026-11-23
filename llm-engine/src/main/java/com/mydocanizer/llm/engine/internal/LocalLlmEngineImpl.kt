@@ -235,7 +235,7 @@ internal class LocalLlmEngineImpl(
                 progressCallback = progressCallback
             )
 
-            logNativeModelResourceState(handle, stage = "AFTER_LOAD_ATTEMPT", loadResult = ret)
+            logNativeModelResourceState(handle, stage = "AFTER_LOAD_ATTEMPT", resultCode = ret)
 
             when (ret) {
                 0 -> { /* Success */ }
@@ -621,6 +621,12 @@ internal class LocalLlmEngineImpl(
             throw error
         }
 
+        logNativeModelResourceState(
+            handle,
+            stage = "AFTER_INFERENCE_PREFILL",
+            resultCode = processRes
+        )
+
         // Result 6 is llama.cpp's dedicated cooperative prefill-abort result. A cancel
         // can also race just after a successful native return (result 0), but must never
         // mask a genuine native failure such as PROMPT_TOO_LONG (result 8).
@@ -919,6 +925,8 @@ internal class LocalLlmEngineImpl(
             EngineDiagnostics.error("inference", "GENERATION_LOOP_FAILED", t)
             trySend(InferenceEvent.Error(t, outputBuilder.toString()))
         } finally {
+            // Capture native prompt/KV/chat ownership after decode or cancellation has ended.
+            logNativeModelResourceState(handle, stage = "AFTER_INFERENCE")
             nativeWorkActive.set(false)
             progressEvents.close()
             isCancelled.set(false)
@@ -997,18 +1005,18 @@ internal class LocalLlmEngineImpl(
     private fun logNativeModelResourceState(
         handle: Long,
         stage: String,
-        loadResult: Int? = null
+        resultCode: Int? = null
     ) {
         val state = runCatching {
             NativeEngineHandle.nativeGetEngineResourceDiagnostics(handle)
         }.getOrElse { error ->
             "diagnosticsError=${error.javaClass.simpleName}"
         }
-        val loadResultField = loadResult?.let { ",loadResult=$it" }.orEmpty()
+        val resultCodeField = resultCode?.let { ",resultCode=$it" }.orEmpty()
         EngineDiagnostics.info(
             "native",
             "NATIVE_MODEL_RESOURCE_STATE",
-            "stage=$stage$loadResultField,$state"
+            "stage=$stage$resultCodeField,$state"
         )
     }
 
