@@ -206,7 +206,9 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
         while (observedLineCount == null) {
             val lines = if (logFile.isFile) logFile.readLines(Charsets.UTF_8) else emptyList()
             if (lines.drop(afterLineCount).any { line ->
-                    line.contains("[memory] RESOURCE_SNAPSHOT - pid=$pid,phase=$phase,")
+                    line.contains("[memory] RESOURCE_SNAPSHOT - ") &&
+                            line.contains("pid=$pid,") &&
+                            line.contains("phase=$phase,")
                 }
             ) {
                 observedLineCount = lines.size
