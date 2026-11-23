@@ -207,6 +207,8 @@ abstract class ConfigurationSmokeViewModel(
             val rows = mutableListOf<String>()
             val profileSamples = mutableMapOf<String, ConfigurationSmokeSample>()
             val profileStatuses = mutableMapOf<String, String>()
+            val profileUnavailableReasons = mutableMapOf<String, String>()
+            var cpuMemoryGuardUnavailableDetail: String? = null
             var stopRemainingProfilesReason: String? = null
             var pendingRecoveryFromProfile: String? = null
             var pendingRecoveryObservedState: String? = null
@@ -244,6 +246,30 @@ abstract class ConfigurationSmokeViewModel(
                             previousStopReason
                         )
                         rows += profile.id + ": NOT_RUN (" + previousStopReason + ")"
+                        continue
+                    }
+
+                    // Once CPU admission is rejected for this exact model/config family,
+                    // do not repeat the same guaranteed-to-fail load for remaining CPU profiles.
+                    // Vulkan profiles remain eligible and continue through their normal path.
+                    if (profile.expectedBackend == "CPU" && cpuMemoryGuardUnavailableDetail != null) {
+                        val reasonCode = InferenceConfigSmokePlan.CPU_MEMORY_GUARD_REJECTED
+                        profileStatuses[profile.id] = "UNAVAILABLE"
+                        profileUnavailableReasons[profile.id] = reasonCode
+                        recordConfigurationSmokeProfileResult(
+                            profile.id,
+                            "UNAVAILABLE",
+                            reasonCode + ": " + cpuMemoryGuardUnavailableDetail
+                        )
+                        val safeDetail = cpuMemoryGuardUnavailableDetail!!
+                            .replace(',', ';').lines().joinToString(" ").take(320)
+                        EngineDiagnostics.info(
+                            "config_test",
+                            "CONFIG_SMOKE_RESULT",
+                            "profile=" + profile.id + ",requestedBackend=CPU,status=UNAVAILABLE," +
+                                "reason=" + reasonCode + ",reasonDetail=" + safeDetail + ",loadMs=-1"
+                        )
+                        rows += profile.id + ": UNAVAILABLE (" + reasonCode + ")"
                         continue
                     }
 
@@ -516,6 +542,46 @@ abstract class ConfigurationSmokeViewModel(
                         stopRemainingProfilesReason = "MODEL_IDENTITY_MISMATCH"
                         stoppedReason = "Modellidentität änderte sich zwischen den Profilen; weitere Läufe wurden gestoppt."
                     } catch (error: Exception) {
+                        val memoryGuardDetail =
+                            InferenceConfigSmokePlan.cpuMemoryGuardAdmissionRejection(profile.expectedBackend, error)
+                        if (memoryGuardDetail != null) {
+                            val reasonCode = InferenceConfigSmokePlan.CPU_MEMORY_GUARD_REJECTED
+                            cpuMemoryGuardUnavailableDetail = memoryGuardDetail
+                            profileStatuses[profile.id] = "UNAVAILABLE"
+                            profileUnavailableReasons[profile.id] = reasonCode
+                            recordConfigurationSmokeProfileResult(
+                                profile.id,
+                                "UNAVAILABLE",
+                                reasonCode + ": " + memoryGuardDetail,
+                                profileLoadMs
+                            )
+                            val safeDetail = memoryGuardDetail
+                                .replace(',', ';').lines().joinToString(" ").take(320)
+                            EngineDiagnostics.info(
+                                "config_test",
+                                "CONFIG_SMOKE_RESULT",
+                                "profile=" + profile.id + ",requestedBackend=CPU,status=UNAVAILABLE," +
+                                    "reason=" + reasonCode + ",reasonDetail=" + safeDetail +
+                                    ",loadMs=" + (profileLoadMs ?: -1L)
+                            )
+                            rows += profile.id + ": UNAVAILABLE (" + reasonCode + ")"
+                            // This admission rejection happens before native model loading.
+                            // It does not require an IPC/service recovery attempt.
+                            pendingRecoveryFromProfile?.let { failedProfile ->
+                                EngineDiagnostics.error(
+                                    "config_test",
+                                    "CONFIG_SMOKE_PROFILE_RECOVERY_FAILED",
+                                    IllegalStateException(
+                                        "Profile $profile could not confirm recovery after $failedProfile: " +
+                                            "CPU memory guard rejected the model load"
+                                    )
+                                )
+                                pendingRecoveryFromProfile = null
+                                pendingRecoveryObservedState = null
+                                stopRemainingProfilesReason = "SERVICE_RECOVERY_UNAVAILABLE"
+                            }
+                            continue
+                        }
                         pendingRecoveryFromProfile?.let { failedProfile ->
                             EngineDiagnostics.error(
                                 "config_test",
@@ -621,10 +687,16 @@ abstract class ConfigurationSmokeViewModel(
                     }
                     d0CpuGateCombinedStatus = d0Status
                     val nativeRunIds = profiles.mapNotNull { profileSamples[it.id]?.result?.nativeRunId }
+                    val d0Reason = when {
+                        d0Status == "PASS" -> "ALL_CPU_REFERENCE_RUNS_PASSED"
+                        cpuMemoryGuardUnavailableDetail != null -> InferenceConfigSmokePlan.CPU_MEMORY_GUARD_REJECTED
+                        else -> "CPU_REFERENCE_RUNS_INCOMPLETE_OR_FAILED"
+                    }
                     EngineDiagnostics.info(
                         "benchmark",
                         "D0_CPU_REFERENCE_GATE_RESULT",
                         "status=" + d0Status +
+                            ",reason=" + d0Reason +
                             ",requestedRuns=" + InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS +
                             ",completedRuns=" + completedRuns +
                             ",passedRuns=" + passedRuns +
@@ -640,7 +712,11 @@ abstract class ConfigurationSmokeViewModel(
                         ", abgeschlossen=" + completedRuns + "/" + InferenceConfigSmokePlan.D0_CPU_REFERENCE_RUNS +
                         ", Vulkan=NICHT AUSGEFÜHRT)"
                     if (d0Status != "PASS") {
-                        rows += "D0 bleibt offen: alle drei quellgrößen-geprüften CPU-Läufe müssen nichtleere Ausgabe und FinishReason=STOP bestehen."
+                        rows += if (d0Reason == InferenceConfigSmokePlan.CPU_MEMORY_GUARD_REJECTED) {
+                            "D0 nicht ausführbar: CPU-Modellladen wurde durch den verfügbaren RAM-Schutz blockiert."
+                        } else {
+                            "D0 bleibt offen: alle drei quellgrößen-geprüften CPU-Läufe müssen nichtleere Ausgabe und FinishReason=STOP bestehen."
+                        }
                     }
                 } else {
                     publishSmokeProgress(
@@ -655,8 +731,10 @@ abstract class ConfigurationSmokeViewModel(
                         .sorted()
                     val pairStatuses = mutableListOf<String>()
                     for (threadCount in threadCounts) {
-                        val cpuSample = profileSamples["cpu-reference-t$threadCount"]
+                        val cpuProfileId = "cpu-reference-t$threadCount"
+                        val cpuSample = profileSamples[cpuProfileId]
                         val vulkanSample = profileSamples["vulkan-candidate-t$threadCount"]
+                        val cpuUnavailableReason = profileUnavailableReasons[cpuProfileId]
                         var numericGate: EngineDiagnostics.BackendCorrectnessResult? = null
                         val pairedGateSummary = InferenceConfigSmokePlan.evaluatePairedGate(
                             cpuSample?.outputGatePassed,
@@ -670,7 +748,7 @@ abstract class ConfigurationSmokeViewModel(
                         }
                         val gate = numericGate ?: EngineDiagnostics.BackendCorrectnessResult(
                             "UNAVAILABLE",
-                            "CPU_OR_VULKAN_RUN_MISSING"
+                            cpuUnavailableReason ?: "CPU_OR_VULKAN_RUN_MISSING"
                         )
                         pairStatuses += pairedGateSummary.combinedStatus
                         val cpuOutputGateStatus = when (cpuSample?.outputGatePassed) {
@@ -686,6 +764,8 @@ abstract class ConfigurationSmokeViewModel(
                         val gateDetails = "profile=CPU_VULKAN_THREAD_SWEEP,threads=$threadCount,backend=Vulkan," +
                             "gateRunId=" + (vulkanSample?.result?.nativeRunId ?: "unavailable") +
                             ",cpuReferenceRunId=" + (cpuSample?.result?.nativeRunId ?: "unavailable") +
+                            ",cpuProfileStatus=" + (profileStatuses[cpuProfileId] ?: "NOT_RECORDED") +
+                            ",cpuUnavailableReason=" + (cpuUnavailableReason ?: "n/a") +
                             ",status=" + gate.status +
                             ",reason=" + gate.reason +
                             ",comparedSteps=" + gate.comparedSteps +
