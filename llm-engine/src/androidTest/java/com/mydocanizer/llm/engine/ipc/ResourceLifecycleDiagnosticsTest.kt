@@ -184,7 +184,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             val nativeStateLines = testLines
                 .filter { it.contains("[native] NATIVE_MODEL_RESOURCE_STATE - ") }
             val loadedNativeState = nativeStateLines.firstOrNull {
-                it.contains("stage=AFTER_LOAD_ATTEMPT,loadResult=0,")
+                it.contains("stage=AFTER_LOAD_ATTEMPT,resultCode=0,")
             } ?: throw AssertionError("Native state after successful load was not recorded")
             // FilePath loading intentionally does not retain a SAF FILE*; descriptor-backed
             // ContentUri loading has a separate ownership path.
@@ -239,7 +239,7 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
             }
 
             val failedNativeState = nativeStateLines.lastOrNull {
-                it.contains("stage=AFTER_LOAD_ATTEMPT,") && !it.contains("loadResult=0,")
+                it.contains("stage=AFTER_LOAD_ATTEMPT,") && !it.contains("resultCode=0,")
             } ?: throw AssertionError("Native state after failed model load was not recorded")
             listOf("modelPresent=0", "contextPresent=0", "batchAllocated=0", "samplerPresent=0", "modelFileStreamOpen=0")
                 .forEach { field ->
