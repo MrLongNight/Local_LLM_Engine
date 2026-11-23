@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### 23.11.2026 — Ressourcenlebenszyklus und Build-Verifikation
+
+- Native Unload-Freigabe ergänzt: Token-/Chat-Vektoren, Strings und Diagnosepuffer geben ihre Kapazität explizit frei; Stream-Zustand und Laufflags werden zurückgesetzt.
+- Native Lifecycle-Diagnostik erfasst Zustände nach Load-Versuchen, vor/nach Inferenz und nach Unload. Der Export bewahrt Objekt-/Buffer-Zustände und Kapazitäten; Prozess-Snapshots ergänzen PSS, Native Heap, RSS-Aufteilung, Swap, Threads und offene FD-Anzahl.
+- Der explizite CPU-Load-Pfad lehnt nach Context-Reduktion bis 256 Tokens unzureichendes verfügbares RAM mit `CPU_AVAILABLE_RAM_LIMIT` ab. Der Override ist weiterhin ausdrücklich möglich; Vulkan behält seine weichere Available-RAM-Policy.
+- Android-Instrumentierung für wiederholte Load-/Unload-Zyklen, echte Inferenz, Prefill-/Post-Inferenz-Snapshots, Buffer-Freigabe und Fehlerbereinigung bei ungültigem GGUF ergänzt.
+- Android APK Build #724 (Run `45229659440`, Code-SHA `ced5ff7`) baute APKs erfolgreich, scheiterte aber bei 2 von 19 Emulator-Tests: `GrammarConstraintTest` akzeptierte das Produktions-`TRIAGE_JSON_GBNF` nicht; `ResourceLifecycleDiagnosticsTest` wartete wegen eines veralteten Snapshot-Log-Prefixes 10 Sekunden vergeblich.
+- Die GBNF-Fixture wurde mit Commit `f9ec2452b884c45b71338dd041da0d726b248a4c` an die Parserregeln des gepinnten llama.cpp angepasst. Der Lifecycle-Test sucht seit Commit `7fb2a0de3110099db420f6c01f57d9868cdd9a53` nach dem tatsächlich emittierten Format `RESOURCE_SNAPSHOT:`.
+- Unit Tests #870 (Run `45267988847`, SHA `7fb2a0d`) und #871 (Run `45268656374`, SHA `15ce396`) sind erfolgreich. Android APK #726 (Run `45268309664`, SHA `7fb2a0d`) hat beim letzten Statusabruf Build, APK-Prüfungen und beide APK-Uploads bestanden; Emulator-Instrumentierung lief noch. Android APK #727 (Run `45269066910`, SHA `15ce396`) war ebenfalls noch aktiv. Keine der beiden Android-Abnahmen wird vor Abschluss der Emulator-Tests als SUCCESS gewertet.
+- Der APK-Workflow entfernt in Commit `15ce396c589650362388b377fb42dc5cc8b2ad1e` die bisherige `cancel-in-progress: true`-Concurrency-Konfiguration, die aktive APK-Läufe bei weiteren Workflow-Ereignissen abbrechen konnte. Damit werden aktive Builds nicht mehr durch diese Concurrency-Gruppe gegenseitig abgebrochen; parallele Builds können dadurch allerdings gleichzeitig laufen.
+
+
 ### Documentation
 
 - Added a canonical Mermaid architecture reference and made project-structure discipline, avoidance of unrelated refactoring and same-commit diagram updates explicit agent requirements.
