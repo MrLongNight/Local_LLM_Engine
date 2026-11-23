@@ -298,10 +298,10 @@ class InferenceService : Service() {
                         totalBytes = memoryInfo.totalMem,
                         lowMemory = memoryInfo.lowMemory,
                         allowHardLimitOverride = config.memoryGuardOverride,
-                        // CPU model pages and native allocations are private to this process
-                        // on the tested path. Do not repeat the SIGKILL seen when the
-                        // minimum-context estimate still exceeds currently available RAM.
-                        // Vulkan keeps the existing soft available-memory policy for UMA.
+                        // The device CPU reference previously ended with SIGNALED status 9
+                        // while its minimum-context estimate exceeded available RAM. Reject
+                        // before native allocation rather than repeat that process kill.
+                        // Vulkan keeps the soft available-memory policy for UMA accounting.
                         requireAvailableMemory = config.backendPreference == BackendPreference.CPU
                     )
                     val effectiveConfig = if (memoryPlan.contextReduced) {
