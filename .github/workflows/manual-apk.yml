@@ -232,7 +232,7 @@ jobs:
         shell: bash
         env:
           APP_BUILD_NUMBER: ${{ github.run_number }}
-          ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
+          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]')) }}
           MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || 'BLOCK' }}
         run: |
           set -euo pipefail
@@ -259,10 +259,10 @@ jobs:
           # Kotlin/Dex output from an earlier run can survive a changed CI version number.
           gradle --no-daemon --no-build-cache clean "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
 
-      - name: Verify standard Debug BuildConfig selection
+      - name: Verify Debug BuildConfig selection
         shell: bash
         env:
-          ENABLE_VULKAN_PERF_PROFILER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler || 'false' }}
+          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]')) }}
         run: |
           set -euo pipefail
           expected=false
