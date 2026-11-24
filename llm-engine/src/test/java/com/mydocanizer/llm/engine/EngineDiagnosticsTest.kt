@@ -351,6 +351,28 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun compactReportRetainsSeparateKleidiAiQ4KernelSelectionsAndMarksMissingEvidenceUnavailable() {
+        val q4Selection =
+            "2026-11-24 10:00:00.000 [NATIVE] kleidiai: primary q4 kernel feature DOTPROD"
+        val q4kSelection =
+            "2026-11-24 10:00:01.000 [NATIVE] kleidiai: primary q4_k kernel feature I8MM"
+        val report = EngineDiagnostics.buildCompactReportForTest(listOf(q4Selection, q4kSelection))
+        val runtimeSection = report.substringAfter("[2] VULKAN-LAUFZEIT")
+            .substringBefore("[3] VULKAN-GPU-OPERATIONSPROFIL")
+
+        assertTrue(runtimeSection.contains("CPU/KleidiAI-Q4-Kernelwahl"))
+        assertTrue(runtimeSection.contains("primary q4 kernel feature DOTPROD"))
+        assertTrue(runtimeSection.contains("primary q4_k kernel feature I8MM"))
+        assertFalse(runtimeSection.contains("UNAVAILABLE"))
+
+        val missingReport = EngineDiagnostics.buildCompactReportForTest(emptyList())
+        val missingRuntimeSection = missingReport.substringAfter("[2] VULKAN-LAUFZEIT")
+            .substringBefore("[3] VULKAN-GPU-OPERATIONSPROFIL")
+        assertTrue(missingRuntimeSection.contains("UNAVAILABLE"))
+        assertTrue(missingRuntimeSection.contains("generischer NEON-Fallback kann nicht ausgeschlossen werden"))
+    }
+
+    @Test
     fun compactReportRetainsPerRunCpuAndVulkanGraphNodeDistribution() {
         val distribution = "2026-11-12 05:00:00.000 [NATIVE] llama_context: " +
             "LOCAL_LLM_GRAPH_BACKEND_DISTRIBUTION - runId=matrix-q4-run,graphNodes=128," +

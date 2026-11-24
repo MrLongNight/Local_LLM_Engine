@@ -913,6 +913,13 @@ internal object EngineDiagnosticsReportBuilder {
                 graphBackendDistributionEvidence + graphOpBackendDistributionEvidence +
                 inferencePhaseTotalsEvidence + qwen35GdnPolicyEvidence
             ).distinct().map { compactLine(it, 360) }
+        // Upstream KleidiAI reports Q4_0 and Q4_K kernel selection separately. These
+        // INFO lines are persisted by the native logger but must be explicitly retained
+        // here instead of being lost in the generic native-event tail.
+        val kleidiAiQ4KernelEvidence = nativeLines.filter {
+            it.contains("kleidiai: primary q4 kernel feature", ignoreCase = true) ||
+                it.contains("kleidiai: primary q4_k kernel feature", ignoreCase = true)
+        }.takeLast(4)
 
         // The upstream Vulkan profiler emits one timestamp-query row per operator.
         // Keep only the newest snapshots, then report per-op p50/p90 instead of
@@ -1265,6 +1272,12 @@ internal object EngineDiagnosticsReportBuilder {
                 appendLine("Keine passende Runtime-Zeile für Mali-Treiberfähigkeiten oder tatsächliche Layer-Zuweisung im nativen Log gefunden.")
             } else {
                 nativePriorityEvidence.map(::readableNativeLine).forEach(::appendLine)
+            }
+            appendLine("CPU/KleidiAI-Q4-Kernelwahl (Q4_0 und Q4_K getrennt):")
+            if (kleidiAiQ4KernelEvidence.isEmpty()) {
+                appendLine("UNAVAILABLE: keine upstream-Kernelwahl protokolliert; generischer NEON-Fallback kann nicht ausgeschlossen werden.")
+            } else {
+                kleidiAiQ4KernelEvidence.map(::readableNativeLine).forEach(::appendLine)
             }
             appendLine()
             appendLine("[3] VULKAN-GPU-OPERATIONSPROFIL – LETZTE ${MAX_VULKAN_PROFILE_SNAPSHOTS} GRAPH-SNAPSHOTS")
