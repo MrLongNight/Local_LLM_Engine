@@ -622,7 +622,7 @@ class EngineDiagnosticsTest {
                 "pid=900,phase=INFERENCE_d0-run-1,processPssMb=123.4,nativePssMb=80.0," +
                 "nativeHeapAllocatedMb=60.0,javaHeapUsedMb=20.0,systemAvailableRamMb=1000.0," +
                 "thermalStatus=MODERATE"
-        val smokeRows = (1..48).map { index ->
+        val smokeRows = (1..32).map { index ->
             "2026-11-25 22:30:%02d.000 [INFO] [config_test] CONFIG_SMOKE_PROFILE_RESULT - ".format(index % 60) +
                 "profile=cpu-reference-$index,status=PASS,reason=INFERENCE_HEALTH_GATE_PASSED,detail=" +
                 "s".repeat(1_200)
