@@ -29,7 +29,9 @@ internal object EngineDiagnosticsReportBuilder {
     // Keep the export bounded while retaining the complete structured evidence.
     private const val MAX_EXPORT_BYTES = 128 * 1024
     private const val MAX_EVENT_LINES = 24
-    private const val MAX_PROCESS_LIFECYCLE_LINES = 48
+    private const val MAX_CRITICAL_PROCESS_LIFECYCLE_LINES = 32
+    private const val MAX_PROCESS_NATIVE_RESOURCE_STATE_LINES = 8
+    private const val MAX_OTHER_PROCESS_LIFECYCLE_LINES = 8
     private const val MAX_NATIVE_LINES = 14
     private const val MAX_MEMORY_TIMELINE_LINES = 16
     private const val MAX_VULKAN_PROFILE_SNAPSHOTS = 12
@@ -217,6 +219,35 @@ internal object EngineDiagnosticsReportBuilder {
         "INFERENCE_TIMEOUT",
         "INFERENCE_TIMEOUT_POLICY",
         "NATIVE_MODEL_RESOURCE_STATE",
+        "CANCEL_REQUESTED",
+        "COOPERATIVE_CANCEL_ESCALATED",
+        "TIMEOUT_COOPERATIVE_CANCEL_SENT",
+        "TIMEOUT_COOPERATIVE_CANCEL_ACKNOWLEDGED",
+        "TIMEOUT_COOPERATIVE_CANCEL_ESCALATED"
+    )
+
+    private val criticalProcessLifecycleEvents = setOf(
+        "SERVICE_DESTROYED",
+        "SERVICE_DISCONNECTED",
+        "SERVICE_RECONNECT_STARTED",
+        "SERVICE_RECONNECT_BIND_REQUESTED",
+        "SERVICE_RECONNECTED",
+        "BINDING_DIED",
+        "PROCESS_DIED",
+        "PROCESS_RESTART",
+        "PROCESS_EXIT_INFO",
+        "PROCESS_EXIT_INFO_UNAVAILABLE",
+        "PROCESS_KILLED",
+        "KILL_PROCESS_REQUESTED",
+        "HARD_KILL",
+        "PROCESS_KILL_REQUESTED",
+        "PROCESS_ABORT_REQUESTED",
+        "PROCESS_ABORT_CONFIRMED",
+        "PROCESS_ABORT_UNCONFIRMED",
+        "PROCESS_ABORT_SKIPPED_REPLACEMENT",
+        "INFERENCE_TIMEOUT",
+        "INFERENCE_CANCELLED",
+        "INFERENCE_TIMEOUT_POLICY",
         "CANCEL_REQUESTED",
         "COOPERATIVE_CANCEL_ESCALATED",
         "TIMEOUT_COOPERATIVE_CANCEL_SENT",
@@ -636,11 +667,26 @@ internal object EngineDiagnosticsReportBuilder {
             .filter(::isImportantEvent)
             .takeLast(MAX_EVENT_LINES)
             .map { readableEventLine(it) }
-        // Process/service lifecycle evidence has its own bounded tail. It must not be
-        // evicted when later model-load or benchmark events fill the general 24-line tail.
-        val processLifecycleLines = kotlinLines
-            .filter(::isProcessLifecycleEvent)
-            .takeLast(MAX_PROCESS_LIFECYCLE_LINES)
+        // Keep terminal causes, reconnects and kill ownership independently from
+        // repeated native resource snapshots. Reserve only eight rows for snapshots
+        // so they cannot evict process-exit or kill evidence from the bounded tail.
+        val processLifecycleCandidates = kotlinLines.filter(::isProcessLifecycleEvent)
+        val criticalProcessLifecycleLines = processLifecycleCandidates
+            .filter { eventName(it) in criticalProcessLifecycleEvents }
+            .takeLast(MAX_CRITICAL_PROCESS_LIFECYCLE_LINES)
+        val nativeResourceStateLines = processLifecycleCandidates
+            .filter { eventName(it) == "NATIVE_MODEL_RESOURCE_STATE" }
+            .takeLast(MAX_PROCESS_NATIVE_RESOURCE_STATE_LINES)
+        val otherProcessLifecycleLines = processLifecycleCandidates
+            .filter {
+                eventName(it) !in criticalProcessLifecycleEvents &&
+                    eventName(it) != "NATIVE_MODEL_RESOURCE_STATE"
+            }
+            .takeLast(MAX_OTHER_PROCESS_LIFECYCLE_LINES)
+        val processLifecycleLines = (
+            criticalProcessLifecycleLines + nativeResourceStateLines + otherProcessLifecycleLines
+            ).distinct()
+            .sortedBy { timestampPrefix.find(it)?.value ?: "" }
             .map { readableEventLine(it, 620, processLifecyclePreservedFields) }
         // These low-frequency metrics are essential to compare Vulkan against CPU:
         // prefill/tokenization/decode times, generated tokens, generation wall time,
@@ -1295,13 +1341,6 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine("[5] WICHTIGE EREIGNISSE / FEHLER")
             if (events.isEmpty()) appendLine("Keine passenden Ereignisse.")
             events.forEach(::appendLine)
-            appendLine()
-            appendLine("[5a] PROZESS- UND SERVICE-LEBENSZYKLUS")
-            if (processLifecycleLines.isEmpty()) {
-                appendLine("Keine passenden Prozess-/Service-Lifecycle-Ereignisse vorhanden.")
-            }
-            processLifecycleLines.forEach(::appendLine)
-            appendLine()
             // Keep the most valuable throughput and synchronization evidence ahead
             // of the potentially unbounded number of per-PID/per-phase RAM groups.
             appendLine("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
@@ -1313,6 +1352,12 @@ internal object EngineDiagnosticsReportBuilder {
             appendLine()
             appendLine("[8] RAM-ZEITVERLAUF")
             memoryTimeline.forEach(::appendLine)
+            appendLine()
+            appendLine("[9] PROZESS- UND SERVICE-LEBENSZYKLUS")
+            if (processLifecycleLines.isEmpty()) {
+                appendLine("Keine passenden Prozess-/Service-Lifecycle-Ereignisse vorhanden.")
+            }
+            processLifecycleLines.forEach(::appendLine)
             appendLine()
             appendLine("[DIAGNOSTIK-VOLLSTÄNDIGKEIT]")
             appendLine("Debug-Textdiagnostik=${BuildConfig.TEXT_DIAGNOSTICS_ENABLED}; Antworttext wird run-korreliert exportiert; native Eingaben/gerenderte Prompts/Token-IDs und Stichproben der Token-Pieces erscheinen nur bei aktivierter Debug-Textdiagnostik.")

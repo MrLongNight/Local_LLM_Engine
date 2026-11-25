@@ -616,6 +616,52 @@ class EngineDiagnosticsTest {
     }
 
     @Test
+    fun compactExportPrioritizesRamSummaryAndTimelineBeforeVerboseLifecycleTail() {
+        val ramSample =
+            "2026-11-25 22:30:00.000 [INFO] [memory] RESOURCE_SNAPSHOT - " +
+                "pid=900,phase=INFERENCE_d0-run-1,processPssMb=123.4,nativePssMb=80.0," +
+                "nativeHeapAllocatedMb=60.0,javaHeapUsedMb=20.0,systemAvailableRamMb=1000.0," +
+                "thermalStatus=MODERATE"
+        val smokeRows = (1..64).map { index ->
+            "2026-11-25 22:30:%02d.000 [INFO] [config_test] CONFIG_SMOKE_PROFILE_RESULT - ".format(index % 60) +
+                "profile=cpu-reference-$index,status=PASS,reason=INFERENCE_HEALTH_GATE_PASSED,detail=" +
+                "s".repeat(1_200)
+        }
+        val matrixRows = (1..48).map { index ->
+            "2026-11-25 22:29:%02d.000 [INFO] [benchmark] FULL_MATRIX_RESULT - ".format(index % 60) +
+                "profile=profile-$index,status=PASS,measuredTokensPerSecond=1.0,detail=" + "m".repeat(1_200)
+        }
+        val errorRows = (1..24).map { index ->
+            "2026-11-25 22:28:%02d.000 [ERROR] [engine] SYNTHETIC_FAILURE - ".format(index % 60) +
+                "detail=" + "e".repeat(1_200)
+        }
+        val nativeTextRows = (1..10).map { index ->
+            "2026-11-25 22:27:%02d.000 [NATIVE] LOCAL_LLM_TEXT_TRACE - ".format(index % 60) +
+                "runId=priority-run,kind=INPUT_MESSAGES,part=$index/10,text=" + "t".repeat(3_000)
+        }
+        val processEvents = (1..60).map { index ->
+            "2026-11-25 22:26:%02d.000 [INFO] [ipc_client] PROCESS_EXIT_INFO - ".format(index % 60) +
+                "pid=${1000 + index},reason=REASON_$index,description=" + "p".repeat(1_200)
+        }
+
+        val report = EngineDiagnostics.buildCompactReportForTest(
+            listOf(ramSample) + smokeRows + matrixRows + errorRows + nativeTextRows + processEvents
+        )
+        val ramSummaryIndex = report.indexOf("[7] RAM-ZUSAMMENFASSUNG")
+        val ramTimelineIndex = report.indexOf("[8] RAM-ZEITVERLAUF")
+        val lifecycleIndex = report.indexOf("[9] PROZESS- UND SERVICE-LEBENSZYKLUS")
+
+        assertTrue(report.contains("[Export begrenzt: weitere Einträge wurden abgeschnitten]"))
+        assertTrue(ramSummaryIndex >= 0)
+        assertTrue(ramTimelineIndex > ramSummaryIndex)
+        assertTrue(report.contains("PSS_peak=123.4MB"))
+        assertTrue(report.contains("nativePSS_peak=80.0MB"))
+        assertTrue(report.contains("availableRAM_min=1000.0MB"))
+        assertTrue(report.contains("thermal_peak=MODERATE"))
+        assertTrue(lifecycleIndex == -1 || ramTimelineIndex < lifecycleIndex)
+    }
+
+    @Test
     fun compactExportRetainsAll48MatrixProfileRowsWithoutLifecycleEventsDisplacingThem() {
         val lines = mutableListOf<String>()
         for (index in 1..48) {
@@ -1025,8 +1071,8 @@ class EngineDiagnosticsTest {
         }
 
         val report = EngineDiagnostics.buildCompactReportForTest(processEvents + appKillEvents + laterModelEvents)
-        val processSection = report.substringAfter("[5a] PROZESS- UND SERVICE-LEBENSZYKLUS")
-            .substringBefore("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
+        val processSection = report.substringAfter("[9] PROZESS- UND SERVICE-LEBENSZYKLUS")
+            .substringBefore("[DIAGNOSTIK-VOLLSTÄNDIGKEIT]")
 
         assertTrue(processSection.contains("SERVICE_DISCONNECTED"))
         assertTrue(processSection.contains("disconnectedPid=26257"))
@@ -1056,13 +1102,13 @@ class EngineDiagnosticsTest {
         }
 
         val report = EngineDiagnostics.buildCompactReportForTest(processEvents)
-        val processSection = report.substringAfter("[5a] PROZESS- UND SERVICE-LEBENSZYKLUS")
-            .substringBefore("[6] TOKEN-DECODE- UND SYNCHRONISATIONSZEITEN")
+        val processSection = report.substringAfter("[9] PROZESS- UND SERVICE-LEBENSZYKLUS")
+            .substringBefore("[DIAGNOSTIK-VOLLSTÄNDIGKEIT]")
         val retainedExitRows = processSection.lineSequence()
             .filter { it.contains("[PROCESS_EXIT_INFO]") }
             .toList()
 
-        assertEquals(48, retainedExitRows.size)
+        assertEquals(32, retainedExitRows.size)
         assertFalse(processSection.contains("pid=1001"))
         assertTrue(processSection.contains("pid=1060"))
         assertTrue(processSection.contains("reason=REASON_60"))
