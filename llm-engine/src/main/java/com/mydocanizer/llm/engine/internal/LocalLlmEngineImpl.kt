@@ -273,6 +273,7 @@ internal class LocalLlmEngineImpl(
             val cpuFallback = config.backendPreference != BackendPreference.CPU &&
                 nativeActiveBackend.contains("CPU", ignoreCase = true)
             _backendInfo.value = _backendInfo.value.copy(
+                backendName = nativeActiveBackend,
                 requestedBackend = requestedBackend,
                 activeBackend = nativeActiveBackend,
                 requestedGpuLayers = config.gpuLayers,
