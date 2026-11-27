@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.UUID
@@ -194,6 +195,11 @@ internal class LocalLlmEngineImpl(
             )
 
             updateModelLoadProgress(0)
+            val nativeDiagnosticsLog = File(
+                context.filesDir,
+                "diagnostics/engine-native-${android.os.Process.myPid()}.log"
+            )
+            val nativeLogStartOffset = nativeDiagnosticsLog.length()
             val nativeLoadStartNano = System.nanoTime()
             var lastProgressBucket = -1
             val progressCallback = NativeModelLoadProgressCallback { progress ->
@@ -260,11 +266,32 @@ internal class LocalLlmEngineImpl(
                 else -> throw IllegalStateException("Native model load failed with error code: $ret")
             }
 
+            val nativeActiveBackend = NativeEngineHandle.nativeGetActiveBackend(handle)
+                .takeIf { it.isNotBlank() } ?: "UNKNOWN"
+            val gpuOffload = readGpuOffloadForLoad(nativeDiagnosticsLog, nativeLogStartOffset)
+            val requestedBackend = config.backendPreference.name
+            val cpuFallback = config.backendPreference != BackendPreference.CPU &&
+                nativeActiveBackend.contains("CPU", ignoreCase = true)
+            _backendInfo.value = _backendInfo.value.copy(
+                requestedBackend = requestedBackend,
+                activeBackend = nativeActiveBackend,
+                requestedGpuLayers = config.gpuLayers,
+                allocatedGpuLayers = gpuOffload?.allocatedLayers ?: -1,
+                totalGpuLayers = gpuOffload?.totalLayers ?: -1,
+                cpuFallback = cpuFallback
+            )
+            EngineDiagnostics.info(
+                "engine",
+                "NATIVE_BACKEND_ALLOCATION",
+                "requestedBackend=$requestedBackend, activeBackend=$nativeActiveBackend, " +
+                    "requestedGpuLayers=${config.gpuLayers}, allocatedGpuLayers=${gpuOffload?.allocatedLayers ?: "unknown"}, " +
+                    "totalGpuLayers=${gpuOffload?.totalLayers ?: "unknown"}, cpuFallback=$cpuFallback"
+            )
             val nativeLoadDurationMs = (System.nanoTime() - nativeLoadStartNano) / 1_000_000L
             EngineDiagnostics.info(
                 "engine",
                 "MODEL_NATIVE_RUNTIME_READY",
-                "durationMs=$nativeLoadDurationMs, backend=${NativeEngineHandle.nativeGetActiveBackend(handle)}, " +
+                "durationMs=$nativeLoadDurationMs, backend=$nativeActiveBackend, " +
                     "threads=${config.threads}, batchThreads=${config.effectiveBatchThreads}, " +
                     "batch=${config.batchSize}, microBatchRequested=${config.microBatchSize}, " +
                     "context=${config.contextSize}, gpuLayers=${config.gpuLayers}"
@@ -275,7 +302,7 @@ internal class LocalLlmEngineImpl(
             // ARCH= field and still preserves legacy semicolon-containing backend strings.
             val parsedMetadata = NativeModelMetadataParser.parse(
                 rawMetadata = rawMetadata,
-                fallbackBackend = NativeEngineHandle.nativeGetActiveBackend(handle),
+                fallbackBackend = nativeActiveBackend,
                 fallbackSizeBytes = file.length()
             )
             val desc = parsedMetadata.description
@@ -361,6 +388,27 @@ internal class LocalLlmEngineImpl(
             }
         }
     }
+
+
+    /**
+     * Reads only native log output appended during this model-load attempt.
+     * The bounded read avoids loading an unbounded diagnostics file into memory.
+     */
+    private fun readGpuOffloadForLoad(logFile: File, startOffset: Long): NativeGpuOffload? =
+        runCatching {
+            if (!logFile.isFile) return@runCatching null
+            RandomAccessFile(logFile, "r").use { log ->
+                val length = log.length()
+                val boundedStart = startOffset.coerceIn(0L, length)
+                log.seek(boundedStart)
+                val text = StringBuilder()
+                while (log.filePointer < length && text.length < 8 * 1024 * 1024) {
+                    val line = log.readLine() ?: break
+                    text.append(line).append('\n')
+                }
+                NativeGpuOffloadParser.parse(text.toString())
+            }
+        }.getOrNull()
 
     override suspend fun unloadModel(): Result<Unit> {
         if (_state.value is EngineState.Inferring) {

@@ -742,6 +742,10 @@ internal class InferenceClient(
                             modelInfo
                         }
                         _currentModel.value = publicInfo
+                        // initialize() reports backend availability; refresh after native model loading.
+                        _backendInfo.value = runCatching {
+                            service.backendInfo ?: _backendInfo.value
+                        }.getOrDefault(_backendInfo.value)
                         _state.value = EngineState.ModelLoaded(publicInfo)
                         deferred.complete(Result.success(publicInfo))
                     } else {
