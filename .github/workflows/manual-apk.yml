@@ -232,14 +232,12 @@ jobs:
         shell: bash
         env:
           APP_BUILD_NUMBER: ${{ github.run_number }}
-          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]')) }}
-          # workflow_run A/B markers: [vulkan-profiler] [mali-fence:BLOCK] or [mali-fence:SPIN].
-          # SPIN is accepted only with the profiler enabled; all unmarked builds keep BLOCK.
-          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') && 'SPIN') || 'BLOCK' }}
+          P1_01D_AB_PAIR: ${{ github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]') }}
+          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]'))) }}
+          # Pair builds finish on SPIN; both variants are built from this exact commit.
+          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]')) && 'SPIN') || 'BLOCK' }}
         run: |
           set -euo pipefail
-          # Standard Debug APK is the full local diagnostic build: raw traces are
-          # bounded and stored app-private; Release builds keep them disabled.
           case "${MALI_FENCE_WAIT_STRATEGY}" in
             BLOCK|SPIN) ;;
             *) echo "::error::mali_fence_wait_strategy must be BLOCK or SPIN."; exit 1 ;;
@@ -249,22 +247,121 @@ jobs:
             exit 1
           fi
           test "${APP_BUILD_NUMBER}" = "${GITHUB_RUN_NUMBER}"
-          gradle_args=("-PappBuildNumber=${APP_BUILD_NUMBER}")
-          if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
-            echo "Building separate Vulkan per-operation profiler APK (Mali fence wait: ${MALI_FENCE_WAIT_STRATEGY})."
-            gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
-            gradle_args+=("-PlocalLlmMaliFenceWaitStrategy=${MALI_FENCE_WAIT_STRATEGY}")
+
+          if [[ "${P1_01D_AB_PAIR}" == "true" ]]; then
+            # Build both APKs in one job: same source SHA, same version, same
+            # one-run signing key, same application ID, and profiler enabled.
+            # The dedicated package suffix keeps the pair separate from the
+            # regular Debug app; updating BLOCK -> SPIN preserves its app data.
+            test "${ENABLE_VULKAN_PERF_PROFILER}" = "true"
+            pair_dir="${RUNNER_TEMP}/p1-01d-ab-pair"
+            mkdir -p "${pair_dir}"
+            apk_analyzer="$(find "${ANDROID_HOME}/cmdline-tools" -type f -name apkanalyzer -print -quit)"
+            apksigner="$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner -print -quit)"
+            test -n "${apk_analyzer}"
+            test -n "${apksigner}"
+            expected_application_id="com.aistudio.localllm.mdoanx.dmmv.p1ab"
+            signer_sha256=""
+
+            for strategy in BLOCK SPIN; do
+              echo "::group::Build P1-01d ${strategy} APK"
+              gradle --no-daemon --no-build-cache clean \
+                "-PappBuildNumber=${APP_BUILD_NUMBER}" \
+                -PlocalLlmVulkanPerfProfiler=true \
+                -PlocalLlmP101dAbPair=true \
+                "-PlocalLlmMaliFenceWaitStrategy=${strategy}" \
+                :app:assembleDebug :llm-engine:assembleDebugAndroidTest
+
+              build_config="$(find llm-engine/build/generated -type f -name BuildConfig.java -print -quit)"
+              test -n "${build_config}"
+              grep -Eq 'VULKAN_PERF_PROFILER_ENABLED[[:space:]]*=[[:space:]]*true;' "${build_config}"
+              grep -Eq 'TEXT_DIAGNOSTICS_ENABLED[[:space:]]*=[[:space:]]*true;' "${build_config}"
+
+              # Verify the generated arm64 Vulkan source selected the requested
+              # strategy before preserving the APK. Do not infer this from inputs.
+              python3 - "${strategy}" <<'PY'
+          import glob
+          import json
+          import os
+          import sys
+
+          strategy = sys.argv[1]
+          marker = f"LOCAL_LLM_MALI_FENCE_WAIT_SELECTED_{strategy}"
+          found = []
+          for database in glob.glob("llm-engine/.cxx/**/arm64-v8a/compile_commands.json", recursive=True):
+              with open(database, encoding="utf-8") as stream:
+                  entries = json.load(stream)
+              for entry in entries:
+                  if os.path.basename(entry.get("file", "")) != "ggml-vulkan.cpp":
+                      continue
+                  source = entry.get("file", "")
+                  if not os.path.isabs(source):
+                      source = os.path.join(entry.get("directory", "."), source)
+                  with open(source, encoding="utf-8") as stream:
+                      if marker in stream.read():
+                          found.append(source)
+          if not found:
+              raise SystemExit(f"arm64 compiled Vulkan source does not prove {strategy}")
+          print(f"Verified {strategy} in compiled arm64 Vulkan source: {found[0]}")
+          PY
+
+              apk="app/build/outputs/apk/debug/app-debug.apk"
+              test -s "${apk}"
+              actual_id="$("${apk_analyzer}" manifest application-id "${apk}")"
+              actual_code="$("${apk_analyzer}" manifest version-code "${apk}")"
+              actual_name="$("${apk_analyzer}" manifest version-name "${apk}")"
+              test "${actual_id}" = "${expected_application_id}"
+              test "${actual_code}" = "${APP_BUILD_NUMBER}"
+              test "${actual_name}" = "1.0.${APP_BUILD_NUMBER}"
+
+              destination="${pair_dir}/Local-LMM-Engine-v1.0.${APP_BUILD_NUMBER}-${strategy}.apk"
+              cp "${apk}" "${destination}"
+              fingerprint="$("${apksigner}" verify --print-certs "${destination}" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]')"
+              test -n "${fingerprint}"
+              if [[ -z "${signer_sha256}" ]]; then
+                signer_sha256="${fingerprint}"
+              elif [[ "${fingerprint}" != "${signer_sha256}" ]]; then
+                echo "::error::BLOCK and SPIN APKs do not share the same signing certificate."
+                exit 1
+              fi
+
+              sha256sum "${destination}" > "${destination}.sha256"
+              {
+                echo "build_number=${APP_BUILD_NUMBER}"
+                echo "version_name=${actual_name}"
+                echo "version_code=${actual_code}"
+                echo "application_id=${actual_id}"
+                echo "mali_fence_wait_strategy=${strategy}"
+                echo "vulkan_profiler=true"
+                echo "text_diagnostics=true"
+                echo "commit_sha=$(git rev-parse HEAD)"
+                echo "signer_certificate_sha256=${fingerprint}"
+                echo "apk_sha256=$(sha256sum "${destination}" | cut -d ' ' -f 1)"
+              } > "${destination}.txt"
+              echo "Verified ${strategy}: appId=${actual_id}, version=${actual_name}, signer=${fingerprint}"
+              echo "::endgroup::"
+            done
+
+            echo "${signer_sha256}" > "${pair_dir}/signer-certificate-sha256.txt"
+            mkdir -p p1-01d-ab-pair-artifacts
+            cp -a "${pair_dir}/." p1-01d-ab-pair-artifacts/
+            echo "P1-01d pair complete: BLOCK and SPIN share source SHA, package ID, version, and signing certificate."
           else
-            echo "Building standard Debug APK with bounded full text/token diagnostics and BLOCK fence wait."
+            gradle_args=("-PappBuildNumber=${APP_BUILD_NUMBER}")
+            if [[ "${ENABLE_VULKAN_PERF_PROFILER}" == "true" ]]; then
+              echo "Building separate Vulkan per-operation profiler APK (Mali fence wait: ${MALI_FENCE_WAIT_STRATEGY})."
+              gradle_args+=("-PlocalLlmVulkanPerfProfiler=true")
+              gradle_args+=("-PlocalLlmMaliFenceWaitStrategy=${MALI_FENCE_WAIT_STRATEGY}")
+            else
+              echo "Building standard Debug APK with bounded full text/token diagnostics and BLOCK fence wait."
+            fi
+            gradle --no-daemon --no-build-cache clean "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
           fi
-          # Build identity is compiled into the UI; force a clean, uncached app build so no
-          # Kotlin/Dex output from an earlier run can survive a changed CI version number.
-          gradle --no-daemon --no-build-cache clean "${gradle_args[@]}" :app:assembleDebug :llm-engine:assembleDebugAndroidTest
 
       - name: Verify Debug BuildConfig selection
         shell: bash
         env:
-          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]')) }}
+          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]'))) }}
         run: |
           set -euo pipefail
           expected=false
@@ -315,6 +412,8 @@ jobs:
         shell: bash
         env:
           EXPECTED_BUILD_NUMBER: ${{ github.run_number }}
+          EXPECTED_APPLICATION_ID: ${{ github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]') && 'com.aistudio.localllm.mdoanx.dmmv.p1ab' || 'com.aistudio.localllm.mdoanx.dmmv' }}
+          P1_01D_AB_PAIR: ${{ github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]') }}
         run: |
           set -euo pipefail
           expected_version="1.0.${EXPECTED_BUILD_NUMBER}"
@@ -334,22 +433,26 @@ jobs:
           actual_id="$("$apk_analyzer" manifest application-id "$apk")"
           test "$actual_code" = "$EXPECTED_BUILD_NUMBER"
           test "$actual_name" = "$expected_version"
-          test "$actual_id" = "com.aistudio.localllm.mdoanx.dmmv"
+          test "$actual_id" = "$EXPECTED_APPLICATION_ID"
 
-          named_apk="app/build/outputs/apk/debug/Local-LMM-Engine-v${expected_version}-debug.apk"
-          cp "$apk" "$named_apk"
-          sha256sum "$named_apk" > "$named_apk.sha256"
-          {
-            echo "build_number=$EXPECTED_BUILD_NUMBER"
-            echo "version_name=$actual_name"
-            echo "version_code=$actual_code"
-            echo "application_id=$actual_id"
-            echo "commit_sha=$(git rev-parse HEAD)"
-            echo "apk_sha256=$(sha256sum "$named_apk" | cut -d ' ' -f 1)"
-          } > "$named_apk.txt"
+          if [[ "$P1_01D_AB_PAIR" != "true" ]]; then
+            named_apk="app/build/outputs/apk/debug/Local-LMM-Engine-v${expected_version}-debug.apk"
+            cp "$apk" "$named_apk"
+            sha256sum "$named_apk" > "$named_apk.sha256"
+            {
+              echo "build_number=$EXPECTED_BUILD_NUMBER"
+              echo "version_name=$actual_name"
+              echo "version_code=$actual_code"
+              echo "application_id=$actual_id"
+              echo "commit_sha=$(git rev-parse HEAD)"
+              echo "apk_sha256=$(sha256sum "$named_apk" | cut -d ' ' -f 1)"
+            } > "$named_apk.txt"
+            echo "Published filename: $named_apk"
+          else
+            echo "Both strategy-specific APKs were already staged and independently verified."
+          fi
 
           echo "Verified final APK: version=$actual_name, versionCode=$actual_code, applicationId=$actual_id"
-          echo "Published filename: $named_apk"
 
       - name: Verify instrumentation test APK exists
         shell: bash
@@ -362,7 +465,7 @@ jobs:
       - name: Verify native Debug optimization flags
         shell: bash
         env:
-          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') && 'SPIN') || 'BLOCK' }}
+          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]')) && 'SPIN') || 'BLOCK' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -693,9 +796,8 @@ jobs:
         with:
           name: Local-LMM-Engine-v1.0.${{ github.run_number }}-debug-apk
           path: |
-            app/build/outputs/apk/debug/Local-LMM-Engine-v1.0.${{ github.run_number }}-debug.apk
-            app/build/outputs/apk/debug/Local-LMM-Engine-v1.0.${{ github.run_number }}-debug.apk.sha256
-            app/build/outputs/apk/debug/Local-LMM-Engine-v1.0.${{ github.run_number }}-debug.apk.txt
+            app/build/outputs/apk/debug/Local-LMM-Engine-v1.0.${{ github.run_number }}-debug.apk*
+            p1-01d-ab-pair-artifacts/*
           if-no-files-found: error
           retention-days: 14
 
