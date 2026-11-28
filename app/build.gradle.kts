@@ -7,6 +7,10 @@ val appBaseVersionName = providers.gradleProperty("appVersionName").orElse("1.0"
 // CI passes the exact APK workflow run number as a Gradle property.
  // Prefer that explicit value over inherited environment variables, which may
  // belong to an upstream workflow_run trigger.
+val localLlmP101dAbPair = providers.gradleProperty("localLlmP101dAbPair")
+  .map { it.equals("true", ignoreCase = true) }
+  .getOrElse(false)
+
 val appBuildNumber = providers.gradleProperty("appBuildNumber")
   .orElse(providers.environmentVariable("GITHUB_RUN_NUMBER"))
   .orElse("1")
@@ -64,7 +68,9 @@ android {
       // Keep the diagnostic build side-by-side with earlier installs. A previous CI APK
       // may have been signed with a different one-run key; never force an uninstall that
       // would delete the user's app-private model data.
-      applicationIdSuffix = ".dmmv"
+      // P1-01d A/B builds use a separate package so they can coexist with
+      // the regular Debug app even when CI uses a one-run signing key.
+      applicationIdSuffix = if (localLlmP101dAbPair) ".dmmv.p1ab" else ".dmmv"
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
