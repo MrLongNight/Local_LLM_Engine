@@ -10,28 +10,8 @@ on:
       - completed
     branches:
       - main
+  # Manual runs build the ordinary Debug APK; diagnostic A/B mode is CI-controlled.
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: "APK build type"
-        required: true
-        type: choice
-        options:
-          - debug
-        default: debug
-      enable_vulkan_perf_profiler:
-        description: "Separate diagnostic APK with Vulkan operator timestamps (not for throughput benchmarks)"
-        required: false
-        type: boolean
-        default: false
-      mali_fence_wait_strategy:
-        description: "TEMPORARY P1-01d Mali A/B selector; SPIN requires the profiler above"
-        required: false
-        type: choice
-        options:
-          - BLOCK
-          - SPIN
-        default: BLOCK
 
 permissions:
   contents: read
@@ -233,9 +213,9 @@ jobs:
         env:
           APP_BUILD_NUMBER: ${{ github.run_number }}
           P1_01D_AB_PAIR: ${{ github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]') }}
-          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]'))) }}
+          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]'))) }}
           # Pair builds finish on SPIN; both variants are built from this exact commit.
-          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]')) && 'SPIN') || 'BLOCK' }}
+          MALI_FENCE_WAIT_STRATEGY: ${{ (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]')) && 'SPIN') || 'BLOCK' }}
         run: |
           set -euo pipefail
           case "${MALI_FENCE_WAIT_STRATEGY}" in
@@ -307,17 +287,45 @@ jobs:
 
               apk="app/build/outputs/apk/debug/app-debug.apk"
               test -s "${apk}"
-              actual_id="$("${apk_analyzer}" manifest application-id "${apk}")"
-              actual_code="$("${apk_analyzer}" manifest version-code "${apk}")"
-              actual_name="$("${apk_analyzer}" manifest version-name "${apk}")"
-              test "${actual_id}" = "${expected_application_id}"
-              test "${actual_code}" = "${APP_BUILD_NUMBER}"
-              test "${actual_name}" = "1.0.${APP_BUILD_NUMBER}"
+              if [[ ! -s "${apk}" ]]; then
+                echo "::error::${strategy} APK missing or empty: ${apk}"
+                exit 1
+              fi
+              actual_id="$("${apk_analyzer}" manifest application-id "${apk}")" || {
+                echo "::error::apkanalyzer could not read application ID from ${apk}"
+                exit 1
+              }
+              actual_code="$("${apk_analyzer}" manifest version-code "${apk}")" || {
+                echo "::error::apkanalyzer could not read version code from ${apk}"
+                exit 1
+              }
+              actual_name="$("${apk_analyzer}" manifest version-name "${apk}")" || {
+                echo "::error::apkanalyzer could not read version name from ${apk}"
+                exit 1
+              }
+              echo "APK metadata (${strategy}): applicationId=${actual_id}; versionCode=${actual_code}; versionName=${actual_name}"
+              for pair in "applicationId:${actual_id}:${expected_application_id}" "versionCode:${actual_code}:${APP_BUILD_NUMBER}" "versionName:${actual_name}:1.0.${APP_BUILD_NUMBER}"; do
+                IFS=: read -r field actual expected <<< "${pair}"
+                if [[ "${actual}" != "${expected}" ]]; then
+                  echo "::error::${strategy} APK ${field} mismatch: expected '${expected}', got '${actual}'"
+                  exit 1
+                fi
+              done
 
               destination="${pair_dir}/Local-LMM-Engine-v1.0.${APP_BUILD_NUMBER}-${strategy}.apk"
               cp "${apk}" "${destination}"
-              fingerprint="$("${apksigner}" verify --print-certs "${destination}" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]')"
-              test -n "${fingerprint}"
+              signer_output="$("${apksigner}" verify --print-certs "${destination}" 2>&1)" || {
+                echo "::error::apksigner rejected ${strategy} APK:"
+                printf '%s\\n' "${signer_output}"
+                exit 1
+              }
+              fingerprint="$(printf '%s\\n' "${signer_output}" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]')"
+              if [[ ! "${fingerprint}" =~ ^[[:xdigit:]]{64}$ ]]; then
+                echo "::error::Could not extract a valid SHA-256 signer fingerprint from ${strategy} APK. apksigner output:"
+                printf '%s\\n' "${signer_output}"
+                exit 1
+              fi
+              echo "Verified ${strategy} APK signer certificate SHA-256: ${fingerprint}"
               if [[ -z "${signer_sha256}" ]]; then
                 signer_sha256="${fingerprint}"
               elif [[ "${fingerprint}" != "${signer_sha256}" ]]; then
@@ -361,7 +369,7 @@ jobs:
       - name: Verify Debug BuildConfig selection
         shell: bash
         env:
-          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]'))) }}
+          ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]'))) }}
         run: |
           set -euo pipefail
           expected=false
@@ -465,7 +473,7 @@ jobs:
       - name: Verify native Debug optimization flags
         shell: bash
         env:
-          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]')) && 'SPIN') || 'BLOCK' }}
+          MALI_FENCE_WAIT_STRATEGY: ${{ (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]')) && 'SPIN') || 'BLOCK' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
