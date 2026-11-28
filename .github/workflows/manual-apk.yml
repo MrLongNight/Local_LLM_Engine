@@ -233,8 +233,8 @@ jobs:
         env:
           APP_BUILD_NUMBER: ${{ github.run_number }}
           ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_vulkan_perf_profiler) || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]')) }}
-          # workflow_run builds can select the temporary A/B strategy via the triggering main commit message.
-          # [mali-fence:SPIN] is accepted only together with [vulkan-profiler]; otherwise BLOCK stays the default.
+          # workflow_run A/B markers: [vulkan-profiler] [mali-fence:BLOCK] or [mali-fence:SPIN].
+          # SPIN is accepted only with the profiler enabled; all unmarked builds keep BLOCK.
           MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') && 'SPIN') || 'BLOCK' }}
         run: |
           set -euo pipefail
