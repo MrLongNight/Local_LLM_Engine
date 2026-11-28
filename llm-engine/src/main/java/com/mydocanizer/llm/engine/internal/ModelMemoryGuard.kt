@@ -1,5 +1,7 @@
 package com.mydocanizer.llm.engine.internal
 
+import com.mydocanizer.llm.engine.BackendPreference
+
 /**
  * Model-load guard that distinguishes the reclaimable GGUF page cache / shared UMA heap
  * from process-private allocations. The conservative total-RAM ceiling applies to every
@@ -15,6 +17,33 @@ internal object ModelMemoryGuard {
     private const val HARD_LIMIT_PERCENT = 85L
     private const val MIB = 1024L * 1024L
     const val OVERRIDE_REQUIRED_MARKER = "MEMORY_GUARD_OVERRIDE_REQUIRED:"
+    const val CPU_MEMORY_SETTLING_SAMPLE_COUNT = 3
+    const val CPU_MEMORY_SETTLING_MAX_VARIATION_BYTES = 128L * MIB
+    const val CPU_MEMORY_SETTLING_MAX_WAIT_MS = 8_000L
+    const val CPU_MEMORY_SETTLING_SAMPLE_INTERVAL_MS = 500L
+
+    /**
+     * A fresh available-RAM snapshot is not enough immediately after releasing a Vulkan
+     * model on unified-memory devices. Require a short stabilization window only for the
+     * Vulkan -> CPU transition; never let this policy override the explicit memory guard.
+     */
+    fun requiresPostVulkanCpuMemorySettling(
+        previousBackend: String?,
+        requestedBackend: BackendPreference,
+        allowHardLimitOverride: Boolean
+    ): Boolean =
+        requestedBackend == BackendPreference.CPU &&
+            !allowHardLimitOverride &&
+            previousBackend?.contains("Vulkan", ignoreCase = true) == true
+
+    /** True when the latest three available-RAM samples fit within the allowed spread. */
+    fun hasStableAvailableMemory(samples: List<Long>): Boolean {
+        if (samples.size < CPU_MEMORY_SETTLING_SAMPLE_COUNT) return false
+        val window = samples.takeLast(CPU_MEMORY_SETTLING_SAMPLE_COUNT)
+        val minimum = window.minOrNull() ?: return false
+        val maximum = window.maxOrNull() ?: return false
+        return maximum - minimum <= CPU_MEMORY_SETTLING_MAX_VARIATION_BYTES
+    }
 
     /**
      * Admission-plan values are estimates, not measured peak memory. In particular,
@@ -179,4 +208,29 @@ internal class InsufficientModelMemoryException(
     companion object {
         const val REASON_TOTAL_RAM_HARD_LIMIT = "TOTAL_RAM_HARD_LIMIT"
     }
+}
+
+internal class ModelMemorySettlingTimeoutException(
+    val previousBackend: String,
+    val lastAvailableBytes: Long,
+    val requiredBytes: Long,
+    val elapsedMs: Long,
+    val lowMemory: Boolean,
+    val stableSampleCount: Int,
+    val stableRangeBytes: Long?
+) : IllegalStateException(
+    buildString {
+        append("${ModelMemoryGuard.OVERRIDE_REQUIRED_MARKER} ")
+        append("CPU-Modellladen nach Vulkan-Unload abgebrochen: ")
+        append("Der verfügbare RAM wurde innerhalb von ${elapsedMs} ms nicht stabil. ")
+        append("Verfügbar=${lastAvailableBytes / (1024L * 1024L)} MiB, ")
+        append("Mindestbedarf=${requiredBytes / (1024L * 1024L)} MiB, ")
+        append("lowMemory=$lowMemory, samples=$stableSampleCount, rangeBytes=${stableRangeBytes ?: "unknown"}.")
+    }
+) {
+    fun diagnosticDetails(): String =
+        "reason=CPU_MEMORY_SETTLING_TIMEOUT,previousBackend=$previousBackend," +
+            "lastAvailableBytes=$lastAvailableBytes,requiredBytes=$requiredBytes," +
+            "elapsedMs=$elapsedMs,lowMemory=$lowMemory," +
+            "stableSampleCount=$stableSampleCount,stableRangeBytes=${stableRangeBytes ?: -1L}"
 }

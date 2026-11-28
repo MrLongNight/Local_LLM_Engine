@@ -207,6 +207,15 @@ internal class EngineResourceMonitor(context: Context) : AutoCloseable {
         logPhase(phase.get())
     }
 
+    /**
+     * Captures another PSS/available-RAM point while the previous model is already
+     * unloaded. The phase stays MODEL_UNLOADED so the samples remain attributable to
+     * the same Vulkan -> CPU transition.
+     */
+    fun sampleModelUnloadSettling() {
+        if (phase.get() == "MODEL_UNLOADED") sample()
+    }
+
     fun modelUnloaded() {
         model.set(null)
         synchronized(nativeMemoryLock) { phase.set("MODEL_UNLOADED") }

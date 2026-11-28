@@ -106,6 +106,31 @@ class ResourceLifecycleDiagnosticsTest : InferenceServiceProcessTestBase() {
                     )
                     awaitNativeState(serviceLog, "AFTER_INFERENCE_PREFILL")
                     awaitNativeState(serviceLog, "AFTER_INFERENCE")
+
+                    // A second load without an explicit unload exercises the service-owned
+                    // replacement path. It must snapshot native unload before its new memory plan.
+                    val automaticReloadStart = serviceLog.readLines(Charsets.UTF_8).size
+                    val automaticReload = client.loadModel(ModelSource.FilePath(modelFile.absolutePath), config)
+                    assertTrue(
+                        "Automatic replacement load must succeed: ${automaticReload.exceptionOrNull()}",
+                        automaticReload.isSuccess
+                    )
+                    awaitSnapshot(serviceLog, servicePid, "MODEL_UNLOADED", automaticReloadStart)
+                    awaitSnapshot(serviceLog, servicePid, "MODEL_LOADED_IDLE", automaticReloadStart)
+                    val automaticReloadLines = serviceLog.readLines(Charsets.UTF_8).drop(automaticReloadStart)
+                    val unloadingSnapshotIndex = automaticReloadLines.indexOfFirst {
+                        it.contains("[memory] RESOURCE_SNAPSHOT - ") && it.contains("phase=MODEL_UNLOADING,")
+                    }
+                    val unloadedSnapshotIndex = automaticReloadLines.indexOfFirst {
+                        it.contains("[memory] RESOURCE_SNAPSHOT - ") && it.contains("phase=MODEL_UNLOADED,")
+                    }
+                    val memoryPlanIndex = automaticReloadLines.indexOfFirst {
+                        it.contains("[memory] MODEL_LOAD_MEMORY_PLAN - ")
+                    }
+                    assertTrue("Automatic reload must snapshot MODEL_UNLOADING", unloadingSnapshotIndex >= 0)
+                    assertTrue("Automatic reload must snapshot MODEL_UNLOADED", unloadedSnapshotIndex > unloadingSnapshotIndex)
+                    assertTrue("Automatic reload must perform its memory plan after unload snapshots", memoryPlanIndex > unloadedSnapshotIndex)
+                    lastObservedLineCount = serviceLog.readLines(Charsets.UTF_8).size
                 }
 
                 val unloaded = client.unloadModel()

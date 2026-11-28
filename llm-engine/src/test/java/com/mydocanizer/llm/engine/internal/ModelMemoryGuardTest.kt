@@ -1,5 +1,7 @@
 package com.mydocanizer.llm.engine.internal
 
+import com.mydocanizer.llm.engine.BackendPreference
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -239,6 +241,62 @@ class ModelMemoryGuardTest {
                 assertTrue(expected.message.orEmpty().contains("Model file size"))
             }
         }
+    }
+
+
+    @Test
+    fun requiresSettlingOnlyForUnforcedVulkanToCpuTransitions() {
+        assertTrue(
+            ModelMemoryGuard.requiresPostVulkanCpuMemorySettling(
+                previousBackend = "Vulkan selected (Mali-G57)",
+                requestedBackend = BackendPreference.CPU,
+                allowHardLimitOverride = false
+            )
+        )
+        assertFalse(
+            ModelMemoryGuard.requiresPostVulkanCpuMemorySettling(
+                previousBackend = "CPU (registered ggml CPU backend)",
+                requestedBackend = BackendPreference.CPU,
+                allowHardLimitOverride = false
+            )
+        )
+        assertFalse(
+            ModelMemoryGuard.requiresPostVulkanCpuMemorySettling(
+                previousBackend = "Vulkan selected (Mali-G57)",
+                requestedBackend = BackendPreference.VULKAN,
+                allowHardLimitOverride = false
+            )
+        )
+        assertFalse(
+            ModelMemoryGuard.requiresPostVulkanCpuMemorySettling(
+                previousBackend = "Vulkan selected (Mali-G57)",
+                requestedBackend = BackendPreference.CPU,
+                allowHardLimitOverride = true
+            )
+        )
+        assertFalse(
+            ModelMemoryGuard.requiresPostVulkanCpuMemorySettling(
+                previousBackend = null,
+                requestedBackend = BackendPreference.CPU,
+                allowHardLimitOverride = false
+            )
+        )
+    }
+
+    @Test
+    fun availableMemoryIsStableOnlyAfterThreeConsecutiveSamplesWithinTolerance() {
+        val mib = 1024L * 1024L
+        assertFalse(ModelMemoryGuard.hasStableAvailableMemory(listOf(1_000L * mib, 1_020L * mib)))
+        assertTrue(
+            ModelMemoryGuard.hasStableAvailableMemory(
+                listOf(1_000L * mib, 1_060L * mib, 1_128L * mib)
+            )
+        )
+        assertFalse(
+            ModelMemoryGuard.hasStableAvailableMemory(
+                listOf(1_000L * mib, 1_060L * mib, 1_129L * mib)
+            )
+        )
     }
 
 }
