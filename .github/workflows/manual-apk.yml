@@ -362,7 +362,7 @@ jobs:
       - name: Verify native Debug optimization flags
         shell: bash
         env:
-          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || 'BLOCK' }}
+          MALI_FENCE_WAIT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.mali_fence_wait_strategy || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[mali-fence:SPIN]') && 'SPIN') || 'BLOCK' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
