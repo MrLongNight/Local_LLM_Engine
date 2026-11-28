@@ -24,6 +24,7 @@ import com.mydocanizer.llm.engine.internal.LocalLlmEngineImpl
 import com.mydocanizer.llm.engine.internal.ModelMemoryGuard
 import com.mydocanizer.llm.engine.internal.InsufficientModelMemoryException
 import com.mydocanizer.llm.engine.internal.InsufficientAvailableModelMemoryException
+import com.mydocanizer.llm.engine.internal.ModelMemorySettlingTimeoutException
 import com.mydocanizer.llm.engine.ModelInfo
 import com.mydocanizer.llm.engine.ModelSource
 import kotlinx.coroutines.CancellationException
@@ -35,6 +36,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -218,6 +220,125 @@ class InferenceService : Service() {
         super.onDestroy()
     }
 
+
+    private data class ModelMemoryAdmission(
+        val memoryInfo: ActivityManager.MemoryInfo,
+        val plan: ModelMemoryGuard.Plan
+    )
+
+    /**
+     * After a Vulkan model is unloaded, Mali UMA allocations and reclaimable GGUF pages
+     * may take time to settle. A CPU load is admitted only after the estimate fits and
+     * three consecutive available-RAM samples are stable. Failure is reported as a
+     * controlled memory rejection; native CPU allocation is never attempted.
+     */
+    private suspend fun awaitStableCpuMemoryAfterVulkanUnload(
+        memoryManager: ActivityManager,
+        modelBytes: Long,
+        config: EngineConfig,
+        previousBackend: String
+    ): ModelMemoryAdmission {
+        val startedAtNanos = System.nanoTime()
+        val samples = mutableListOf<Long>()
+        var lastMemoryInfo: ActivityManager.MemoryInfo? = null
+        var lastPlan: ModelMemoryGuard.Plan? = null
+        var lastMemoryRejection: InsufficientAvailableModelMemoryException? = null
+        var attempt = 0
+
+        while (true) {
+            attempt++
+            val memoryInfo = ActivityManager.MemoryInfo()
+            memoryManager.getMemoryInfo(memoryInfo)
+            lastMemoryInfo = memoryInfo
+            samples += memoryInfo.availMem
+            if (samples.size > ModelMemoryGuard.CPU_MEMORY_SETTLING_SAMPLE_COUNT) {
+                samples.removeAt(0)
+            }
+
+            val plan = try {
+                ModelMemoryGuard.plan(
+                    modelBytes = modelBytes,
+                    requestedContextTokens = config.contextSize,
+                    availableBytes = memoryInfo.availMem,
+                    totalBytes = memoryInfo.totalMem,
+                    lowMemory = memoryInfo.lowMemory,
+                    allowHardLimitOverride = config.memoryGuardOverride,
+                    requireAvailableMemory = true
+                ).also {
+                    lastPlan = it
+                    lastMemoryRejection = null
+                }
+            } catch (rejected: InsufficientAvailableModelMemoryException) {
+                lastMemoryRejection = rejected
+                null
+            }
+
+            val stable = ModelMemoryGuard.hasStableAvailableMemory(samples)
+            val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
+            val windowRangeBytes = if (samples.size == ModelMemoryGuard.CPU_MEMORY_SETTLING_SAMPLE_COUNT) {
+                (samples.maxOrNull() ?: 0L) - (samples.minOrNull() ?: 0L)
+            } else {
+                null
+            }
+            resourceMonitor?.sampleModelUnloadSettling()
+
+            EngineDiagnostics.info(
+                "memory",
+                "MODEL_UNLOAD_SETTLING_SAMPLE",
+                "previousBackend=${previousBackend},requestedBackend=CPU,attempt=$attempt," +
+                    "elapsedMs=$elapsedMs,availableBytes=${memoryInfo.availMem}," +
+                    "requiredBytes=${plan?.requiredBytes ?: lastMemoryRejection?.requiredBytes ?: -1L}," +
+                    "lowMemory=${memoryInfo.lowMemory},stable=$stable," +
+                    "stableSampleCount=${samples.size},stableRangeBytes=${windowRangeBytes ?: -1L}"
+            )
+
+            if (plan != null && !memoryInfo.lowMemory && stable) {
+                EngineDiagnostics.info(
+                    "memory",
+                    "MODEL_UNLOAD_SETTLING_COMPLETED",
+                    "previousBackend=${previousBackend},attempt=$attempt,elapsedMs=$elapsedMs," +
+                        "availableBytes=${memoryInfo.availMem},requiredBytes=${plan.requiredBytes}," +
+                        "stableSampleCount=${samples.size},stableRangeBytes=${windowRangeBytes ?: -1L}"
+                )
+                return ModelMemoryAdmission(memoryInfo, plan)
+            }
+
+            if (elapsedMs >= ModelMemoryGuard.CPU_MEMORY_SETTLING_MAX_WAIT_MS) break
+            delay(ModelMemoryGuard.CPU_MEMORY_SETTLING_SAMPLE_INTERVAL_MS)
+        }
+
+        val memoryInfo = lastMemoryInfo
+            ?: throw IllegalStateException("CPU memory-settling window produced no system-memory sample")
+        val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
+        val windowRangeBytes = if (samples.size == ModelMemoryGuard.CPU_MEMORY_SETTLING_SAMPLE_COUNT) {
+            (samples.maxOrNull() ?: 0L) - (samples.minOrNull() ?: 0L)
+        } else {
+            null
+        }
+
+        EngineDiagnostics.info(
+            "memory",
+            "MODEL_UNLOAD_SETTLING_FAILED",
+            "previousBackend=${previousBackend},elapsedMs=$elapsedMs," +
+                "availableBytes=${memoryInfo.availMem},lowMemory=${memoryInfo.lowMemory}," +
+                "stableSampleCount=${samples.size},stableRangeBytes=${windowRangeBytes ?: -1L}," +
+                "reason=${lastMemoryRejection?.diagnosticDetails() ?: "memory_not_stable"}"
+        )
+
+        lastMemoryRejection?.let { throw it }
+        val plan = lastPlan
+            ?: throw IllegalStateException("CPU memory-settling window ended without a memory plan")
+        throw ModelMemorySettlingTimeoutException(
+            previousBackend = previousBackend,
+            lastAvailableBytes = memoryInfo.availMem,
+            requiredBytes = plan.requiredBytes,
+            elapsedMs = elapsedMs,
+            lowMemory = memoryInfo.lowMemory,
+            stableSampleCount = samples.size,
+            stableRangeBytes = windowRangeBytes
+        )
+    }
+
     private val binder = object : IInferenceService.Stub() {
 
         override fun initialize() {
@@ -240,13 +361,27 @@ class InferenceService : Service() {
             callback: IInferenceCallback?
         ) {
             interruptInferenceForModelOperation("loadModel")
-            resourceMonitor?.beginModelLoad(modelPath, config)
             serviceScope.launch {
                 var progressJob: Job? = null
                 var modelLoadedSuccessfully = false
                 var descriptorTransferred = false
+                var modelLoadStarted = false
+                var previousModelUnloaded = false
                 try {
                     val e = initEngine()
+                    val previousModel = e.currentModel.value
+                    val previousDescriptor = activeModelDescriptor
+                    val previousBackend = previousModel?.activeBackend
+                    val previousModelPresent = previousModel != null || previousDescriptor != null
+
+                    // For a fresh load, begin the resource timeline immediately. During a
+                    // replacement, keep the old model identity until its native unload and
+                    // descriptor close have both completed.
+                    if (!previousModelPresent) {
+                        resourceMonitor?.beginModelLoad(modelPath, config)
+                        modelLoadStarted = true
+                    }
+
                     val initialization = e.initialize()
                     if (initialization.isFailure) {
                         val error = initialization.exceptionOrNull()
@@ -268,19 +403,34 @@ class InferenceService : Service() {
                         }
                     }
 
-                    // Unload an old mmap before closing the descriptor it uses.
-                    activeModelDescriptor?.let { previous ->
-                        e.unloadModel().getOrThrow()
-                        activeModelDescriptor = null
-                        previous.close()
+                    if (previousModelPresent) {
+                        resourceMonitor?.modelUnloading()
+                        EngineDiagnostics.info(
+                            "ipc",
+                            "MODEL_RELOAD_UNLOAD_STARTED",
+                            "previousBackend=${previousBackend ?: "unknown"},previousModel=${previousModel?.name ?: "descriptor_only"}"
+                        )
+                        try {
+                            e.unloadModel().getOrThrow()
+                            activeModelDescriptor = null
+                            previousDescriptor?.close()
+                        } catch (unloadError: Throwable) {
+                            resourceMonitor?.modelUnloadFailed()
+                            throw unloadError
+                        }
+                        resourceMonitor?.modelUnloaded()
+                        previousModelUnloaded = true
+                        EngineDiagnostics.info(
+                            "ipc",
+                            "MODEL_RELOAD_UNLOAD_COMPLETED",
+                            "previousBackend=${previousBackend ?: "unknown"},descriptorClosed=${previousDescriptor != null}"
+                        )
                     }
 
-                    // Preflight after releasing the previous model: estimate GGUF + KV +
-                    // allocator headroom and reduce context before native model allocation.
                     val memoryManager = getSystemService(ActivityManager::class.java)
-                        ?: throw IllegalStateException("Android ActivityManager is unavailable; cannot safely estimate model-load memory")
-                    val memoryInfo = ActivityManager.MemoryInfo()
-                    memoryManager.getMemoryInfo(memoryInfo)
+                        ?: throw IllegalStateException(
+                            "Android ActivityManager is unavailable; cannot safely estimate model-load memory"
+                        )
                     val descriptorSize = modelDescriptor.statSize
                     val modelBytes = when {
                         descriptorSize > 0L -> descriptorSize
@@ -291,19 +441,52 @@ class InferenceService : Service() {
                         else -> File(modelPath).length().takeIf { it > 0L }
                             ?: throw IllegalArgumentException("Could not determine GGUF file size for the model memory guard")
                     }
-                    val memoryPlan = ModelMemoryGuard.plan(
-                        modelBytes = modelBytes,
-                        requestedContextTokens = config.contextSize,
-                        availableBytes = memoryInfo.availMem,
-                        totalBytes = memoryInfo.totalMem,
-                        lowMemory = memoryInfo.lowMemory,
-                        allowHardLimitOverride = config.memoryGuardOverride,
-                        // The device CPU reference previously ended with SIGNALED status 9
-                        // while its minimum-context estimate exceeded available RAM. Reject
-                        // before native allocation rather than repeat that process kill.
-                        // Vulkan keeps the soft available-memory policy for UMA accounting.
-                        requireAvailableMemory = config.backendPreference == BackendPreference.CPU
-                    )
+
+                    val memoryAdmission =
+                        if (ModelMemoryGuard.requiresPostVulkanCpuMemorySettling(
+                                previousBackend = previousBackend,
+                                requestedBackend = config.backendPreference,
+                                allowHardLimitOverride = config.memoryGuardOverride
+                            )
+                        ) {
+                            EngineDiagnostics.info(
+                                "memory",
+                                "MODEL_UNLOAD_SETTLING_STARTED",
+                                "previousBackend=${previousBackend},requestedBackend=CPU," +
+                                    "maxWaitMs=${ModelMemoryGuard.CPU_MEMORY_SETTLING_MAX_WAIT_MS}," +
+                                    "sampleIntervalMs=${ModelMemoryGuard.CPU_MEMORY_SETTLING_SAMPLE_INTERVAL_MS}," +
+                                    "stableSampleCount=${ModelMemoryGuard.CPU_MEMORY_SETTLING_SAMPLE_COUNT}"
+                            )
+                            awaitStableCpuMemoryAfterVulkanUnload(
+                                memoryManager = memoryManager,
+                                modelBytes = modelBytes,
+                                config = config,
+                                previousBackend = previousBackend!!
+                            )
+                        } else {
+                            val memoryInfo = ActivityManager.MemoryInfo()
+                            memoryManager.getMemoryInfo(memoryInfo)
+                            val plan = ModelMemoryGuard.plan(
+                                modelBytes = modelBytes,
+                                requestedContextTokens = config.contextSize,
+                                availableBytes = memoryInfo.availMem,
+                                totalBytes = memoryInfo.totalMem,
+                                lowMemory = memoryInfo.lowMemory,
+                                allowHardLimitOverride = config.memoryGuardOverride,
+                                // CPU requires the estimate to fit in available RAM. Vulkan
+                                // retains the soft available-memory policy for UMA accounting.
+                                requireAvailableMemory = config.backendPreference == BackendPreference.CPU
+                            )
+                            ModelMemoryAdmission(memoryInfo, plan)
+                        }
+
+                    if (!modelLoadStarted) {
+                        resourceMonitor?.beginModelLoad(modelPath, config)
+                        modelLoadStarted = true
+                    }
+
+                    val memoryInfo = memoryAdmission.memoryInfo
+                    val memoryPlan = memoryAdmission.plan
                     val effectiveConfig = if (memoryPlan.contextReduced) {
                         config.copy(contextSize = memoryPlan.effectiveContextTokens)
                     } else config
@@ -348,9 +531,16 @@ class InferenceService : Service() {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (t: Throwable) {
+                    // If a replacement was unloaded but its next memory admission failed,
+                    // make that attempted load visible as a failed load in the resource timeline.
+                    if (previousModelUnloaded && !modelLoadStarted) {
+                        resourceMonitor?.beginModelLoad(modelPath, config)
+                        modelLoadStarted = true
+                    }
                     val memoryRejectionDetails = when (t) {
                         is InsufficientModelMemoryException -> t.diagnosticDetails()
                         is InsufficientAvailableModelMemoryException -> t.diagnosticDetails()
+                        is ModelMemorySettlingTimeoutException -> t.diagnosticDetails()
                         else -> null
                     }
                     if (memoryRejectionDetails != null) {
@@ -367,7 +557,7 @@ class InferenceService : Service() {
                     // Close a descriptor whose ownership was not transferred before taking
                     // the failure snapshot, so the recorded FD count reflects post-cleanup state.
                     if (!descriptorTransferred) runCatching { modelDescriptor.close() }
-                    if (!modelLoadedSuccessfully) resourceMonitor?.modelLoadFailed()
+                    if (!modelLoadedSuccessfully && modelLoadStarted) resourceMonitor?.modelLoadFailed()
                     progressJob?.cancel()
                 }
             }
