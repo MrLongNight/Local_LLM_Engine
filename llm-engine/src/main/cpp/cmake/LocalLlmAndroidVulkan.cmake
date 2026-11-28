@@ -1,3 +1,73 @@
+# Validate the generated Mali fence-wait control flow independently from the
+# large upstream-source overlay. The helper is also exercised by a host CMake test.
+function(local_llm_verify_mali_fence_wait_strategy vulkan_contents_variable strategy)
+    if(NOT DEFINED ${vulkan_contents_variable})
+        message(FATAL_ERROR "LocalLLM: generated Vulkan source variable is not defined: ${vulkan_contents_variable}")
+    endif()
+    string(TOUPPER "${strategy}" _mali_strategy)
+    if(NOT _mali_strategy STREQUAL "BLOCK" AND NOT _mali_strategy STREQUAL "SPIN")
+        message(FATAL_ERROR "LocalLLM: unsupported Mali fence-wait strategy: ${strategy}")
+    endif()
+    set(_mali_wait_source "${${vulkan_contents_variable}}")
+
+    set(_mali_wait_vendor_anchor "if (ctx->device->vendor_id == 0x13B5) {")
+    string(FIND "${_mali_wait_source}" "${_mali_wait_vendor_anchor}" _mali_wait_vendor_position)
+    set(_mali_wait_poll_anchor "if (local_llm_poll_fence) {")
+    string(FIND "${_mali_wait_source}" "${_mali_wait_poll_anchor}" _mali_wait_poll_position)
+    if(_mali_wait_vendor_position LESS 0 OR
+       _mali_wait_poll_position LESS 0 OR
+       _mali_wait_vendor_position GREATER_EQUAL _mali_wait_poll_position)
+        message(FATAL_ERROR "LocalLLM: Mali fence-wait strategy is not connected to the shared fence-poll path.")
+    endif()
+
+    string(SUBSTRING "${_mali_wait_source}" ${_mali_wait_vendor_position} -1 _mali_wait_from_vendor)
+    string(FIND "${_mali_wait_from_vendor}" "} else {" _mali_wait_vendor_else_position)
+    if(_mali_wait_vendor_else_position LESS 0)
+        message(FATAL_ERROR "LocalLLM: Mali fence-wait vendor guard lost its non-Mali fallback.")
+    endif()
+    string(SUBSTRING "${_mali_wait_from_vendor}" 0 ${_mali_wait_vendor_else_position} _mali_wait_mali_branch)
+
+    if(_mali_strategy STREQUAL "SPIN")
+        string(FIND "${_mali_wait_mali_branch}" "LOCAL_LLM_MALI_FENCE_WAIT_SELECTED_SPIN" _mali_spin_marker_position)
+        string(FIND "${_mali_wait_mali_branch}" "local_llm_poll_fence = true;" _mali_spin_enable_position)
+        string(FIND "${_mali_wait_mali_branch}" "waitForFences" _mali_spin_blocking_position)
+        if(_mali_spin_marker_position LESS 0 OR
+           _mali_spin_enable_position LESS 0 OR
+           NOT _mali_spin_blocking_position LESS 0)
+            message(FATAL_ERROR "LocalLLM: SPIN must select Mali fence polling and must not block with waitForFences.")
+        endif()
+    else()
+        string(FIND "${_mali_wait_mali_branch}" "LOCAL_LLM_MALI_FENCE_WAIT_SELECTED_BLOCK" _mali_block_marker_position)
+        string(FIND "${_mali_wait_mali_branch}" "waitForFences" _mali_block_call_position)
+        string(FIND "${_mali_wait_mali_branch}" "local_llm_poll_fence = true;" _mali_block_poll_position)
+        if(_mali_block_marker_position LESS 0 OR
+           _mali_block_call_position LESS 0 OR
+           NOT _mali_block_poll_position LESS 0)
+            message(FATAL_ERROR "LocalLLM: BLOCK must call waitForFences and must not enable Mali fence polling.")
+        endif()
+    endif()
+
+    # Both modes share the same checked poll loop for SPIN and non-Mali GPUs:
+    # success exits, unexpected Vulkan results throw, and the fence resets only
+    # after completion. This guards ordering and prevents a busy-loop regression.
+    string(SUBSTRING "${_mali_wait_source}" ${_mali_wait_poll_position} -1 _mali_wait_poll_tail)
+    string(FIND "${_mali_wait_poll_tail}" "getFenceStatus(ctx->fence)" _mali_poll_status_position)
+    string(FIND "${_mali_wait_poll_tail}" "vk::Result::eSuccess" _mali_poll_success_position)
+    string(FIND "${_mali_wait_poll_tail}" "vk::Result::eNotReady" _mali_poll_not_ready_position)
+    string(FIND "${_mali_wait_poll_tail}" "YIELD();" _mali_poll_yield_position)
+    string(FIND "${_mali_wait_poll_tail}" "resetFences({ ctx->fence })" _mali_poll_reset_position)
+    if(_mali_poll_status_position LESS 0 OR
+       _mali_poll_success_position LESS _mali_poll_status_position OR
+       _mali_poll_not_ready_position LESS _mali_poll_success_position OR
+       _mali_poll_yield_position LESS _mali_poll_not_ready_position OR
+       _mali_poll_reset_position LESS _mali_poll_yield_position)
+        message(FATAL_ERROR "LocalLLM: Mali fence-poll completion/error/yield/reset ordering is invalid.")
+    endif()
+
+    message(STATUS
+        "LocalLLM: verified Mali fence-wait strategy=${_mali_strategy} (Mali-only branch, exact wait implementation, checked completion loop)")
+endfunction()
+
 # The pinned upstream tree is kept pristine. For Android ARM64 we compile a
 # build-directory copy of ggml-vulkan.cpp with the small loader/extension
 # compatibility adjustments required by Android API 24+ and Mali drivers.
@@ -1229,6 +1299,8 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT")
         message(FATAL_ERROR "LocalLLM: blocking Mali fence-wait implementation did not apply.")
     endif()
+
+    local_llm_verify_mali_fence_wait_strategy(_vulkan_contents "${LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY}")
 
     string(FIND "${_q4k_decode_function_contents}" "local_llm_q4k_integer_dot_batch1" _q4k_selector_position)
     string(FIND "${_q4k_decode_function_contents}"

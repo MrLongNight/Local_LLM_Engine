@@ -85,6 +85,9 @@ jobs:
           test -d "$ANDROID_SDK_ROOT/ndk/27.2.12479018"
           test -x "$ANDROID_SDK_ROOT/cmake/3.22.1/bin/cmake"
 
+      - name: Verify Mali fence-wait strategy CMake guards
+        run: cmake -P llm-engine/src/test/cmake/mali_fence_wait_strategy_test.cmake
+
       - name: Run all JVM unit tests
         run: >-
           gradle --no-daemon --continue --build-cache
