@@ -88,6 +88,40 @@ jobs:
       - name: Verify Mali fence-wait strategy CMake guards
         run: cmake -P llm-engine/src/test/cmake/mali_fence_wait_strategy_test.cmake
 
+      - name: Verify one-click APK diagnostic workflow contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/manual-apk.yml").read_text(encoding="utf-8")
+          forbidden_inputs = (
+              "enable_vulkan_perf_profiler:",
+              "mali_fence_wait_strategy:",
+              "inputs.enable_vulkan_perf_profiler",
+              "inputs.mali_fence_wait_strategy",
+          )
+          present = [value for value in forbidden_inputs if value in workflow]
+          if present:
+              raise SystemExit(f"Manual APK workflow exposes retired options: {present}")
+
+          required_pair_contract = (
+              "workflow_dispatch:",
+              "P1_01D_AB_PAIR",
+              "[p1-01d-ab-pair]",
+              "for strategy in BLOCK SPIN",
+              "-PlocalLlmVulkanPerfProfiler=true",
+              "-PlocalLlmMaliFenceWaitStrategy=${strategy}",
+              "Local-LMM-Engine-v1.0.${APP_BUILD_NUMBER}-${strategy}.apk",
+          )
+          missing = [value for value in required_pair_contract if value not in workflow]
+          if missing:
+              raise SystemExit(f"Paired diagnostic build contract is incomplete: {missing}")
+
+          print("Verified: manual APK runs have no profiler/fence selectors; P1-01d builds BLOCK and SPIN as one CI-controlled pair.")
+          PY
+
       - name: Run all JVM unit tests
         run: >-
           gradle --no-daemon --continue --build-cache
