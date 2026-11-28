@@ -1386,3 +1386,5 @@ void vk_perf_logger::print_timings(bool force) {
         "LocalLLM header-only SPIRV-Headers package shim" FORCE)
     message(STATUS "LocalLLM: prepared Android Vulkan compatibility overlay for pinned llama.cpp")
 endfunction()
+
+# P1-01d diagnostic APK trigger: [vulkan-profiler] [mali-fence:BLOCK]
