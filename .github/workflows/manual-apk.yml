@@ -21,9 +21,9 @@ permissions:
 jobs:
   unit-test-gate:
     name: Require passing unit tests
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success'
+    # Keep the gate job itself schedulable for workflow_run events. The step
+    # validates the upstream conclusion; a job-level if previously caused
+    # successful Unit Tests workflow_run events to be skipped on GitHub.
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
