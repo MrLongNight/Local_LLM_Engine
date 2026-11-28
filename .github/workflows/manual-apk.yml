@@ -212,6 +212,7 @@ jobs:
         shell: bash
         env:
           APP_BUILD_NUMBER: ${{ github.run_number }}
+          # One successful Unit Tests run builds the full P1-01d pair when its commit is marked [p1-01d-ab-pair].
           P1_01D_AB_PAIR: ${{ github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]') }}
           ENABLE_VULKAN_PERF_PROFILER: ${{ (github.event_name == 'workflow_run' && (contains(github.event.workflow_run.head_commit.message, '[vulkan-profiler]') || contains(github.event.workflow_run.head_commit.message, '[p1-01d-ab-pair]'))) }}
           # Pair builds finish on SPIN; both variants are built from this exact commit.
