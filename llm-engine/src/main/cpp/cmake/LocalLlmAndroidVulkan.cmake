@@ -1216,11 +1216,18 @@ void vk_perf_logger::print_timings(bool force) {
        NOT _vulkan_contents MATCHES "LOCAL_LLM_Q4K_PREFILL_F16_OVERRIDE" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_QWEN35_GDN_CPU_FALLBACK" OR
        NOT _vulkan_contents MATCHES "LOCAL_LLM_VULKAN_MMVQ_FORCE" OR
-       NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT" OR
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_FENCE_WAIT_SELECTED_${LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY}" OR
        NOT _vulkan_contents MATCHES "local_llm_vulkan_logits_readback_record" OR
        NOT _vulkan_contents MATCHES "eHostCoherent" OR
        _vulkan_contents MATCHES "vkGetPhysicalDeviceFeatures2\\(")
         message(FATAL_ERROR "LocalLLM: Android Vulkan compatibility/performance diagnostics overlay did not apply completely.")
+    endif()
+
+    # BLOCK has an additional blocking API call; validate it only in BLOCK mode.
+    # SPIN deliberately replaces that call with a non-blocking fence-poll strategy.
+    if(LOCAL_LLM_MALI_FENCE_WAIT_STRATEGY STREQUAL "BLOCK" AND
+       NOT _vulkan_contents MATCHES "LOCAL_LLM_MALI_BLOCKING_FENCE_WAIT")
+        message(FATAL_ERROR "LocalLLM: blocking Mali fence-wait implementation did not apply.")
     endif()
 
     string(FIND "${_q4k_decode_function_contents}" "local_llm_q4k_integer_dot_batch1" _q4k_selector_position)
